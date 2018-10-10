@@ -22,6 +22,7 @@ maxYVal = max(abs(dataTable.trace(:,cellIndex)));
 
 %% Align trial traces and calculate mean trace at each reward
 alignedTrialTraces = nan(nrewards, numel(groupingName), (max(maxTimestamps)-min(minTimestamps))/timestampStep);
+alignedTrialEvents = nan(size(alignedTrialTraces));
 for trialIndex = 1:numel(groupingName)
     trialTable = dataTable(grouping == trialIndex,:);
     arrivedAtRewardIndex = find(trialTable.arrivedAtReward > 0);
@@ -33,6 +34,8 @@ for trialIndex = 1:numel(groupingName)
         offset = timestampDiff / timestampStep;
         alignedTrialTraces(rewardIndex, trialIndex, (1 + offset):(offset + numel(timestamps))) = ...
             trialTable.trace(:, cellIndex)';
+        alignedTrialEvents(rewardIndex, trialIndex, (1 + offset):(offset + numel(timestamps))) = ...
+            trialTable.events(:, cellIndex)';
     end
 end
 globalTimestamps = zeros(nrewards, (max(maxTimestamps)-min(minTimestamps))/timestampStep);
@@ -49,8 +52,12 @@ for i = 1:nrewards
     subplot(2,1,i);
     hold on;
     for trialIndex = 1:numel(groupingName)
-        alignedTrace = alignedTrialTraces(i, trialIndex,:);
+       alignedTrace = alignedTrialTraces(i, trialIndex,:);
        plot(globalTimestamps(i,:), alignedTrace(:));
+       eventTimes = find(alignedTrialEvents(i, trialIndex,:) == 1);
+       plot(globalTimestamps(i, eventTimes), ...
+            reshape(alignedTrace(eventTimes), [], 1), ...
+            'r*');
     end
      
     plot(globalTimestamps(i,:), meanRewardTrace(i,:), 'black', 'LineWidth', 1.5);

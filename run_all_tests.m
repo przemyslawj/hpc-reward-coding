@@ -1,0 +1,5 @@
+runtests('testCalculateVelocity.m')
+runtests('testGetPlaceField.m')
+runtests('testIsAtReward.m')
+runtests('testMergeByTimestamp.m')
+runtests('testMergevars.m')

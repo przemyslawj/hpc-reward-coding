@@ -1,8 +1,8 @@
 function [sessionData] = calculateVelocity(sessionData)
 %CALCULATEVELOCITY adds columns with distance traveled and velocity of movement
 
-trans_x_diff = sessionData.trans_x(2:end) - sessionData.trans_x(1:end-1);
-trans_y_diff = sessionData.trans_y(2:end) - sessionData.trans_y(1:end-1);
+trans_x_diff = sessionData.smooth_trans_x(2:end) - sessionData.smooth_trans_x(1:end-1);
+trans_y_diff = sessionData.smooth_trans_y(2:end) - sessionData.smooth_trans_y(1:end-1);
 time_diff = sessionData.timestamp(2:end) - sessionData.timestamp(1:end-1);
 T = [ trans_x_diff, trans_y_diff ];
 dist = sqrt(sum(T .* T, 2));

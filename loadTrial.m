@@ -1,6 +1,12 @@
-rootDir = '/media/prez/DATA/Prez/cheeseboard/2018-07-pilot/';
-caimg_analysis_rootdir = '/media/prez/DATA/Prez/ca_img/sample_data/results_fullExperiment2';
+addpath(genpath(pwd)) 
+
+rootDir = '/mnt/DATA/Prez/cheeseboard/2018-07-pilot/';
+caimg_analysis_rootdir = '/mnt/DATA/Prez/ca_img/sample_data/results_fullExperiment3';
 animal = 'A0';
+sessions = [1 2];
+
+EVENT_THRESH_NUM_STD = 4;
+
 
 %% Load joint ca img data
 %caimg_analysis_dir = '/media/prez/DATA/Prez/ca_img/sample_data/results_single_session3/M1/Session1/sorted';
@@ -19,9 +25,63 @@ info = h5info(h5file, '/sessionLengths');
 sessionLengths = h5read(h5file, '/sessionLengths', [1 1], info.Dataspace.Size);
 timestampsBySession = mat2cell(ts, sessionLengths, 1);
 
+%% Load behavioural data for each session
+sessionsInfo = readtable([caimg_analysis_rootdir filesep 'session_info.csv']);
+
+allData = [];
+
+for session = sessions
+    sessionName = ['Session' num2str(session)];
+    sessionMeta = sessionsInfo(strcmp(sessionsInfo.SessionName, sessionName), :);
+    dateStr = datestr(sessionMeta.Date, 'yyyy-mm-dd');
+    datedRootDir = [ rootDir filesep dateStr ];
+    trackingDir = [ datedRootDir filesep 'movie' filesep 'tracking' ];
+    tracesBySession = mat2cell(traces, size(traces, 1), sessionLengths);
+    sessionTimestamps = timestampsBySession{session}';
+    freq = (sessionTimestamps(end) - sessionTimestamps(2)) / numel(sessionTimestamps);
+    
+    trackingFile = [ dateStr '_' animal '_' 'trial_' num2str(sessionMeta.Trial) '_positions.csv' ];
+
+    trackingFilepath = [trackingDir filesep trackingFile]
+    opts = detectImportOptions(trackingFilepath);
+    index = find(cellfun(@(x) strcmp(x, 'inside_roi'), opts.VariableNames, 'UniformOutput', 1));
+    opts.VariableTypes(index) = { 'logical' };
+
+    trialPositions = readtable(trackingFilepath, opts);
+
+    sessionTraces = tracesBySession{session};
+    sessionTraces = sessionTraces(valid == 1, :);
+
+    sessionData = mergeByTimestamp(trialPositions, sessionTraces, sessionTimestamps);
+    taskStartedIndecies = find(sessionData.smooth_trans_x > -100 | sessionData.smooth_trans_y > -100);
+    sessionData = sessionData(taskStartedIndecies,:);
+    sessionData = calculateVelocity(sessionData);
+    sessionData.atReward0 = isAtReward(sessionData.velocity, sessionData.dist_reward0);
+    sessionData.atReward1 = isAtReward(sessionData.velocity, sessionData.dist_reward1);
+    
+    n = size(sessionData.atReward0, 1);
+    sessionData.arrivedAtReward = zeros(n, 1);
+    sessionData.arrivedAtReward(find(sessionData.atReward0, 1, 'first')) = 1;
+    sessionData.arrivedAtReward(find(sessionData.atReward1, 1, 'first')) = 2;
+    trial_id = [ dateStr '_' num2str(sessionMeta.Trial) ];
+    sessionData.trial_id = mat2cell(repmat(trial_id, n, 1), ones(n, 1), numel(trial_id));
+    sessionData.date = repmat(sessionMeta.Date, n, 1);
+    sessionData.trial = repmat(sessionMeta.Trial, n, 1);
+    fe = findEvents(sessionData.trace, EVENT_THRESH_NUM_STD, freq);
+    sessionData.events = fe;
+    
+    if isempty(allData)
+        allData = sessionData;
+    else
+        allData = [allData; sessionData];
+    end
+end
+
+trial_data_path = [caimg_analysis_rootdir filesep 'traces_and_positions.csv'];
+writetable(allData, trial_data_path);
+
+
 %% Load cheeseboard map and reward locations
-dateStr = '2018-07-10';
-datedRootDir = [ rootDir filesep dateStr ];
 locationsFile = [ datedRootDir filesep 'locations.csv' ];
 locationsTable = readtable(locationsFile);
 
@@ -51,51 +111,10 @@ if ~isempty(negativeLocationsTable)
             cheeseboardMapTable.Row_X == negativeLocationsTable.Well_row(1) ...
             & cheeseboardMapTable.Row_Y == negativeLocationsTable.Well_col(1));
 end
-
-%% Load behavioural data for each session
-trackingDir = [ datedRootDir filesep 'movie' filesep 'tracking' ];
-allData = [];
+%% Calculate place fields
 % TODO: evaluate different velocity thresholds
 RUNNING_VELOCITY_THRESH = 2;
 
-for session = [1 2]
-    tracesBySession = mat2cell(traces, size(traces, 1), sessionLengths);
-    sessionTimestamps = timestampsBySession{session}';
-    
-    trackingFile = [ dateStr '_' animal '_' 'trial_' num2str(session) '_positions.csv' ]
-
-    trackingFilepath = [trackingDir filesep trackingFile];
-    opts = detectImportOptions(trackingFilepath);
-    index = find(cellfun(@(x) strcmp(x, 'inside_roi'), opts.VariableNames, 'UniformOutput', 1));
-    opts.VariableTypes(index) = { 'logical' };
-
-    trialPositions = readtable(trackingFilepath, opts);
-
-    sessionTraces = tracesBySession{session};
-    sessionTraces = sessionTraces(valid == 1, :);
-
-    sessionData = mergeByTimestamp(trialPositions, sessionTraces, sessionTimestamps);
-    taskStartedIndecies = find(sessionData.trans_x > -100 | sessionData.trans_y > -100);
-    sessionData = sessionData(taskStartedIndecies,:);
-    sessionData = calculateVelocity(sessionData);
-    sessionData.atReward0 = isAtReward(sessionData.velocity, sessionData.dist_reward0);
-    sessionData.atReward1 = isAtReward(sessionData.velocity, sessionData.dist_reward1);
-    
-    n = size(sessionData.atReward0, 1);
-    sessionData.arrivedAtReward = zeros(n, 1);
-    sessionData.arrivedAtReward(find(sessionData.atReward0, 1, 'first')) = 1;
-    sessionData.arrivedAtReward(find(sessionData.atReward1, 1, 'first')) = 2;
-    trial_id = [ dateStr '_' num2str(session) ];
-    sessionData.trial_id = mat2cell(repmat(trial_id, n, 1), ones(n, 1), numel(trial_id));
-    
-    if isempty(allData)
-        allData = sessionData;
-    else
-        allData = [allData; sessionData];
-    end
-end
-
-%% Calculate place fields
 ncells = size(sessionData.trace, 2);
 PCIs = zeros(size(1, ncells));
 
@@ -103,11 +122,12 @@ runningData = allData(allData.velocity > RUNNING_VELOCITY_THRESH, :);
 binSize = 5;
 cheeseboardSize = 100 / binSize;
 for i = 1:ncells
-    [ placeField, PCI ] = getPlaceField(runningData.trans_x, runningData.trans_y,...
+    [ placeField, PCI ] = getPlaceField(...
+        runningData.smooth_trans_x, runningData.smooth_trans_y,...
         runningData.trace(:, i), binSize);
     PCIs(i) = PCI;
     
-    if PCI > 0.4
+    if PCI > 0.2
         figure;
         image(placeField, 'CDataMapping','scaled'), colorbar
         hold on;
@@ -146,7 +166,7 @@ rew0 = allData.dist_reward0 / rewDistBinSize;
 rew1 = allData.dist_reward1 / rewDistBinSize;
 
 for i = 1:ncells
-    if PCIs(i) > 0.4
+    if PCIs(i) > 0.2
         figure;
         plot(allData.dist_reward0, allData.trace(:,i), '*');
         hold on;
@@ -159,8 +179,7 @@ end
 
 allData = addAlignedTrialTimestamps(allData);
 %% 
-% Calculates mean and std for different trials and evaluates them with
-% anova
+% Calculates mean trace and mean events count before and after the reward
 beforeRewardMs = 2000;
 afterRewardMs = 2000;
 
@@ -176,17 +195,27 @@ for t_index = 1:numel(arrivedAtRewardTimestamps)
             & allData.timestamp <= arrivedAtRewardTimestamps(t_index) + afterRewardMs)];
 end
 
-beforeStats = grpstats(allData(beforeIndecies, {'trace', 'trial_id'}), ...
+beforeStats = grpstats(allData(beforeIndecies, {'trace', 'events', 'trial_id'}), ...
         'trial_id', {'mean'});
 trialMeanTraceBefore = table2array(beforeStats(:, {'mean_trace'}));
+trialMeanEventsBefore = table2array(beforeStats(:, {'mean_events'}));
 
-afterStats = grpstats(allData(afterIndecies, {'trace', 'trial_id'}), ...
+afterStats = grpstats(allData(afterIndecies, {'trace', 'events', 'trial_id'}), ...
         'trial_id', {'mean'});
 trialMeanTraceAfter = table2array(afterStats(:, {'mean_trace'}));
+trialMeanEventsAfter = table2array(afterStats(:, {'mean_events'}));
+
+%% 
+% Evaluate with anova difference in traces and events before and after the reward
 for i = 1:ncells
-    [p, stats] = anova1([trialMeanTraceBefore(:, i), trialMeanTraceAfter(:, i)], ...
+    [p_trace, stats] = anova1([trialMeanTraceBefore(:, i), trialMeanTraceAfter(:, i)], ...
             {'before', 'atReward'}, 'off');
-    if p < 0.1
+        
+    % TODO: test other test than anova, since variance will be
+    % zero in case of 0 events.
+    [p_events, stats] = anova1([trialMeanEventsBefore(:, i), trialMeanEventsAfter(:, i)], ...
+        {'before', 'atReward'}, 'off');
+    if p_trace < 0.3
         i
         anova1([trialMeanTraceBefore(:, i), trialMeanTraceAfter(:, i)], ...
             {'before', 'atReward'}, 'on');
@@ -196,6 +225,7 @@ for i = 1:ncells
 end
 
 % TODO: 
-% - calculate events count and do analysis using those?
+% - use interquartile interval for estimation of STD in find peaks
+% - calculate place fields for events
 % - calculate reward responsiveness of cells
 % - save the place fields images
