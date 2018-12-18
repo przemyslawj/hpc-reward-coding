@@ -1,4 +1,5 @@
-function [ field, PCI ] = getPlaceField(posX, posY, trace, binSize)
+function [ field, PCI, occupancyMap, totalActivityMap ] = ...
+    getPlaceField(posX, posY, trace, binSize)
 % Calculates spatial heatmap of cell activity and Place Cell Information
 % defined as bits of information per 1% change in fluorescence. The metric
 % translated for calcium imaging from the original definition in Skiggs et 
@@ -17,8 +18,8 @@ minY = 0;
 posX = posX - minX;
 posY = posY - minY;
 
-maxX = 100 - minX;
-maxY = 100 - minY;
+maxX = max([100; posX]) - minX;
+maxY = max([100; posY]) - minY;
 
 binnedPosX = max(int32(round(posX / binSize)), 1);
 binnedPosY = max(int32(round(posY / binSize)), 1);
@@ -32,19 +33,19 @@ for i = 1:numel(trace)
     x = binnedPosX(i);
     y = binnedPosY(i);
 
-    if occupancyMap(x, y) < 0
-        occupancyMap(x, y) = 0;
+    if occupancyMap(y, x) < 0
+        occupancyMap(y, x) = 0;
     end
-    occupancyMap(x, y) = occupancyMap(x, y) + 1;
-    totalActivityMap(x, y) = totalActivityMap(x, y) + trace(i);
+    occupancyMap(y, x) = occupancyMap(y, x) + 1;
+    totalActivityMap(y, x) = totalActivityMap(y, x) + trace(i);
 end
 
 PCI = 0;
 mfr = mean(trace);
-for x = 1:size(totalActivityMap, 1)
-    for y = 1:size(totalActivityMap, 2)
-        occupancyProb = max(0, occupancyMap(x, y)) / numel(trace);
-        fr = totalActivityMap(x, y) / occupancyMap(x, y);
+for y = 1:size(totalActivityMap, 1)
+    for x = 1:size(totalActivityMap, 2)
+        occupancyProb = max(0, occupancyMap(y, x)) / numel(trace);
+        fr = totalActivityMap(y, x) / occupancyMap(y, x);
         if occupancyProb > 0 && fr > 0
             PCI = PCI + occupancyProb * fr * log2(fr / mfr);
         end
@@ -54,5 +55,5 @@ if mfr > 0
     PCI = PCI / mfr;
 end
 
-field = (totalActivityMap ./ occupancyMap)';
+field = totalActivityMap ./ occupancyMap;
 end

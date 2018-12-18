@@ -1,9 +1,9 @@
 addpath(genpath(pwd)) 
 
-rootDir = '/mnt/DATA/Prez/cheeseboard/2018-07-pilot/';
-caimg_analysis_rootdir = '/mnt/DATA/Prez/ca_img/sample_data/results_fullExperiment3';
-animal = 'A0';
-sessions = [1 2];
+rootDir = '/mnt/DATA/Prez/conditioning/';
+caimg_analysis_rootdir = '/mnt/DATA/Prez/conditioning/results_all_caimg/';
+animal = 'F';
+sessions = 1:9;
 
 EVENT_THRESH_NUM_STD = 4;
 
@@ -11,7 +11,8 @@ EVENT_THRESH_NUM_STD = 4;
 %% Load joint ca img data
 %caimg_analysis_dir = '/media/prez/DATA/Prez/ca_img/sample_data/results_single_session3/M1/Session1/sorted';
 caimg_analysis_dir = [caimg_analysis_rootdir filesep animal filesep 'jointExtraction/sorted'];
-sortedCellActivityFile = [caimg_analysis_dir filesep 'intermediateAnnotationResult.mat'];
+%sortedCellActivityFile = [caimg_analysis_dir filesep 'intermediateAnnotationResult.mat'];
+sortedCellActivityFile = [caimg_analysis_dir filesep 'PCAICAsorted.mat'];
 % loads variables traces, valid, filters
 load(sortedCellActivityFile);
 
@@ -50,7 +51,9 @@ for session = sessions
     trialPositions = readtable(trackingFilepath, opts);
 
     sessionTraces = tracesBySession{session};
-    sessionTraces = sessionTraces(valid == 1, :);
+    if size(sessionTraces,1) == size(valid,1)
+        sessionTraces = sessionTraces(valid == 1, :);
+    end
 
     sessionData = mergeByTimestamp(trialPositions, sessionTraces, sessionTimestamps);
     taskStartedIndecies = find(sessionData.smooth_trans_x > -100 | sessionData.smooth_trans_y > -100);
