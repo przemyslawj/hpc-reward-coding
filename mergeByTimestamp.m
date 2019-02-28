@@ -8,15 +8,15 @@ ntimestamps = numel(traceTimestamps);
 assert(size(trace, 2) == ntimestamps);
 
 
-trans_x = zeros(ntimestamps, 1);
-trans_y = zeros(ntimestamps, 1);
-dist_reward0 = zeros(ntimestamps, 1);
-dist_reward1 = zeros(ntimestamps, 1);
-inside_roi = zeros(ntimestamps, 1);
-
 function avg = weightedAvg(datatable, indecies, colName, weights)
     values = datatable{indecies, colName};
     avg = double(weights) * values / sum(weights);
+end
+
+function val = closerVal(datatable, indecies, colName, time_diff)
+    [~, I] = min(time_diff);
+    values = datatable{indecies, colName};
+    val = values(I);
 end
 
 traceIndex = 1;
@@ -38,30 +38,20 @@ while traceIndex <= ntimestamps
     end
     
     prevBehavIndex = behavIndex;
-    avgWeights = [1 1];
+    timestampDiff = [1 1];
     if behavData{behavIndex, 'timestamp'} > traceTimestamps(traceIndex)
         prevBehavIndex = behavIndex - 1;
-        avgWeights = [...
+        timestampDiff = [...
             behavData{behavIndex, 'timestamp'} - traceTimestamps(traceIndex), ...
             traceTimestamps(traceIndex) - behavData{prevBehavIndex, 'timestamp'}
         ];
     end
     
     for i = 1:numel(avgedVariables)
-        avgedVals(traceIndex, i) = weightedAvg(behavData,...
-                [prevBehavIndex behavIndex], avgedVariables{i}, avgWeights);
+        avgedVals(traceIndex, i) = closerVal(behavData,...
+                [prevBehavIndex behavIndex], avgedVariables{i}, timestampDiff);
     end
-%     smooth_trans_x(traceIndex) = weightedAvg(behavData,...
-%         [prevBehavIndex behavIndex], 'smooth_trans_x', avgWeights);
-%     smooth_trans_y(traceIndex) = weightedAvg(behavData,...
-%         [prevBehavIndex behavIndex], 'smooth_trans_y', avgWeights);
-%     dist_reward0(traceIndex) = weightedAvg(behavData,...
-%         [prevBehavIndex behavIndex], 'dist_reward0', avgWeights);
-%     dist_reward1(traceIndex) = weightedAvg(behavData,...
-%         [prevBehavIndex behavIndex], 'dist_reward1', avgWeights);
-%     inside_roi(traceIndex) = any([behavData{prevBehavIndex, 'inside_roi'}(1),...
-%         behavData{behavIndex, 'inside_roi'}(1)]);
-%         
+        
     traceIndex = traceIndex + 1;
 end
 
@@ -70,10 +60,6 @@ resultTable = table(traceTimestamps', trace', 'VariableNames', ...
 for i = 1:numel(avgedVariables)
     resultTable{:,avgedVariables{i}} = avgedVals(:,i);
 end
-%resultTable = table(traceTimestamps', smooth_trans_x', smooth_trans_y', inside_roi, ...
-%    dist_reward0, dist_reward1, trace', 'VariableNames', ...
-%    {'timestamp', 'smooth_trans_x', 'smooth_trans_y', 'inside_roi', ...
-%     'dist_reward0', 'dist_reward1', 'trace'});
 
 end
 
