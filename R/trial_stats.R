@@ -1,0 +1,119 @@
+library(dplyr)
+library(readr)
+
+source('crossings.R')
+source('distances.R')
+source('locations.R')
+source('tracking_files.R')
+
+rew_zone_radius = 10
+frame_rate = 15
+
+get_stats = function(tracking_df) {
+  valid_pos_df = tracking_df %>%
+    filter(x > -1 & y > -1)
+  
+  dist_df = valid_pos_df
+  dist_df$dist_trans = vec_dist(dist_df$smooth_trans_x, dist_df$smooth_trans_y)
+  
+  total_dist = sum(dist_df$dist_trans)
+  total_frames = dist_df$frame[length(dist_df$frame)] - dist_df$frame[1]
+  
+  rew_dwell_pct = (filter(valid_pos_df, dist_reward0 < rew_zone_radius) %>% nrow() +
+                   filter(valid_pos_df, dist_reward1 < rew_zone_radius) %>% nrow()) * 
+                  100.0 / total_frames 
+  frame_30s = frame_rate * 30
+  frame_60s = frame_rate * 60
+  frame_90s = frame_rate * 90
+  frame_120s = frame_rate * 120
+  
+  return(list(total_dist=total_dist, 
+              dist_30s=sum(dist_df$dist_trans[1:frame_30s],na.rm=TRUE),
+              dist_60s=sum(dist_df$dist_trans[1:frame_60s],na.rm=TRUE),
+              total_frames=total_frames, 
+              crossings_n=get_crossings_n(valid_pos_df$dist_reward0, frame_rate=frame_rate) +
+                          get_crossings_n(valid_pos_df$dist_reward1, frame_rate=frame_rate),
+              crossings_0_30s=get_crossings_n(valid_pos_df$dist_reward0[1:frame_30s]) +
+                              get_crossings_n(valid_pos_df$dist_reward1[1:frame_30s]),
+              crossings_30_60s=get_crossings_n(valid_pos_df$dist_reward0[frame_30s:frame_60s]) +
+                              get_crossings_n(valid_pos_df$dist_reward1[frame_30s:frame_60s]),
+              crossings_60_90s=get_crossings_n(valid_pos_df$dist_reward0[frame_60s:frame_90s]) +
+                              get_crossings_n(valid_pos_df$dist_reward1[frame_60s:frame_90s]),
+              crossings_90_120s=get_crossings_n(valid_pos_df$dist_reward0[frame_90s:frame_120s]) +
+                              get_crossings_n(valid_pos_df$dist_reward1[frame_90s:frame_120s]),
+              rew_dwell_pct=rew_dwell_pct,
+              start_x=valid_pos_df$trans_x[1], 
+              start_y=valid_pos_df$trans_y[1]))
+}
+
+
+output_df = data.frame(date=character(), 
+                       animal=character(), 
+                       trial_n=numeric(), 
+                       dist=numeric(), 
+                       total_frames=numeric(), 
+                       is_test=factor(),
+                       start_x=numeric(),
+                       start_y=numeric(),
+                       rew1_x=numeric(),
+                       rew1_y=numeric(),
+                       rew2_x=numeric(),
+                       rew2_y=numeric(),
+                       crossings_n=numeric(),
+                       rew_dwell_pct=numeric())
+
+root_dat_dir = '/mnt/DATA/Prez/cheeseboard/2019-02-learning'
+#root_dat_dir = '~/neurodata/cheeseboard/2018-07-pilot'
+
+locations.df = read_locations(root_dat_dir)
+
+files.df = get_tracking_files(root_dat_dir)
+
+for (i in 1:nrow(files.df)) {
+  tracking_df = read_csv(files.df$filepath[i], col_types = cols())
+  res = get_stats(tracking_df)
+      
+  reward_pos = filter(locations.df, Animal == files.df$animal[i], Valence == 'Positive', date == files.df$date[i])
+  new_row = data.frame(date=files.df$date[i],
+                       animal_id=files.df$animal[i],
+                       trial_n=files.df$trial[i],
+                       dist=res['total_dist'],
+                       dist_30s=res['dist_30s'],
+                       dist_60s=res['dist_60s'],
+                       total_frames=res['total_frames'],
+                       is_test=files.df$is_test[i],
+                       location_set=reward_pos$location_set[1],
+                       start_x=res['start_x'],
+                       start_y=res['start_y'],
+                       rew1_x=reward_pos$trans_x[1],
+                       rew1_y=reward_pos$trans_y[1],
+                       rew2_x=reward_pos$trans_x[2],
+                       rew2_y=reward_pos$trans_y[2],
+                       crossings_n=res['crossings_n'],
+                       crossings_0_30s=res['crossings_0_30s'],
+                       crossings_30_60s=res['crossings_30_60s'],
+                       crossings_60_90s=res['crossings_60_90s'],
+                       crossings_90_120s=res['crossings_90_120s'],
+                       rew_dwell_pct=res['rew_dwell_pct'])
+  output_df = rbind(output_df, new_row) 
+}
+
+output_df$animal_id = as.factor(output_df$animal_id)
+output_df$date = as.Date(output_df$date)
+output_df$trial_n = as.integer(output_df$trial_n)
+
+# Add absolute trial id/number
+fst_loc_date = as.Date('2019-02-19')
+snd_loc_date = as.Date('2018-03-04')
+output_df = output_df %>% 
+    mutate(learning_day1 = as.integer(date - fst_loc_date) + 1,
+           learning_day2 = as.integer(date - snd_loc_date) + 1,
+           learning_day = if_else(location_set == 1, learning_day1, learning_day2))  %>%
+    mutate(trial_id = learning_day1 * 10 + trial_n) %>%
+    select(-learning_day2) 
+output_df$learning_day = as.integer(output_df$learning_day)
+output_df$learning_day1 = as.integer(output_df$learning_day1)
+output_df$trial_id = as.integer(output_df$trial_id)
+
+write_csv(output_df, paste0(root_dat_dir, '/trial_stats.csv'))
+
