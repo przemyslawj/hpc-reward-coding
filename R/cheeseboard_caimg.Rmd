@@ -62,7 +62,7 @@ data = mutate(data,
 
 Read reward locations per day
 ``` {r}
-source('~/mnt_code/openv_mouse_tracker/analyse/locations.R')
+source('locations.R')
 locations.df = read_locations(paste0(data_dir)) 
 ```
 # Calcium events
@@ -191,22 +191,34 @@ geom_trace = function(df, alpha=0.1) {
 ```
 
 ```{r}
-geom_rewards = function(locations.df, subject, day, valence='Positive') {
-  reward.df = filter(locations.df, date==day, Animal==subject, valence == valence)
-  geom_point(data=reward.df, aes(x=trans_x,y=-trans_y), shape=0,color='blue', fill='white', size=7, stroke=5) 
+geom_rewards = function(locations.df, subject, day=NULL, valence='Positive') {
+  reward.df = filter(locations.df,
+                     Animal==subject, 
+                     Valence == valence)
+  if (!is.null(day)) {
+    reward.df = filter(reward.df, date==day)
+  }
+  rew.col = 'blue'
+  if (valence == 'Negative') {
+    rew.col = 'red'
+  }
+  geom_point(data=reward.df, aes(x=trans_x,y=-trans_y), shape=0,color=rew.col, 
+             fill='white', size=7, stroke=5, alpha=0.6) 
 }
+
 ```
 
 
+Events location for each cell
 ```{r}
 for (cell_id in unique(data$cell)) {
   single_trial = filter(events.df, cell==cell_id & velocity > run.threshold)
   trial_name = sprintf('Cell_%d', cell_id)
   cell.trace.df = filter(data, cell == cell_id)
   g = ggplot(single_trial) +
-    geom_rewards(locations.df, subject, day.str) +
     geom_point(aes(x=smooth_trans_x, y=-smooth_trans_y, color=date, size=norm_trace)) +
-    geom_trace(cell.trace.df) +
+    #geom_trace(cell.trace.df) +
+    geom_rewards(locations.df, subject) +
     xlab(trial_name) +
     theme_void()
   out.path = paste0('/tmp/', trial_name, '.jpg')
@@ -220,7 +232,7 @@ pci.df = mutate(pci.df, cell_desc=paste0('Cell ', cell_id,
                                         ' sd dist.=', round(event_spread, 1), ' (cm)'))
 
 
-show_trial_events = function(data.df) {
+show_trial_events = function(data.df, g) {
   events.df = filter(data.df, nevents > 0)
   events.joined = left_join(events.df, pci.df, by=c('date'='day', 'cell'='cell_id'))  %>%
     mutate(cell_desc = if_else(is.na(cell_desc), paste('Cell', as.character(cell)), cell_desc))
@@ -228,28 +240,33 @@ show_trial_events = function(data.df) {
   trace.df = filter(data.df, cell == cells.selected[1])
   
   events.joined$cell_desc = as.factor(events.joined$cell_desc)
-  g = ggplot(events.joined) +
+  events.joined$cell = as.factor(events.joined$cell)
+  g = g + 
+    geom_rewards(locations.df, subject, day.str, valence = 'Negative') +
     geom_rewards(locations.df, subject, day.str) +
-    geom_point(aes(x=smooth_trans_x, y=-smooth_trans_y, color=cell_desc, size=norm_trace), alpha=0.6) +
+    geom_point(data=events.joined, 
+               aes(x=smooth_trans_x, y=-smooth_trans_y, 
+                   color=trial_id, size=norm_trace), alpha=0.8) +
     geom_trace(trace.df, alpha=0.1) +
     xlim(c(1,100)) + ylim(c(-100,-1))
-  g
+  return(g)
 }
 
-day.str = '2019-02-28'
-cells.selected = 1:ncells
-#cells.selected = c(9, 15)
+day.str = '2019-02-26'
+cells.selected = 2
+include_test = FALSE
+g = ggplot()
 for (trial_day in 1:7) {
   data.day.df = filter(data, date==day.str) %>%
                 filter(cell %in% cells.selected) %>%
-                filter(trial == trial_day)
-  g = show_trial_events(data.day.df)
-  trial_name = paste(day.str, 'trial', trial_day, sep='_')
-  out.path = paste0('/tmp/', trial_name, '.jpg')
-  print(out.path)
-  ggsave(filename=out.path, plot=g, height=4, width=9)
+                filter(trial == trial_day) %>%
+                filter(is_test == include_test)
+  g = show_trial_events(data.day.df, g)
 }
 g
+trial_name = paste(day.str, 'trial', trial_day, sep='_')
+out.path = paste0('/tmp/', trial_name, '.jpg')
+#ggsave(filename=out.path, plot=g, height=4, width=9)
 ```
 
 

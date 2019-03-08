@@ -39,7 +39,7 @@ read_locations = function(root.data.dir) {
     prev_date = '0000-00-00'
     for (i in 1:nrow(animal.locations)) {
       loc = paste0(animal.locations$Well_row[i], 'x', animal.locations$Well_col[i])
-      if (!(loc %in% prev_locs)) {
+      if (!(loc %in% prev_locs) && animal.locations$Valence[i] == 'Positive') {
         if (prev_date == animal.locations$date[i]) {
           prev_locs = append(prev_locs, loc)
         } else {

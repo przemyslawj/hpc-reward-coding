@@ -5,16 +5,28 @@ source('crossings.R')
 source('distances.R')
 source('locations.R')
 source('tracking_files.R')
+source('tracking_info.R')
 
 rew_zone_radius = 10
-frame_rate = 15
+frame_rate = 24
+
+get_time_arrived = function(at.reward.vec, timestamps) {
+  indecies = which(at.reward.vec == 1)
+  if (length(indecies) == 0) {
+    return(-1)
+  }
+  return(timestamps[min(indecies)] / 1000)
+}
 
 get_stats = function(tracking_df) {
   valid_pos_df = tracking_df %>%
     filter(x > -1 & y > -1)
   
-  dist_df = valid_pos_df
-  dist_df$dist_trans = vec_dist(dist_df$smooth_trans_x, dist_df$smooth_trans_y)
+  dist_df = valid_pos_df %>%
+    mutate(dist_trans = vec_dist(smooth_trans_x, smooth_trans_y),
+           velocity = get_velocity(dist_trans, timestamp),
+           at_rew0 = is.at.reward(velocity, dist_reward0, timestamp),
+           at_rew1 = is.at.reward(velocity, dist_reward1, timestamp))
   
   total_dist = sum(dist_df$dist_trans)
   total_frames = dist_df$frame[length(dist_df$frame)] - dist_df$frame[1]
@@ -43,7 +55,9 @@ get_stats = function(tracking_df) {
                               get_crossings_n(valid_pos_df$dist_reward1[frame_90s:frame_120s]),
               rew_dwell_pct=rew_dwell_pct,
               start_x=valid_pos_df$trans_x[1], 
-              start_y=valid_pos_df$trans_y[1]))
+              start_y=valid_pos_df$trans_y[1],
+              arrived_rew0=get_time_arrived(dist_df$at_rew0, dist_df$timestamp),
+              arrived_rew1=get_time_arrived(dist_df$at_rew1, dist_df$timestamp)))
 }
 
 
@@ -59,6 +73,9 @@ output_df = data.frame(date=character(),
                        rew1_y=numeric(),
                        rew2_x=numeric(),
                        rew2_y=numeric(),
+                       arrived_rew0=numeric(),
+                       arrived_rew1=numeric(),
+                       time_finished=numeric(),
                        crossings_n=numeric(),
                        rew_dwell_pct=numeric())
 
@@ -71,9 +88,15 @@ files.df = get_tracking_files(root_dat_dir)
 
 for (i in 1:nrow(files.df)) {
   tracking_df = read_csv(files.df$filepath[i], col_types = cols())
+  print(files.df$filepath[i])
   res = get_stats(tracking_df)
       
   reward_pos = filter(locations.df, Animal == files.df$animal[i], Valence == 'Positive', date == files.df$date[i])
+  time_finished = -1
+  if (res[['arrived_rew0']] >= 0 && res[['arrived_rew1']] >= 0) {
+    time_finished_sec = max(res[['arrived_rew0']], res[['arrived_rew1']])
+  }
+  
   new_row = data.frame(date=files.df$date[i],
                        animal_id=files.df$animal[i],
                        trial_n=files.df$trial[i],
@@ -89,6 +112,9 @@ for (i in 1:nrow(files.df)) {
                        rew1_y=reward_pos$trans_y[1],
                        rew2_x=reward_pos$trans_x[2],
                        rew2_y=reward_pos$trans_y[2],
+                       arrived_rew0=res[['arrived_rew0']],
+                       arrived_rew1=res[['arrived_rew1']],
+                       time_finished=time_finished_sec,
                        crossings_n=res['crossings_n'],
                        crossings_0_30s=res['crossings_0_30s'],
                        crossings_30_60s=res['crossings_30_60s'],
@@ -103,7 +129,7 @@ output_df$date = as.Date(output_df$date)
 output_df$trial_n = as.integer(output_df$trial_n)
 
 # Add absolute trial id/number
-fst_loc_date = as.Date('2019-02-19')
+fst_loc_date = as.Date('2019-02-20')
 snd_loc_date = as.Date('2018-03-04')
 output_df = output_df %>% 
     mutate(learning_day1 = as.integer(date - fst_loc_date) + 1,

@@ -19,14 +19,23 @@ function val = closerVal(datatable, indecies, colName, time_diff)
     val = values(I);
 end
 
-traceIndex = 1;
-behavIndex = 1;
 
 avgedVariables = intersect({'smooth_trans_x', 'smooth_trans_y', ...
                            'dist_reward0', 'dist_reward1', 'inside_roi'}, ...
-                          behavData.Properties.VariableNames);
-avgedVals = zeros(ntimestamps, numel(avgedVariables)); 
+                          behavData.Properties.VariableNames);       
 
+traceIndex = 1;
+behavIndex = 1;
+% Skip caimg trace before the tracking positions start
+while traceIndex <= ntimestamps &&...
+        behavData{behavIndex, 'timestamp'} > traceTimestamps(traceIndex)
+    traceIndex = traceIndex + 1;
+end
+skippedTraceIndecies = traceIndex - 1;
+
+avgedVals = zeros(ntimestamps - traceIndex + 1, numel(avgedVariables)); 
+
+savedTraceValueIndex = 1;
 while traceIndex <= ntimestamps
     while (behavIndex <= size(behavData, 1)) && ...
             (behavData{behavIndex, 'timestamp'} < traceTimestamps(traceIndex))
@@ -48,15 +57,17 @@ while traceIndex <= ntimestamps
     end
     
     for i = 1:numel(avgedVariables)
-        avgedVals(traceIndex, i) = closerVal(behavData,...
+        avgedVals(savedTraceValueIndex, i) = closerVal(behavData,...
                 [prevBehavIndex behavIndex], avgedVariables{i}, timestampDiff);
     end
         
     traceIndex = traceIndex + 1;
+    savedTraceValueIndex = savedTraceValueIndex + 1;
 end
 
-resultTable = table(traceTimestamps', trace', 'VariableNames', ...
-        {'timestamp', 'trace'});
+resultTable = table(traceTimestamps(skippedTraceIndecies+1:end)', ...
+                    trace(:,skippedTraceIndecies+1:end)', ...
+                    'VariableNames', {'timestamp', 'trace'});
 for i = 1:numel(avgedVariables)
     resultTable{:,avgedVariables{i}} = avgedVals(:,i);
 end
