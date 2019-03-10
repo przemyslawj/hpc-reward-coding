@@ -21,6 +21,7 @@ gtheme = theme_minimal() + theme_cowplot() +
 
 ```{r}
 data_dir = '/mnt/DATA/Prez/cheeseboard/2019-02-learning/'
+data_dir = '~/neurodata/cheeseboard/2019-02-learning/'
 ca_img_result_dir = paste0(data_dir, 'joined_caimg/')
 subject = '1BR'
 gen_imgs_dir = '/tmp/'
@@ -194,7 +195,8 @@ geom_trace = function(df, alpha=0.1) {
 geom_rewards = function(locations.df, subject, day=NULL, valence='Positive') {
   reward.df = filter(locations.df,
                      Animal==subject, 
-                     Valence == valence)
+                     Valence == valence,
+                     current_loc == TRUE)
   if (!is.null(day)) {
     reward.df = filter(reward.df, date==day)
   }

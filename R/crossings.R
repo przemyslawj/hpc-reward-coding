@@ -1,4 +1,4 @@
-get_crossings_n = function(zone_dist, zone_radius=10, frame_rate=15) {
+get_crossings_n = function(zone_dist, zone_radius=10, frame_rate=24) {
   is_inside = zone_dist < zone_radius
   min_frames_inside = 0.25  * frame_rate
   inside_diff = diff(is_inside) 
