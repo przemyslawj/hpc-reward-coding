@@ -21,7 +21,7 @@ gtheme = theme_minimal() + theme_cowplot() +
 
 ```{r}
 data_dir = '/mnt/DATA/Prez/cheeseboard/2019-02-learning/'
-data_dir = '~/neurodata/cheeseboard/2019-02-learning/'
+#data_dir = '~/neurodata/cheeseboard/2019-02-learning/'
 ca_img_result_dir = paste0(data_dir, 'joined_caimg/')
 subject = '1BR'
 gen_imgs_dir = '/tmp/'
@@ -53,7 +53,7 @@ data$inside_roi = data$inside_roi > 0
 ```{r}
 ncells = unique(data$cell) %>% length
 
-first_learning_day = min(as.Date(data$date))
+first_learning_day = as.Date('2019-02-20')
 last_day = max(as.Date(data$date))
 max_trial = max(data$trial)
 data = mutate(data, 
@@ -64,14 +64,22 @@ data = mutate(data,
 Read reward locations per day
 ``` {r}
 source('locations.R')
-locations.df = read_locations(paste0(data_dir)) 
+locations.df = read_locations(paste0(data_dir))  %>%
+  add_prev_locations() %>%
+  add_future_neg_locations()
+
+cur_rewards.df = filter(locations.df, current_loc == TRUE) %>%
+  group_by(date, location_set, is_test) %>%
+  summarise(airpuff = any(Valence == 'Negative')) %>%
+  slice(1) %>%
+  select(date, location_set, is_test, airpuff) 
 ```
 # Calcium events
 
 Events per cell per day and trial
 ```{r}
 events_total.df = data %>% 
-  group_by(date, trial, cell, trial_no, learning_day) %>%
+  group_by(date, trial, cell, trial_no, learning_day, is_test) %>%
   summarise(total_events = sum(nevents), 
             duration_sec = max(timestamp) / 1000,
             mer = total_events / duration_sec) %>%
@@ -81,11 +89,22 @@ datatable(select(events_total.df, trial_no, cell, total_events, duration_sec, me
 ```
 Correlation between trial no and no events
 ```{r}
-events_total.df %>%
-  group_by(date, cell) %>%
+events_total.df.joined = left_join(events_total.df, cur_rewards.df, by=c('date', 'is_test'))
+
+
+events_total.df.joined %>%
+  mutate(day_test = paste0('Day ', sprintf("%02d", learning_day), ifelse(is_test, '_1test', '_trial')))  %>%
+  group_by(day_test, cell,airpuff) %>%
   summarise(mean.event.rate = sum(total_events) / ncells / mean(duration_sec)) %>%
   ggplot() +
-  geom_line(aes(x=date, y=mean.event.rate, group=cell))
+  geom_boxplot(aes(x=day_test, y=mean.event.rate, colour=airpuff)) +
+  xlab('') +
+  ylab('Mean event rate (Hz)') +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+out.path='/tmp/mer.jpg'
+ggsave(filename=out.path, height=4, width=7)
 ```
 
 
@@ -96,14 +115,18 @@ events.df = filter(data, nevents > 0)
 
 Events during run vs during stationary
 ```{r}
-run.threshold = 0.6
+run.threshold = 1.5
 events.df %>% 
   mutate(running = velocity > run.threshold) %>%
   group_by(cell, running) %>%
   summarise(nnevents=n()) %>%
   ggplot(aes(cell,nnevents)) +
-    geom_bar(stat='identity', aes(fill=running), position='dodge')
-  
+  geom_bar(stat='identity', aes(fill=running), position='dodge') +
+  gtheme +
+  xlab('Cell') + ylab('#Events')
+
+out.path='/tmp/mer_running.jpg'
+ggsave(filename=out.path, height=4, width=7)
 ```
 
 
@@ -201,11 +224,15 @@ geom_rewards = function(locations.df, subject, day=NULL, valence='Positive') {
     reward.df = filter(reward.df, date==day)
   }
   rew.col = 'blue'
+  rew.shape = 0
+  rew.size = 7
   if (valence == 'Negative') {
     rew.col = 'red'
+    rew.shape = 1
+    rew.size = 30
   }
-  geom_point(data=reward.df, aes(x=trans_x,y=-trans_y), shape=0,color=rew.col, 
-             fill='white', size=7, stroke=5, alpha=0.6) 
+  geom_point(data=reward.df, aes(x=trans_x,y=-trans_y), shape=rew.shape,color=rew.col, 
+             fill='white', size=rew.size, stroke=4, alpha=0.6) 
 }
 
 ```
@@ -234,7 +261,7 @@ pci.df = mutate(pci.df, cell_desc=paste0('Cell ', cell_id,
                                         ' sd dist.=', round(event_spread, 1), ' (cm)'))
 
 
-show_trial_events = function(data.df, g) {
+show_trial_events = function(data.df, loc.df, g) {
   events.df = filter(data.df, nevents > 0)
   events.joined = left_join(events.df, pci.df, by=c('date'='day', 'cell'='cell_id'))  %>%
     mutate(cell_desc = if_else(is.na(cell_desc), paste('Cell', as.character(cell)), cell_desc))
@@ -243,34 +270,47 @@ show_trial_events = function(data.df, g) {
   
   events.joined$cell_desc = as.factor(events.joined$cell_desc)
   events.joined$cell = as.factor(events.joined$cell)
+  if (nrow(events.joined) > 0) {
+    g = g + geom_point(data=events.joined, 
+                       aes(x=smooth_trans_x, y=-smooth_trans_y, 
+                      color=cell, size=15), alpha=0.6) 
+  }
   g = g + 
-    geom_rewards(locations.df, subject, day.str, valence = 'Negative') +
-    geom_rewards(locations.df, subject, day.str) +
-    geom_point(data=events.joined, 
-               aes(x=smooth_trans_x, y=-smooth_trans_y, 
-                   color=trial_id, size=norm_trace), alpha=0.8) +
+    geom_rewards(loc.df, subject, day.str, valence = 'Negative') +
+    geom_rewards(loc.df, subject, day.str) +
     geom_trace(trace.df, alpha=0.1) +
-    xlim(c(1,100)) + ylim(c(-100,-1))
+    xlim(c(1,100)) + ylim(c(-100,-1)) +
+    theme_void() +
+    theme(legend.position = 'None')
   return(g)
 }
 
-day.str = '2019-02-26'
-cells.selected = 2
+day.str = '2019-03-02'
+cells.selected = 1:13
 include_test = FALSE
 g = ggplot()
-for (trial_day in 1:7) {
+for (trial_day in c(1,2,3,4,5,6,7)) {
   data.day.df = filter(data, date==day.str) %>%
                 filter(cell %in% cells.selected) %>%
                 filter(trial == trial_day) %>%
                 filter(is_test == include_test)
-  g = show_trial_events(data.day.df, g)
+  loc.df = filter(locations.df, is_test == include_test)
+  g = show_trial_events(data.day.df, loc.df, g)
 }
 g
 trial_name = paste(day.str, 'trial', trial_day, sep='_')
 out.path = paste0('/tmp/', trial_name, '.jpg')
-#ggsave(filename=out.path, plot=g, height=4, width=9)
+ggsave(filename=out.path, plot=g, height=3, width=4)
 ```
 
+```{r}
+events.df %>%
+  filter(date=='2019-03-08', is_test == FALSE) %>%
+  ggplot(aes(x=smooth_trans_x, y=-smooth_trans_y)) +
+  #stat_density_2d(aes(fill = stat(level)), geom = "polygon") 
+  geom_density_2d()
+  
+```
 
 Standard distance histogram
 ```{r}
@@ -307,10 +347,220 @@ ggplot() +
 
 
 
-Reward distance
+Cells responsive to both rewards
 ```{r}
+max_rew_dist = 10
+rew_responsive.df = mutate(data, 
+                           is_at_rew0=(dist_reward0 < max_rew_dist),
+                           is_at_rew1=(dist_reward1 < max_rew_dist),
+                           is_at_rew=is_at_rew0 | is_at_rew1)
+
+get.nrews.responsive = function(pct_at_rew, pct_at_rew0, pct_at_rew1) {
+  if (is.na(pct_at_rew) | is.na(pct_at_rew0) | is.na(pct_at_rew1)) {
+    return(0)
+  }
+  if (pct_at_rew < 0.65) {
+    return(0)
+  }  
+  
+  mpct_single_rew = min(pct_at_rew0, pct_at_rew1)
+  if (mpct_single_rew < 0.2) {
+    return(1)
+  }
+  return(2)
+}
+
+day.summary.df = group_by(rew_responsive.df, date, cell, is_test) %>%
+  summarise(nevents_at_rew=sum(is_at_rew & (nevents > 0), na.rm = TRUE),
+            pct_events_at_rew0=sum(is_at_rew0 & (nevents > 0), na.rm = TRUE) / sum(nevents, na.rm = TRUE),
+            pct_events_at_rew1=sum(is_at_rew1 & (nevents > 0), na.rm = TRUE) / sum(nevents, na.rm = TRUE),
+            pct_events_at_rew=nevents_at_rew / sum(nevents, na.rm = TRUE)) %>% 
+  mutate(pct_events_at_rew0 = replace_na(pct_events_at_rew0, 0)) %>%
+  mutate(pct_events_at_rew1 = replace_na(pct_events_at_rew1, 0)) %>%
+  mutate(pct_events_at_rew = replace_na(pct_events_at_rew, 0))
+
+day.summary.df$nrew_responsive = rep(0, nrow(day.summary.df))
+for (i in 1:nrow(day.summary.df)) {
+  day.summary.df$nrew_responsive[i] = with(day.summary.df,
+                                           get.nrews.responsive(pct_events_at_rew[i], pct_events_at_rew0[i], pct_events_at_rew1[i]))
+}
+```
+Merge current location_set column
+```{r}
+  
+day.summary.df = left_join(day.summary.df, cur_rewards.df, by=c('date', 'is_test'))
+day.summary.df$nrew_responsive = as.factor(day.summary.df$nrew_responsive)
+```
+
+
+```{r}
+notest.day.summary = day.summary.df %>%
+  filter(is_test == FALSE) %>%
+  mutate(learning_day = as.integer(as.Date(date) - first_learning_day + 1))
+ggplot(notest.day.summary, aes(x=factor(1), fill=nrew_responsive)) +
+  geom_bar(width=1) +
+  facet_grid(. ~ learning_day) +
+  gtheme +
+  ylab('#Cells')  + xlab('Day') +
+  theme(legend.position = 'top')
+  #coord_polar(theta='y') + theme_void()
+ggsave(paste0(gen_imgs_dir, 'responsive_cells.svg'), width=5, height=4)
+```
+
+Show traces at reward for reward responsive cell
+```{r}
+source('tracking_info.R')
+
+get_index_arrived = function(at.reward.vec, timestamps) {
+  indecies = which(at.reward.vec == 1)
+  if (length(indecies) == 0) {
+    return(-1)
+  }
+  return(timestamps[indecies[1]])
+}
+
+aligned.data.df = filter(data, is_test == FALSE) %>%
+         group_by(trial_id) %>%
+         mutate(at_rew0 = is.at.reward(velocity, dist_reward0, timestamp, running.thresh = 3),
+                at_rew1 = is.at.reward(velocity, dist_reward1, timestamp, running.thresh = 3)) %>%
+         mutate(arrived.rew0=get_index_arrived(at_rew0, timestamp),
+                arrived.rew1=get_index_arrived(at_rew1, timestamp),
+                timestamp.rew0 = timestamp  - arrived.rew0,
+                timestamp.rew1 = timestamp - arrived.rew1) %>%
+         ungroup()
+```
+
+
+```{r}
+#day.str = '2019-03-08'
+day.str = '2019-03-02'
+cell_id = 3
+cell_id = 3
+day.df = filter(aligned.data.df, cell == cell_id, date == day.str)
+
+
+day.df.rew0 = filter(day.df, timestamp.rew0 > -5000, timestamp.rew0 < 20000)
+day.df.rew1 = filter(day.df, timestamp.rew1 > -5000, timestamp.rew1 < 20000)
+#day.df.rew0 = day.df
+cell.events0 = filter(day.df.rew0, nevents > 0)
+cell.events1 = filter(day.df.rew1, nevents > 0)
+
+ggplot(day.df.rew0) +
+  geom_line(aes(x=timestamp.rew0/1000, y=norm_trace, group=1)) +
+  geom_line(aes(x=timestamp.rew0/1000, y=dist_reward0/10, group=1), colour='blue') +
+  geom_point(data=cell.events0, aes(x=timestamp.rew0/1000, y=norm_trace + 1), shape=8, colour='red') +
+  facet_grid(trial ~ .) +
+  ylim(c(-3,9)) +
+  xlab('Time (sec)') +
+  ylab('z-scored dF/F')  + gtheme
+ggsave(paste0(gen_imgs_dir, 'rew1_traces.svg'), width=5, height=4)
+
+ggplot(day.df.rew1) +
+  geom_line(aes(x=timestamp.rew1/1000, y=norm_trace, group=1)) +
+  geom_line(aes(x=timestamp.rew1/1000, y=dist_reward1/10, group=1), colour='blue') +
+  geom_point(data=cell.events1, aes(x=timestamp.rew1/1000, y=norm_trace + 1), shape=8, colour='red') +
+  facet_grid(trial ~ .) +
+  ylim(c(-3,9)) +
+  xlab('Time (sec)') +
+  ylab('z-scored dF/F')  + gtheme
+ggsave(paste0(gen_imgs_dir, 'rew2_traces.svg'), width=5, height=4)
+```
+Each trial one line
+TODO: order by reward pct_events_at_rew
+```{r}
+rew0.aligned.data = filter(aligned.data.df, timestamp.rew0 > -5000, timestamp.rew0 < 20000)
+
+rew0.aligned.data = rew0.aligned.data %>%
+  mutate(trace_id = paste0(trial_id, '_', cell)) %>%
+  filter(date=='2019-03-08', trial==2) 
+
+frame.length.ms = (max(rew0.aligned.data$timestamp, na.rm = TRUE) - min(rew0.aligned.data$timestamp, na.rm = TRUE)) /
+  (filter(rew0.aligned.data, cell == 1) %>% nrow)
+frame.length.ms = round(frame.length.ms)
+
+rew0.aligned.data = rew0.aligned.data %>%
+  group_by(trace_id) %>%
+  arrange(timestamp.rew0) %>%
+  mutate(aligned_timestamp = row_number() * frame.length.ms)
+
+ggplot(rew0.aligned.data, aes(x=aligned_timestamp / 1000 - 5, y=factor(trace_id))) +
+  geom_raster(aes(fill=norm_trace), interpolate = FALSE)  +
+  xlab('Time (sec)')
+
 
 ```
+
+
+
+```{r}
+day.summary.df %>%
+  mutate(learning_day = as.integer(as.Date(date) - as.Date('2019-02-20') + 1)) %>%
+  #filter(learning_day >= 12, (learning_day <17 | is_test == TRUE)) %>%
+  mutate(day_test = paste0(sprintf("%02d", learning_day), ifelse(is_test, '_test', '_trial')))  %>%
+  ggplot(aes(x=day_test, y=pct_events_at_rew * 100)) +
+  #geom_point(aes(color=nrew_responsive), size=2) +
+  geom_dotplot(aes(fill=nrew_responsive), binaxis = 'y', stackratio=0.6) +
+  geom_line(aes(group=cell), size=0.3, alpha=0.2) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlab('Learning Day') + ylab('Calcium events at reward (%)') +
+  theme(legend.position='top')
+
+ggsave(paste0(gen_imgs_dir, 'responsive_cells_change.svg'), width=5, height=4)
+```
+
+
+How persistent is coding of reward across days and when reward moved
+```{r}
+mevents_at_reward.df = notest.day.summary %>%
+  group_by(location_set, cell, airpuff) %>%
+  summarise(mevents_at_reward = mean(pct_events_at_rew),
+            sdevents_at_reward = sd(pct_events_at_rew))
+
+mevents_at_reward.df$location_set = as.factor(mevents_at_reward.df$location_set)
+
+filter(mevents_at_reward.df, airpuff == TRUE) %>%
+  ggplot(aes(x=location_set, y=mevents_at_reward)) +
+  geom_line(aes(group=cell), size=0.3) +
+  geom_point(aes(colour=airpuff),size=2)
+```
+
+```{r}
+notest.day.summary$cell = as.factor(notest.day.summary$cell)
+notest.day.summary$location_set = as.factor(notest.day.summary$location_set)
+notest.day.summary %>%
+  filter(location_set == 2) %>%
+  ggplot() +
+  geom_boxplot(aes(x=cell, y=pct_events_at_rew)) 
+```
+
+
+Inside ROI
+```{r}
+is.inside = function(zone_x, zone_y, pos_x, pos_y) {
+  if(is.na(zone_x)) {
+    return(FALSE)
+  }
+  zone_dist = sqrt((pos_x - zone_x)^2 + (pos_y - zone_y)^2)
+  return(zone_dist < 10)
+}
+
+future.locations.df = filter(locations.df, future_loc == TRUE, Valence == 'Negative', is_test == FALSE) %>%
+  rename(future_roi_trans_x = trans_x,
+         future_roi_trans_y = trans_y) %>%
+  dplyr::select(date, future_roi_trans_x, future_roi_trans_y)
+events.df.joinedloc = left_join(events.df, future.locations.df, by='date', suffix=c('', '.loc')) %>%
+  filter(is_test == 0) %>%
+  mutate(inside_future_roi = is.inside(future_roi_trans_x, future_roi_trans_y, smooth_trans_x, smooth_trans_y)) %>%
+  filter(dist_reward0 > 8, dist_reward1 > 8) %>%
+  filter(inside_roi == TRUE | inside_future_roi == TRUE) 
+
+events.df.joinedloc %>%
+  group_by(date, cell) %>%
+  summarise(n=n())
+  
+```
+
 
 
 Raster plot for events
@@ -389,8 +639,9 @@ ggsave(paste0(gen_imgs_dir, 'centroids.svg'), g)
 g
 
 ```
+
 ```{r}
-day.str = '2018-10-30'
+day.str = '2019-03-08'
 trial.df = filter(data, cell %in% cells.selected, date==day.str)
 trial.df$cell_name=as.factor(trial.df$cell) %>% as.integer
 trial.events.df = filter(trial.df, nevents > 0)

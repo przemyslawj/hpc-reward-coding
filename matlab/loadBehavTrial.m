@@ -3,7 +3,7 @@ addpath(genpath(pwd))
 rootDir = '/mnt/DATA/Prez/cheeseboard/2019-02-learning/';
 caimg_analysis_rootdir = '/mnt/DATA/Prez/cheeseboard/2019-02-learning/joined_caimg';
 animal = '1BR';
-sessions = 1:81;
+sessions = 1:96;
 
 EVENT_THRESH_NUM_STD = 4;
 

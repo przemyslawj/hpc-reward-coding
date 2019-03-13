@@ -28,6 +28,7 @@ get_stats = function(tracking_df, animal_locations.df) {
            at_rew0 = is.at.reward(velocity, dist_reward0, timestamp),
            at_rew1 = is.at.reward(velocity, dist_reward1, timestamp))
   
+  mvelocity = mean(dist_df$velocity[which(dist_df$velocity > 1.0)])
   # Add crossings statistics for previous reward locations
   prev_locs.df = filter(animal_locations.df, previous_loc == TRUE, Valence == 'Positive') %>%
       arrange(position_no)
@@ -79,6 +80,7 @@ get_stats = function(tracking_df, animal_locations.df) {
                               get_crossings_n(valid_pos_df$dist_reward1[frame_60s:frame_90s]),
               crossings_90_120s=get_crossings_n(valid_pos_df$dist_reward0[frame_90s:frame_120s]) +
                               get_crossings_n(valid_pos_df$dist_reward1[frame_90s:frame_120s]),
+              mvelocity=mvelocity,
               nroi_crossings=length(roi_durs),
               roi_duration=sum(roi_durs),
               mroi_velocity=mean(roi_velocity),
@@ -107,6 +109,7 @@ output_df = data.frame(date=character(),
                        arrived_rew1=numeric(),
                        time_finished=numeric(),
                        crossings_n=numeric(),
+                       mvelocity=numeric(),
                        ncross_prev_rew=numeric(),
                        ncross_future_roi=numeric(),
                        nroi_crossings=numeric(),
@@ -114,8 +117,8 @@ output_df = data.frame(date=character(),
                        mroi_velocity=numeric(),
                        rew_dwell_pct=numeric())
 
-#root_dat_dir = '/mnt/DATA/Prez/cheeseboard/2019-02-learning'
-root_dat_dir = '~/neurodata/cheeseboard/2019-02-learning'
+root_dat_dir = '/mnt/DATA/Prez/cheeseboard/2019-02-learning'
+#root_dat_dir = '~/neurodata/cheeseboard/2019-02-learning'
 
 locations.df = read_locations(root_dat_dir) %>% 
   add_prev_locations() %>%
@@ -128,10 +131,12 @@ for (i in 1:nrow(files.df)) {
   tracking_df$inside_roi = as.logical(tracking_df$inside_roi)
   print(files.df$filepath[i])
       
-  animal_pos.df = filter(locations.df, Animal == files.df$animal[i], date == files.df$date[i])
+  animal_pos.df = filter(locations.df, Animal == files.df$animal[i], 
+                         date == files.df$date[i], is_test == files.df$is_test[i])
   
   res = get_stats(tracking_df, animal_pos.df)
-  current_reward_pos = filter(animal_pos.df, Valence == 'Positive', current_loc == TRUE)
+  current_reward_pos = filter(animal_pos.df, Valence == 'Positive', 
+                              current_loc == TRUE, is_test == files.df$is_test[i])
   time_finished_sec = -1
   if (res[['arrived_rew0']] >= 0 && res[['arrived_rew1']] >= 0) {
     time_finished_sec = max(res[['arrived_rew0']], res[['arrived_rew1']])
@@ -156,6 +161,7 @@ for (i in 1:nrow(files.df)) {
                        arrived_rew1=res[['arrived_rew1']],
                        time_finished=time_finished_sec,
                        crossings_n=res['crossings_n'],
+                       mvelocity=res['mvelocity'],
                        crossings_0_30s=res['crossings_0_30s'],
                        crossings_30_60s=res['crossings_30_60s'],
                        crossings_60_90s=res['crossings_60_90s'],
