@@ -18,6 +18,14 @@ get_time_arrived = function(at.reward.vec, timestamps) {
   return(timestamps[min(indecies)] / 1000)
 }
 
+get_time_fst_passed = function(dist, timestamps) {
+  index.passed = which(dist < 10) %>% first
+  if (is.na(index.passed)) {
+    return(-1)
+  }
+  return(timestamps[index.passed] / 1000)
+}
+
 get_stats = function(tracking_df, animal_locations.df) {
   valid_pos_df = tracking_df %>%
     filter(x > -1 & y > -1)
@@ -27,6 +35,8 @@ get_stats = function(tracking_df, animal_locations.df) {
            velocity = get_velocity(dist_trans, timestamp),
            at_rew0 = is.at.reward(velocity, dist_reward0, timestamp),
            at_rew1 = is.at.reward(velocity, dist_reward1, timestamp))
+  
+  
   
   mvelocity = mean(dist_df$velocity[which(dist_df$velocity > 1.0)])
   # Add crossings statistics for previous reward locations
@@ -88,7 +98,9 @@ get_stats = function(tracking_df, animal_locations.df) {
               start_x=valid_pos_df$trans_x[1], 
               start_y=valid_pos_df$trans_y[1],
               arrived_rew0=get_time_arrived(dist_df$at_rew0, dist_df$timestamp),
-              arrived_rew1=get_time_arrived(dist_df$at_rew1, dist_df$timestamp))
+              arrived_rew1=get_time_arrived(dist_df$at_rew1, dist_df$timestamp),
+              passed_rew0=get_time_fst_passed(dist_df$dist_reward0, dist_df$timestamp),
+              passed_rew1=get_time_fst_passed(dist_df$dist_reward1, dist_df$timestamp))
   return(c(main_summary, loc_summary))
 }
 
@@ -107,6 +119,8 @@ output_df = data.frame(date=character(),
                        rew2_y=numeric(),
                        arrived_rew0=numeric(),
                        arrived_rew1=numeric(),
+                       passed_rew0=numeric(),
+                       passed_rew1=numeric(),
                        time_finished=numeric(),
                        crossings_n=numeric(),
                        mvelocity=numeric(),
@@ -159,6 +173,8 @@ for (i in 1:nrow(files.df)) {
                        rew2_y=current_reward_pos$trans_y[2],
                        arrived_rew0=res[['arrived_rew0']],
                        arrived_rew1=res[['arrived_rew1']],
+                       passed_rew0=res[['passed_rew0']],
+                       passed_rew1=res[['passed_rew1']],
                        time_finished=time_finished_sec,
                        crossings_n=res['crossings_n'],
                        mvelocity=res['mvelocity'],

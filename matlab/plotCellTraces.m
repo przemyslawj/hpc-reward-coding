@@ -1,4 +1,4 @@
-function [] = plotCellTrace(dataTable, cellIndex)
+function [] = plotCellTraces(dataTable, cellIndex)
 %PLOTCELLTRACE Plots traces for each trial and the mean trace.
 % Timeline on x axis is centered around two times mice arrive at reward.
 

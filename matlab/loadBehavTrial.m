@@ -1,9 +1,9 @@
 addpath(genpath(pwd)) 
 
-rootDir = '/mnt/DATA/Prez/cheeseboard/2019-02-learning/';
-caimg_analysis_rootdir = '/mnt/DATA/Prez/cheeseboard/2019-02-learning/joined_caimg';
+rootDir = '/mnt/DATA/Prez/cheeseboard/2019-03-learning/';
+caimg_analysis_rootdir = [rootDir filesep 'joined_caimg'];
 animal = '1BR';
-sessions = 1:96;
+sessions = 1:33;
 
 EVENT_THRESH_NUM_STD = 4;
 
@@ -37,13 +37,15 @@ for session = sessions
     sessionName = ['Session' num2str(session)];
     sessionMeta = sessionsInfo(strcmp(sessionsInfo.SessionName, sessionName), :);
     dateStr = datestr(sessionMeta.Date, 'yyyy-mm-dd');
-    is_test_str = '';
+    dir_suffix = '';
     is_test = 0;
-    if strcmp(sessionMeta.is_test{1}, 'TRUE')
-        is_test_str = '_test';
-        is_test = 1;
+    if ~strcmp(sessionMeta.SessionType{1}, 'Trial')
+        dir_suffix = ['_' lower(sessionMeta.SessionType{1})] ;
+        if strcmp(sessionMeta.SessionType{1}, 'Test')
+            is_test = 1;
+        end
     end
-    datedRootDir = [ rootDir filesep dateStr is_test_str];
+    datedRootDir = [ rootDir filesep dateStr dir_suffix];
     trackingDir = [ datedRootDir filesep 'movie' filesep 'tracking' ];
     tracesBySession = mat2cell(traces, size(traces, 1), sessionLengths);
     sessionTimestamps = timestampsBySession{session}';
@@ -71,13 +73,14 @@ for session = sessions
     n = size(sessionData, 1);
 
     trial_id = [ dateStr '_' num2str(sessionMeta.Trial) ];
-    if is_test
-        trial_id = [trial_id '_test' ];
+    if ~strcmp(sessionMeta.SessionType{1}, 'Trial')
+        trial_id = [trial_id dir_suffix ];
     end
     sessionData.date = repmat(sessionMeta.Date, n, 1);
     sessionData.trial = repmat(sessionMeta.Trial, n, 1);
     sessionData.trial_id = mat2cell(repmat(trial_id, n, 1), ones(n, 1), numel(trial_id));
     sessionData.is_test = repmat(is_test, n, 1);
+    sessionData.session_type = repmat({sessionMeta.SessionType{1}}, n, 1);
     [eventsVec, normTrace] = findEvents(sessionData.trace, EVENT_THRESH_NUM_STD, freq);
     sessionData.events = eventsVec;
     sessionData.normTrace = normTrace;
@@ -98,39 +101,39 @@ for i = 1:ncells
     disp(['Cell ' num2str(i) ' events: ' num2str(nevents)])
 end
 
-%% Calculate place fields
-% TODO: evaluate different velocity thresholds
-RUNNING_VELOCITY_THRESH = -1;
-
-ncells = size(sessionData.trace, 2);
-PCIs = zeros(size(1, ncells));
-
-runningData = allData(allData.velocity > RUNNING_VELOCITY_THRESH, :);
-binSize = 10;
-for i = 1:ncells
-    [ placeField, PCI, occupancyMap, eventMap ] = getPlaceField(...
-        runningData.smooth_trans_x, runningData.smooth_trans_y,...
-        runningData.events(:, i), binSize);
-    PCIs(i) = PCI;
-    
-    if PCI > 1.2
-        nevents = sum(allData.events(:,i));
-        figure('Name', ['Cell ' num2str(i) ', nevents: ' num2str(nevents) ...
-                        ', PCI: ' num2str(PCI, 2)]);
-        %subplot(1, 3, 1);
-        %image(occupancyMap, 'CDataMapping','scaled'), colorbar
-        %hold on;
-        %subplot(1, 3, 2);
-        %image(eventMap, 'CDataMapping','scaled'), colorbar
-        %subplot(1, 3, 3);
-        image(placeField, 'CDataMapping','scaled'), colorbar
-     
-        
-        hold off;
-        waitforbuttonpress
-    end
-end
-
+% %% Calculate place fields
+% % TODO: evaluate different velocity thresholds
+% RUNNING_VELOCITY_THRESH = -1;
+% 
+% ncells = size(sessionData.trace, 2);
+% PCIs = zeros(size(1, ncells));
+% 
+% runningData = allData(allData.velocity > RUNNING_VELOCITY_THRESH, :);
+% binSize = 10;
+% for i = 1:ncells
+%     [ placeField, PCI, occupancyMap, eventMap ] = getPlaceField(...
+%         runningData.smooth_trans_x, runningData.smooth_trans_y,...
+%         runningData.events(:, i), binSize);
+%     PCIs(i) = PCI;
+%     
+%     if PCI > 1.2
+%         nevents = sum(allData.events(:,i));
+%         figure('Name', ['Cell ' num2str(i) ', nevents: ' num2str(nevents) ...
+%                         ', PCI: ' num2str(PCI, 2)]);
+%         %subplot(1, 3, 1);
+%         %image(occupancyMap, 'CDataMapping','scaled'), colorbar
+%         %hold on;
+%         %subplot(1, 3, 2);
+%         %image(eventMap, 'CDataMapping','scaled'), colorbar
+%         %subplot(1, 3, 3);
+%         image(placeField, 'CDataMapping','scaled'), colorbar
+%      
+%         
+%         hold off;
+%         waitforbuttonpress
+%     end
+% end
+% 
 
 %% 
 

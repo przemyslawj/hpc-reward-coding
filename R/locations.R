@@ -19,16 +19,21 @@ read_locations = function(root.data.dir) {
     }
     if (is.date(date_str)) {
       print(dated_dir)
-      locations.df = read.csv(paste0(dated_dir, '/locations.csv'), stringsAsFactors=TRUE)
-      locations.df$date = rep(date_str, nrow(locations.df))
-      locations.df$is_test = rep(is_test, nrow(locations.df))
-      locations.df.pos = left_join(locations.df, cheeseboard.map, by=c("Well_row"="Row_X", "Well_col"="Row_Y"))
-      merged.df = bind_rows(merged.df, locations.df.pos)
+      fpath = paste0(dated_dir, '/locations.csv')
+      if (file.exists(fpath)) {
+        locations.df = read.csv(fpath, stringsAsFactors=TRUE)
+        locations.df$date = rep(date_str, nrow(locations.df))
+        locations.df$is_test = rep(is_test, nrow(locations.df))
+        locations.df.pos = left_join(locations.df, cheeseboard.map, by=c("Well_row"="Row_X", "Well_col"="Row_Y"))
+        merged.df = bind_rows(merged.df, locations.df.pos)
+      }
     }
   }
  
   
+  merged.df$Animal = as.factor(merged.df$Animal)
   result.df = data.frame()
+  
   # Add location_set column 
   merged.df$location_set = rep(0, nrow(merged.df))
   for (animal in levels(merged.df$Animal)) {

@@ -10,7 +10,11 @@ assert(size(trace, 2) == ntimestamps);
 
 function avg = weightedAvg(datatable, indecies, colName, weights)
     values = datatable{indecies, colName};
-    avg = double(weights) * values / sum(weights);
+    if values(1) <= 0
+        avg = values(2);
+    else
+        avg = double(weights) * values / sum(weights);
+    end
 end
 
 function val = closerVal(datatable, indecies, colName, time_diff)
@@ -21,8 +25,9 @@ end
 
 
 avgedVariables = intersect({'smooth_trans_x', 'smooth_trans_y', ...
-                           'dist_reward0', 'dist_reward1', 'inside_roi'}, ...
-                          behavData.Properties.VariableNames);       
+                           'dist_reward0', 'dist_reward1'}, ...
+                          behavData.Properties.VariableNames);
+chooseCloserVariables = {'inside_roi'};
 
 traceIndex = 1;
 behavIndex = 1;
@@ -33,7 +38,8 @@ while traceIndex <= ntimestamps &&...
 end
 skippedTraceIndecies = traceIndex - 1;
 
-avgedVals = zeros(ntimestamps - traceIndex + 1, numel(avgedVariables)); 
+avgedVals = zeros(ntimestamps - traceIndex + 1, ...
+    numel(avgedVariables) + numel(chooseCloserVariables)); 
 
 savedTraceValueIndex = 1;
 while traceIndex <= ntimestamps
@@ -57,8 +63,12 @@ while traceIndex <= ntimestamps
     end
     
     for i = 1:numel(avgedVariables)
-        avgedVals(savedTraceValueIndex, i) = closerVal(behavData,...
+        avgedVals(savedTraceValueIndex, i) = weightedAvg(behavData,...
                 [prevBehavIndex behavIndex], avgedVariables{i}, timestampDiff);
+    end
+    for i = 1:numel(chooseCloserVariables)
+        avgedVals(savedTraceValueIndex, numel(avgedVariables) + i) = closerVal(behavData,...
+                [prevBehavIndex behavIndex], chooseCloserVariables{i}, timestampDiff);
     end
         
     traceIndex = traceIndex + 1;
@@ -70,6 +80,10 @@ resultTable = table(traceTimestamps(skippedTraceIndecies+1:end)', ...
                     'VariableNames', {'timestamp', 'trace'});
 for i = 1:numel(avgedVariables)
     resultTable{:,avgedVariables{i}} = avgedVals(:,i);
+end
+for i = 1:numel(chooseCloserVariables)
+    j = numel(avgedVariables) + i;
+    resultTable{:,chooseCloserVariables{i}} = avgedVals(:,j);
 end
 
 end
