@@ -3,6 +3,7 @@ caimg_analysis_rootdir = [rootDir filesep 'joined_caimg'];
 animal = '1BR';
 session = 35;
 
+addpath('~/code/miniscope_dat_analysis/misc/')
 caimg_analysis_dir = [caimg_analysis_rootdir filesep animal filesep 'jointExtraction' filesep 'sorted'];
 sessionName = ['Session' num2str(session)];
 
@@ -43,20 +44,43 @@ opts.VariableTypes(index) = { 'logical' };
 
 trialPositions = readtable(trackingFilepath, opts); 
 
-addpath('~/code/miniscope_dat_analysis/misc/')
+% Load Processed movie
+addpath('~/code/miniscope_dat_analysis/annotation/')
 cumLenghts = double([1 cumsum(sessionLengths)]);
 processedCamovieMat = loadMovie(h5file, cumLenghts(session), cumLenghts(session+1));
 
+%% Overlay cell outlines on processed movie
+P = rescale(processedCamovieMat, 0.1, 1.0); 
+[ areas,centroids,cvxHulls,cvxAreas,outlines ] = getFilterProps(filters);
+M = zeros(size(processedCamovieMat,1), size(processedCamovieMat, 2));
+for cell_i = 1:numel(outlines)
+    outline = outlines{cell_i};
+    for pixel = 1:size(outline,1)
+        M(floor(outline(pixel,2)), floor(outline(pixel,1))) = 1;
+    end
+end
+
+P = toRGB(P);
+P(:,:,1,:) = P(:,:,1,:) + M;
+P(:,:,3,:) = P(:,:,3,:) + M;
+
+
+%% Load original movie
 h5file = [caimg_analysis_rootdir filesep animal filesep sessionName filesep 'raw' filesep 'rawMovie.h5'];
 rawCamovieMat = loadMovie(h5file);
+% downsample in time
+downsampleFactor = 2;
 X=permute(rawCamovieMat, [3, 1, 2]);
-rawCamovieMat=permute(downsample(X, 2), [2, 3, 1]);
+rawCamovieMat=permute(downsample(X, downsampleFactor), [2, 3, 1]);
 
 playMovies(0, 1000 * 100, 10.0, tracking_vid_filename, ...
     tracesBySession{session},...
+    outlines,...
     tracking_vid, trialPositions.timestamp,...
     rawCamovieMat, caimg_timestamps,...
-    processedCamovieMat, caimg_timestamps);
+    P, caimg_timestamps);
 
 
-
+function [M] = toRGB(A)
+    M = permute(cat(4, A, A, A), [1 2 4 3]);
+end

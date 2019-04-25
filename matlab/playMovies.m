@@ -1,5 +1,5 @@
 function [] = playMovies(start,stop, playback_speed, tracking_vid_filename,...
-    traces, varargin)
+    traces, cell_outlines, varargin)
 
 saveVideo = 1;
 if saveVideo
@@ -12,7 +12,9 @@ end
 nMov = length(varargin) / 2;
 x = ceil(nMov/2);
 y = ceil(nMov/x);
-f = figure('WindowStyle','normal','Position',[100,200,y*500,x*400]);
+f = figure('WindowStyle','normal',...
+    'Position',[100,200,y*500,x*400],...
+    'KeyPressFcn',@PauseOnKeyDown);
 frame_ids = ones(nMov, 1);
 cvals = [];
 for i = 1:nMov
@@ -38,9 +40,15 @@ for time = start:stop
         if timestamp == time
             subplot(x,y,j)
             movie = varargin{j * 2 - 1};
-            imagesc(movie(:,:,frame_id));
+            
+            if ndims(movie) == 3
+                imagesc(movie(:,:,frame_id));
+                colormap(gray)
+            else
+                imagesc(movie(:,:,:,frame_id));
+            end
             caxis(cvals(j,:));
-            colormap(gray)
+            
             
             if j == nMov-1 % ca img movie
                 subplot(x,y,nMov+1)
@@ -55,11 +63,17 @@ for time = start:stop
                         'YData', A(cell,:))
                 end
 
-                drawnow
-                
+                drawnow 
+            elseif j == nMov
+                for cell_index = 1:numel(cell_outlines)
+                    outline = cell_outlines{cell_index};
+                    text(max(outline(:,1)), mean(outline(:,2)), ...
+                         num2str(cell_index), 'Color', 'magenta');
+                end
             end
             
-            frame_ids(j) = min(size(movie, 3), frame_id + 1);
+            nframes = size(movie, ndims(movie));
+            frame_ids(j) = min(nframes, frame_id + 1);
         end
     end
     pause(1/1000/playback_speed);
@@ -80,5 +94,12 @@ function [A] = createTraceMatrix(traces, start, stop)
     A = traces(:,start:stop);
     for cell = 1:size(A,1)
         A(cell,:) = A(cell,:) + cell;
+    end
+end
+
+
+function PauseOnKeyDown(~, event)
+    if event.Character == ' '
+        waitforbuttonpress
     end
 end

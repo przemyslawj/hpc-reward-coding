@@ -293,7 +293,7 @@ show_trial_events = function(data.df, loc.df, g) {
 }
 
 day.str = '2019-03-20'
-cells.selected = 1:13
+cells.selected = 1:12
 include_test = FALSE
 g = ggplot()
 for (trial_day in c(1,2,3,4,5,6,7)) {
