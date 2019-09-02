@@ -8,6 +8,7 @@ output:
 
 ```{r}
 library(dplyr)
+library(plyr)
 library(readr)
 library(tidyr)
 library(stringr)
@@ -18,45 +19,58 @@ library(cowplot)
 gtheme = theme_minimal() + theme_cowplot() + 
   theme(text = element_text(size=18), axis.text = element_text(size=15))
 
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+
 ```
 
 ```{r}
-data_dir = '/mnt/DATA/Prez/cheeseboard/2019-07-habituation/'
-#data_dir = '~/neurodata/cheeseboard/2019-02-learning/'
-ca_img_result_dir = paste0(data_dir, '/')
-subject = '1BR'
+data_dir = '/mnt/DATA/Prez/cheeseboard/2019-08/2019-08-habituation/'
+#data_dir = '/mnt/DATA/Prez/cheeseboard/2019-07-learning/'
+subject = 'E-BL'
+datestr = '2019-08-28'
+ca_img_result_dir = paste0(data_dir, datestr, '/trials/mv_caimg/', subject, '/')
 gen_imgs_dir = '/tmp/'
 traces_file = paste0(ca_img_result_dir, 'traces_and_positions.csv')
 data = read.csv(traces_file)
-data$session_type = as.factor(data$session_type)
-
-data = filter(data, session_type %in% c('Trial','Test'))
 ```
 
 
 ```{r}
-data = data %>%
+data.events = data %>%
+  select('date', 'timestamp', 'trial', starts_with('events_')) %>%
   gather('cell', 'nevents', starts_with('events_')) %>%
-  gather('trace_cell', 'norm_trace', starts_with('normTrace_')) 
-data$cell = str_replace(data$cell,'events_[.]?','')
-data$trace_cell = str_replace(data$trace_cell,'normTrace_[.]?','')
-data = filter(data, cell == trace_cell) %>%
-  select(-trace_cell)
-data = data %>%
-  gather('trace_cell', 'trace', starts_with('trace_')) 
-data$trace_cell = str_replace(data$trace_cell,'trace_[.]?','')
-data = filter(data, cell == trace_cell) %>%
-  select(-trace_cell)
-data$trace = as.double(data$trace)
+  mutate(cell = str_replace(cell, 'events_[.]?[.]?',''))
 
+data.traces = data %>%
+  select(-starts_with('events_')) %>%
+  gather('cell', 'trace', starts_with('trace_')) %>%
+  mutate(cell = str_replace(cell, 'trace_[.]?[.]?',''))
+
+data = left_join(data.traces, data.events, by=c('date', 'trial', 'timestamp', 'cell'))
 data$cell = as.integer(data$cell)
-data$inside_roi = data$inside_roi > 0
+```
+
+```{r}
+source('trace_utils.R')
+data = data %>%
+  ddply(.(date, trial, cell), plyr::mutate,
+        timestamp = timestamp,
+        smooth_trans_x = smooth_trans_x,
+        smooth_trans_y = smooth_trans_y,
+        dist = dist,
+        velocity = velocity,
+        inside_roi = inside_roi,
+        nevents = nevents,
+        trace = trace,
+        df = df(trace),
+        ztrace=zscore(df)) 
 ```
 
 ```{r}
 ncells = unique(data$cell) %>% length
 
-first_learning_day = as.Date('2019-02-20')
+first_learning_day = as.Date('2019-08-27')
 last_day = max(as.Date(data$date))
 max_trial = max(data$trial)
 data = mutate(data, 
@@ -64,25 +78,14 @@ data = mutate(data,
               trial_no = (learning_day - 1) * max_trial + trial)
 ```
 
-Read reward locations per day
-``` {r}
-source('locations.R')
-locations.df = read_locations(paste0(data_dir))  %>%
-  add_prev_locations() %>%
-  add_future_neg_locations()
 
-cur_rewards.df = filter(locations.df, current_loc == TRUE) %>%
-  group_by(date, location_set, is_test) %>%
-  summarise(airpuff = any(Valence == 'Negative')) %>%
-  slice(1) %>%
-  select(date, location_set, is_test, airpuff) 
-```
+
 # Calcium events
 
 Events per cell per day and trial
 ```{r}
 events_total.df = data %>% 
-  group_by(date, trial, cell, trial_no, learning_day, is_test) %>%
+  group_by(date, trial, cell, trial_no, learning_day) %>%
   summarise(total_events = sum(nevents), 
             duration_sec = max(timestamp) / 1000,
             mer = total_events / duration_sec) %>%
@@ -92,21 +95,20 @@ datatable(select(events_total.df, trial_no, cell, total_events, duration_sec, me
 ```
 Correlation between trial no and no events
 ```{r}
-events_total.df.joined = left_join(events_total.df, cur_rewards.df, by=c('date', 'is_test'))
 
 
-events_total.df.joined %>%
-  mutate(day_test = paste0('Day ', sprintf("%02d", learning_day), ifelse(is_test, '_1test', '_trial')))  %>%
-  group_by(day_test, cell,airpuff) %>%
+events_total.df%>%
+  mutate(day_test = paste0('Day ', sprintf("%02d", learning_day)))  %>%
+  group_by(day_test, cell) %>%
   summarise(mean.event.rate = sum(total_events) / ncells / mean(duration_sec)) %>%
   ggplot() +
-  geom_boxplot(aes(x=day_test, y=mean.event.rate, colour=airpuff)) +
+  geom_boxplot(aes(x=day_test, y=mean.event.rate)) +
   xlab('') +
   ylab('Mean event rate (Hz)') +
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
 
-out.path='/tmp/mer.jpg'
+out.path=paste0(gen_imgs_dir, 'mer.jpg')
 ggsave(filename=out.path, height=4, width=7)
 ```
 
@@ -116,10 +118,20 @@ ggsave(filename=out.path, height=4, width=7)
 events.df = filter(data, nevents > 0)
 ```
 
+
+Running velocity hist
+```{r}
+run.threshold = 2
+ggplot(data) +
+  geom_histogram(aes(velocity), binwidth = 1) +
+  geom_vline(aes(xintercept=run.threshold + 0.5), color='red') +
+  xlim(c(0,20)) 
+```
+
+
 Events during run vs during stationary
 ```{r}
-run.threshold = 1.5
-frame.hz = 13
+frame.hz = 20
 data %>% 
   mutate(running = velocity > run.threshold) %>%
   group_by(cell, running) %>%
@@ -132,7 +144,7 @@ data %>%
   gtheme +
   xlab('Cell') + ylab('MFR (Hz)')
 
-out.path='/tmp/mer_running.jpg'
+out.path=paste0(gen_imgs_dir, '/mer_running.jpg')
 ggsave(filename=out.path, height=4, width=7)
 ```
 
@@ -177,13 +189,9 @@ for (i in 1:length(days)) {
     field_centre = get_place_field_centre(cell.events)
     if (nrow(cell.events) > 5) {
       cell.df.run = filter(cell.df, velocity >= run.threshold)
-      if (nrow(cell.df.run) > 5) {
-        pf = getPlaceField(cell.df.run)
-        pci = pf$pci
-      } else {
-        pci = 0
-      }
-      entropy = getPlaceField(cell.df.run)$entropy
+      pf = getPlaceField(cell.df.run)
+      pci = pf$pci
+      entropy = pf$entropy
       cell.events = mutate(cell.events, sd.dist = standard.distance(field_centre, smooth_trans_x, smooth_trans_y))
       pci.df = bind_rows(pci.df, data.frame(cell_id=cell_id, day=day.str, 
                                             pci=pci, entropy=entropy,
@@ -191,6 +199,16 @@ for (i in 1:length(days)) {
                                             event_spread=cell.events$sd.dist[1],
                                             field_centre.x=field_centre[1],
                                             field_centre.y=field_centre[2]))
+      
+      cell_event_rate = nrow(cell.events) / nrow(cell.df) * frame.hz
+      zscore.quantiles = quantile(cell.df.run$ztrace, probs=c(0.2, 0.9))
+      g.placefield = plot.pf(pf$field, pf$occupancy, min.zscore = zscore.quantiles[[1]], zscore.quantiles[[2]]) + 
+        labs(title=paste0('Cell ', cell_id, ' MER = ', format(cell_event_rate, digits=2), ' Hz'),
+             fill='Mean zscored\ndF/F') +
+        theme(text = element_text(size=4),
+              plot.title = element_text(size = 6))
+      ggsave(paste0(gen_imgs_dir, 'place_field_cell_', cell_id, '.jpg'), g.placefield,
+             width=4.0, height=3.5, units='cm')
     }
   }
 }
@@ -221,43 +239,19 @@ geom_trace = function(df, alpha=0.1) {
 }
 ```
 
-```{r}
-geom_rewards = function(locations.df, subject, day=NULL, valence='Positive') {
-  reward.df = filter(locations.df,
-                     Animal==subject, 
-                     Valence == valence,
-                     current_loc == TRUE)
-  if (!is.null(day)) {
-    reward.df = filter(reward.df, date==day)
-  }
-  rew.col = 'blue'
-  rew.shape = 0
-  rew.size = 7
-  if (valence == 'Negative') {
-    rew.col = 'red'
-    rew.shape = 1
-    rew.size = 30
-  }
-  geom_point(data=reward.df, aes(x=trans_x,y=-trans_y), shape=rew.shape,color=rew.col, 
-             fill='white', size=rew.size, stroke=4, alpha=0.6) 
-}
-
-```
-
 
 Events location for each cell
 ```{r}
 for (cell_id in unique(data$cell)) {
   single_trial = filter(events.df, cell==cell_id & velocity > run.threshold)
-  trial_name = sprintf('Cell_%d', cell_id)
+  cell_name = sprintf('Cell_%d', cell_id)
   cell.trace.df = filter(data, cell == cell_id)
   g = ggplot(single_trial) +
-    geom_point(aes(x=smooth_trans_x, y=-smooth_trans_y, color=date, size=norm_trace)) +
+    geom_point(aes(x=smooth_trans_x, y=-smooth_trans_y, color=date, size=trace)) +
     #geom_trace(cell.trace.df) +
-    geom_rewards(locations.df, subject) +
-    xlab(trial_name) +
+    xlab(cell_name) +
     theme_void()
-  out.path = paste0('/tmp/', trial_name, '.jpg')
+  out.path = paste0(gen_imgs_dir, cell_name, '.jpg')
   ggsave(filename=out.path, plot=g, height=4, width=7)
 }
 ```
@@ -481,9 +475,9 @@ cell.events0 = filter(day.df.rew0, nevents > 0)
 cell.events1 = filter(day.df.rew1, nevents > 0)
 
 ggplot(day.df.rew0) +
-  geom_line(aes(x=timestamp.rew0/1000, y=norm_trace, group=1)) +
+  geom_line(aes(x=timestamp.rew0/1000, y=trace, group=1)) +
   geom_line(aes(x=timestamp.rew0/1000, y=dist_reward0/10, group=1), colour='blue') +
-  geom_point(data=cell.events0, aes(x=timestamp.rew0/1000, y=norm_trace + 1), shape=8, colour='red') +
+  geom_point(data=cell.events0, aes(x=timestamp.rew0/1000, y=trace + 1), shape=8, colour='red') +
   facet_grid(trial ~ .) +
   ylim(c(-3,9)) +
   xlab('Time (sec)') +
@@ -491,9 +485,9 @@ ggplot(day.df.rew0) +
 ggsave(paste0(gen_imgs_dir, 'rew1_traces.svg'), width=5, height=4)
 
 ggplot(day.df.rew1) +
-  geom_line(aes(x=timestamp.rew1/1000, y=norm_trace, group=1)) +
+  geom_line(aes(x=timestamp.rew1/1000, y=trace, group=1)) +
   geom_line(aes(x=timestamp.rew1/1000, y=dist_reward1/10, group=1), colour='blue') +
-  geom_point(data=cell.events1, aes(x=timestamp.rew1/1000, y=norm_trace + 1), shape=8, colour='red') +
+  geom_point(data=cell.events1, aes(x=timestamp.rew1/1000, y=trace + 1), shape=8, colour='red') +
   facet_grid(trial ~ .) +
   ylim(c(-3,9)) +
   xlab('Time (sec)') +
@@ -532,7 +526,7 @@ trial.aligned.data = rew.aligned.data %>%
   filter(date==day.str, trial==trial.no)
 
 trial.max.timestamp.ordered = group_by(trial.aligned.data, cell, trace_id) %>%
-  summarise(max.timestamp=which.max(norm_trace)) %>%
+  summarise(max.timestamp=which.max(trace)) %>%
   arrange(desc(max.timestamp))
 
 pct_events.var = paste0('pct_events_at_rew', which.rew)
@@ -543,7 +537,7 @@ day.responsiveness.ordered = filter(day.summary.df, date == day.str, is_test==FA
 
 ggplot(trial.aligned.data, 
        aes(x=aligned_timestamp / 1000 - before.sec, y=factor(trace_id, levels=trial.max.timestamp.ordered$trace_id))) +
-  geom_raster(aes(fill=norm_trace), interpolate = FALSE)  +
+  geom_raster(aes(fill=trace), interpolate = FALSE)  +
   ylab('Cell') +
   xlab('Time (sec)')
 

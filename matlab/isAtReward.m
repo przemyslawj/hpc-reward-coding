@@ -15,7 +15,7 @@ atReward = (velocity <= RUNNING_VELOCITY_THRESH) & ...
 startsAtReward = find(diff(atReward) == 1) + 1;
 endsAtReward = find(diff(atReward) == -1);
 if numel(endsAtReward) < numel(startsAtReward)
-    endsAtReward = [endsAtReward, numel(atReward)];
+    endsAtReward = [endsAtReward; numel(atReward)];
 end
 
 longerStartsAtRewardIndex = find(endsAtReward - startsAtReward >= minTimestampsAtReward);
