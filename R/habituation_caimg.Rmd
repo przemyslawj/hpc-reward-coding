@@ -11,6 +11,7 @@ library(dplyr)
 library(plyr)
 library(readr)
 library(tidyr)
+library(tibble)
 library(stringr)
 library(DT)
 
@@ -25,11 +26,10 @@ summarize = dplyr::summarize
 ```
 
 ```{r}
-data_dir = '/mnt/DATA/Prez/cheeseboard/2019-08/2019-08-habituation/'
-#data_dir = '/mnt/DATA/Prez/cheeseboard/2019-07-learning/'
+data_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/habituation/'
 subject = 'E-BL'
 datestr = '2019-08-28'
-ca_img_result_dir = paste0(data_dir, datestr, '/trials/mv_caimg/', subject, '/')
+ca_img_result_dir = paste0(data_dir, datestr, '/caiman/', subject, '/filtered/')
 gen_imgs_dir = '/tmp/'
 traces_file = paste0(ca_img_result_dir, 'traces_and_positions.csv')
 data = read.csv(traces_file)
@@ -37,17 +37,26 @@ data = read.csv(traces_file)
 
 
 ```{r}
+data.traces = data %>%
+  select(-starts_with('events_'), -starts_with('deconvTrace_')) %>%
+  gather('cell', 'trace', starts_with('trace_')) %>%
+  mutate(cell = str_replace(cell, 'trace_[.]?[.]?','')) %>%
+  arrange(date, trial, cell, timestamp)
+
+data.deconv_traces = data %>%
+  select('date', 'timestamp', 'trial', starts_with('deconvTrace_')) %>%
+  gather('cell', 'deconv_trace', starts_with('deconvTrace_')) %>%
+  mutate(cell = str_replace(cell, 'deconvTrace_[.]?[.]?','')) %>%
+  arrange(date, trial, cell, timestamp)
+  
 data.events = data %>%
   select('date', 'timestamp', 'trial', starts_with('events_')) %>%
   gather('cell', 'nevents', starts_with('events_')) %>%
-  mutate(cell = str_replace(cell, 'events_[.]?[.]?',''))
+  mutate(cell = str_replace(cell, 'events_[.]?[.]?','')) %>%
+  arrange(date, trial, cell, timestamp)
 
-data.traces = data %>%
-  select(-starts_with('events_')) %>%
-  gather('cell', 'trace', starts_with('trace_')) %>%
-  mutate(cell = str_replace(cell, 'trace_[.]?[.]?',''))
-
-data = left_join(data.traces, data.events, by=c('date', 'trial', 'timestamp', 'cell'))
+data = cbind(data.traces, data.deconv_traces$deconv_trace, data.events$nevents)
+colnames(data)[(ncol(data)-1):ncol(data)] = c('deconv_trace', 'nevents')
 data$cell = as.integer(data$cell)
 ```
 
@@ -63,8 +72,7 @@ data = data %>%
         inside_roi = inside_roi,
         nevents = nevents,
         trace = trace,
-        df = df(trace),
-        ztrace=zscore(df)) 
+        ztrace=zscore(trace)) 
 ```
 
 ```{r}
@@ -141,6 +149,7 @@ data %>%
     mfr = nnevents/time.sec) %>%
   ggplot(aes(cell, mfr)) +
   geom_bar(stat='identity', aes(fill=running), position='dodge') +
+  facet_grid(running ~ .) +
   gtheme +
   xlab('Cell') + ylab('MFR (Hz)')
 

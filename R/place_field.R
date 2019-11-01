@@ -25,7 +25,9 @@ getPlaceField = function(trial.df) {
     mutate(binned_posy = round(smooth_trans_y / binSizeY))  %>%
     arrange(timestamp)
     
-  trace = trial.df$ztrace
+  #trace = trial.df$df
+  #trace = trial.df$ztrace
+  trace = trial.df$deconv_trace
   #trace = trace - mean(trial.df$trace)
   #trace = sapply(trace, FUN=function(x) {max(0,x)})
   #trace = trial.df$nevents
@@ -46,13 +48,16 @@ getPlaceField = function(trial.df) {
   
   PCI = 0;
   trial.dur = nrow(trial.df)
-  mfr = sum(trace) / trial.dur;
+  fr = totalActivityMap / occupancyMap
+  fr_offset = min(fr, na.rm=TRUE) - 10e-10
+  fr = fr - fr_offset
+  
+  mfr = sum(trace) / trial.dur - fr_offset;
   for (y in 1:dim(totalActivityMap)[2]) {
     for (x in 1:dim(totalActivityMap)[1]) {
-      occupancyProb = max(0, occupancyMap[x, y]) / trial.dur
-      fr = totalActivityMap[x, y] / occupancyMap[x, y]
-      if (occupancyProb > 0 && fr > 0) {
-        PCI = PCI + occupancyProb * fr / mfr * log2(fr / mfr)
+      occupancyProb = max(0, occupancyMap[x, y], na.rm=TRUE) / trial.dur
+      if (occupancyProb > 0) {
+        PCI = PCI + occupancyProb * fr[x,y] / mfr * log2(fr[x,y] / mfr)
       }
     }
   }
