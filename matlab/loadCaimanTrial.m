@@ -52,7 +52,7 @@ trackingVars = {'dist', 'inside_roi', 'smooth_trans_x', 'smooth_trans_y',...
 for session_i = 1:numel(session_info.session_fpaths)
     session_fpath_parts = split(session_info.session_fpaths{session_i}, filesep);
     exp_title = session_fpath_parts{end-3};
-    
+
     traceBySession = mat2cell(ms.RawTraces, sessionLengths);
     deconvTraceBySession = mat2cell(ms.DeconvTraces, sessionLengths);
     sessionTimestamps = timestampsBySession{session_i}';
@@ -94,7 +94,7 @@ for session_i = 1:numel(session_info.session_fpaths)
             sessionData.arrivedAtReward(find(sessionData.atReward1, 1, 'first')) = 2;
         end
     end
-    
+
     % Populate unknown tracking variables with zeroes
     n = size(sessionData, 1);
     otherTrackingVars = setdiff(trackingVars, sessionData.Properties.VariableNames);
@@ -108,7 +108,7 @@ for session_i = 1:numel(session_info.session_fpaths)
     sessionData.trial = repmat(sessionNo, n, 1);
     sessionData.exp_title = repmat({exp_title}, n, 1);
     sessionData.animal = repmat({animal}, n, 1);
-    
+
     freq = (sessionTimestamps(end) - sessionTimestamps(2)) / numel(sessionTimestamps);
     fe = findEvents(sessionData.trace, EVENT_THRESH_NUM_STD, freq);
     sessionData.events = fe;
@@ -128,3 +128,4 @@ cell_mapping=table();
 cell_mapping.cell_no = (1:numel(ms.cellId))';
 cell_mapping.cell_id = ms.cellId';
 writetable(cell_mapping, [caimg_analysis_dir filesep 'filtered' filesep 'cell_mapping.csv']);
+

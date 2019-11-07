@@ -32,47 +32,19 @@ datestr = '2019-08-28'
 ca_img_result_dir = paste0(data_dir, datestr, '/caiman/', subject, '/filtered/')
 gen_imgs_dir = '/tmp/'
 traces_file = paste0(ca_img_result_dir, 'traces_and_positions.csv')
+
 data = read.csv(traces_file)
 ```
 
 
 ```{r}
-data.traces = data %>%
-  select(-starts_with('events_'), -starts_with('deconvTrace_')) %>%
-  gather('cell', 'trace', starts_with('trace_')) %>%
-  mutate(cell = str_replace(cell, 'trace_[.]?[.]?','')) %>%
-  arrange(date, trial, cell, timestamp)
+source('trace_utils.R')
 
-data.deconv_traces = data %>%
-  select('date', 'timestamp', 'trial', starts_with('deconvTrace_')) %>%
-  gather('cell', 'deconv_trace', starts_with('deconvTrace_')) %>%
-  mutate(cell = str_replace(cell, 'deconvTrace_[.]?[.]?','')) %>%
-  arrange(date, trial, cell, timestamp)
-  
-data.events = data %>%
-  select('date', 'timestamp', 'trial', starts_with('events_')) %>%
-  gather('cell', 'nevents', starts_with('events_')) %>%
-  mutate(cell = str_replace(cell, 'events_[.]?[.]?','')) %>%
-  arrange(date, trial, cell, timestamp)
-
-data = cbind(data.traces, data.deconv_traces$deconv_trace, data.events$nevents)
-colnames(data)[(ncol(data)-1):ncol(data)] = c('deconv_trace', 'nevents')
-data$cell = as.integer(data$cell)
+data = gather.traces(data)
 ```
 
 ```{r}
-source('trace_utils.R')
-data = data %>%
-  ddply(.(date, trial, cell), plyr::mutate,
-        timestamp = timestamp,
-        smooth_trans_x = smooth_trans_x,
-        smooth_trans_y = smooth_trans_y,
-        dist = dist,
-        velocity = velocity,
-        inside_roi = inside_roi,
-        nevents = nevents,
-        trace = trace,
-        ztrace=zscore(trace)) 
+data = zscore.traces(data)
 ```
 
 ```{r}
