@@ -13,7 +13,8 @@ caimg_result_file = [caimg_analysis_dir filesep 'filtered' filesep 'ms.mat'];
 if exist(caimg_result_file, 'file')
     load(caimg_result_file);
 else
-    exit
+	sprintf('Input file does not exist: %s', caimg_result_file)
+    return
 end
 
 %% Align timestamps in case of missing frames
@@ -47,7 +48,8 @@ session_info = jsondecode(session_info_txt);
 allData = [];
 trackingVars = {'dist', 'inside_roi', 'smooth_trans_x', 'smooth_trans_y',...
                 'velocity', 'dist_reward0', 'dist_reward1', ...
-                'atReward0', 'atReward1', 'arrivedAtReward'};
+                'atReward0', 'atReward1', 'arrivedAtReward', ...
+				'smooth_heading_angle'};
 
 for session_i = 1:numel(session_info.session_fpaths)
     session_fpath_parts = split(session_info.session_fpaths{session_i}, filesep);
@@ -98,6 +100,8 @@ for session_i = 1:numel(session_info.session_fpaths)
     % Populate unknown tracking variables with zeroes
     n = size(sessionData, 1);
     otherTrackingVars = setdiff(trackingVars, sessionData.Properties.VariableNames);
+	sprintf('Zeroing tracking variables: ')
+	otherTrackingVars
     zeroValsTable = array2table(zeros(n, numel(otherTrackingVars)),...
         'VariableNames', otherTrackingVars);
     sessionData = [sessionData zeroValsTable];
