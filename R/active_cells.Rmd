@@ -12,6 +12,7 @@ library(tidyr)
 library(tibble)
 library(stringr)
 library(DT)
+library(data.table)
 
 library(ggplot2)
 library(cowplot)
@@ -39,8 +40,10 @@ get.subject.result.dirs = function(root_dir, subject) {
 }
 
 caimg_result_dirs = c(
-  get.subject.result.dirs(root_dir, 'E-BL')
-  #get.subject.result.dirs(root_dir, 'E-TR'),
+  get.subject.result.dirs(root_dir, 'E-BL'),
+  get.subject.result.dirs(root_dir, 'E-TR'),
+  get.subject.result.dirs(root_dir, 'F-BL'),
+  get.subject.result.dirs(root_dir, 'F-TL')
 )
 
 
@@ -62,8 +65,8 @@ for (ca_img_result_dir in caimg_result_dirs) {
   cellmapping_file = paste0(ca_img_result_dir, 'cell_mapping.csv')
   cellmapping.df = read.csv(cellmapping_file)
   traces_file = paste0(ca_img_result_dir, 'traces_and_positions.csv')
-  data = read.csv(traces_file)
-  data.traces = gather.traces(data)
+  data = fread(traces_file)
+  data.traces = melt.traces(data)
   data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
   dir_parts = str_split(ca_img_result_dir, '/')
   animal = dir_parts[[1]][length(dir_parts[[1]]) - 2]
@@ -93,14 +96,16 @@ Mean deconv values during the day in the detected cells, one datapoint per cell 
 cell.day.activity.df %>%
   ggplot() +
   geom_histogram(aes(x=deconv.mean)) +
-  facet_grid(animal ~ exp_title)
+  facet_grid(animal ~ exp_title) +
+  xlim(c(0, 0.5))
 ```
 Deconv values in the detected cells, one datapoint per cell per trial
 ```{r}
 cell.trial.activity.df %>%
   ggplot() +
   geom_histogram(aes(x=deconv.mean)) +
-  facet_grid(animal ~ exp_title)
+  facet_grid(animal ~ exp_title) +
+  xlim(c(0,0.5))
 ```
 
 # Cell activity across days and trials
@@ -117,10 +122,6 @@ expand.cell_ids = function(df, join.cols) {
     expanded.cols.list[[col]] = unique(df[[col]])  
   }
   expanded.cell.day = expand.grid(expanded.cols.list)
-  #expanded.cell.day = expand.grid(animal=unique(df$animal),
-  #                                date=unique(df$date),
-  #                                exp_title=unique(df$exp_title),
-  #                                cell_id=unique(df$cell_id))
   
   expanded.cell.day = expanded.cell.day %>%
     mutate(animal_cell_id = paste(animal, cell_id, sep='_')) %>%
@@ -252,18 +253,19 @@ active.day.df %>%
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))  +
   ylab('Cells active (%)') +
-  xlab('')
+  xlab('') +
+  ylim(c(0,70))
   
 ```
 
 
 Proportion of the same cells active between days
 ```{r}
-
 days = unique(active.day.df$date) %>% as.Date
 fst.learning.day = as.Date('2019-08-30')
 habituation.days = days[which(days < fst.learning.day)]
 learning.days = days[which(days >= fst.learning.day)]
+ndays = length(learning.days)
 
 day.comb = combn(1:length(learning.days), 2)
 
@@ -286,20 +288,57 @@ for (i in 1:ncol(day.comb)) {
       cell.overlap.df = bind_rows(cell.overlap.df, new.row)
   }
 }
-
 ```
-Plot
+
 ```{r}
 summary.cell.overlap = cell.overlap.df %>%
   group_by(animal, days.diff) %>%
   dplyr::summarise(overlap.mean = mean(overlap),
                    overlap.sem = sem(overlap))
 
-ggplot() +
-  geom_line(data=summary.cell.overlap, aes(x=days.diff, y=overlap, group=animal, color=animal)) +
-  geom_point(data=cell.overlap.df, aes(x=days.diff, y=overlap)) +
+ggplot(data=summary.cell.overlap) +
+  geom_line(aes(x=days.diff, y=overlap.mean, group=animal, color=animal)) +
+  geom_ribbon(aes(x=days.diff, ymin=overlap.mean - overlap.sem, 
+                  ymax=overlap.mean + overlap.sem, group=animal, fill=animal), alpha=0.2) +
+  #geom_point(data=cell.overlap.df, aes(x=days.diff, y=overlap, color=animal)) +
   gtheme +
   ylab('Cell overlap (%)') +
-  xlab('Days apart')
+  xlab('Days apart') +
+  scale_x_continuous(breaks=1:ndays, limits=c(1,ndays-1)) +
+  ylim(c(0, 70))
+```
+
+Total days a cell active
+```{r}
+
+active.day.df %>%
+  filter(cell.active, exp_title=='trial', date >= fst.learning.day) %>%
+  group_by(animal, cell_id) %>%
+  dplyr::summarise(ndays = n()) %>%
+  arrange(desc(ndays)) %>%
+  ggplot() +
+  #geom_histogram(aes(x=ndays, y=..count../sum(..count..), color=animal, group=animal), bins=10) +
+  geom_freqpoly(aes(x=ndays, y=..count../sum(..count..) * 100, color=animal, group=animal), bins=ndays) +
+  scale_x_continuous(breaks=1:ndays, limits=c(1,ndays)) +
+  ylab('Cells (%)') +
+  xlab('Days active')
+```
+
+Number of consecutive days
+```{r}
+source('utils.R')
+
+active.day.df$date = as.Date(active.day.df$date)
+ncons.days.df = active.day.df %>%
+  filter(exp_title=='trial', cell.active, date >= fst.learning.day) %>%
+  ddply(.(animal, cell_id), summarise, ncons=max.consecutive.days(date))
+
+ggplot(ncons.days.df) +
+  geom_freqpoly(aes(x=ncons, y=..count../sum(..count..) * 100, color=animal, group=animal), bins=ndays) +
+  scale_x_continuous(breaks=1:ndays, limits=c(1,ndays)) +
+  ylab('Cells (%)') +
+  xlab('Consecutive days active')
+  
+  
 ```
 

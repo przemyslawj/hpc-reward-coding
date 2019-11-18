@@ -1,0 +1,308 @@
+  ---
+title: "Analysis of place field stability across days and sessions"
+output: html_notebook
+---
+
+
+```{r}
+library(dplyr)
+library(plyr)
+library(pracma)
+library(readr)
+library(tidyr)
+library(tibble)
+library(stringr)
+library(DT)
+library(data.table)
+#library(doParallel)
+#library(foreach)
+library(tictoc)
+
+library(ggplot2)
+library(cowplot)
+gtheme = theme_minimal() + theme_cowplot() +
+  theme(text = element_text(size=18), axis.text = element_text(size=15))
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+
+Rcpp::sourceCpp('place_field.cpp')
+
+```
+
+
+```{r}
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+
+list.subdir = function(subdir) {
+  learning_datestr = list.files(subdir)
+  sapply(learning_datestr, FUN=function(x) {paste(subdir, x, sep='/')}) %>% unname
+}
+
+get.subject.result.dirs = function(root_dir, subject) {
+  dated_dirs = c(list.subdir(paste(root_dir, 'habituation', sep='/')),
+                 list.subdir(paste(root_dir, 'learning', sep='/')))
+  sapply(dated_dirs, FUN=function(x) {paste0(x, '/caiman/', subject, '/filtered/')})
+}
+
+caimg_result_dirs = c(
+  get.subject.result.dirs(root_dir, 'E-BL'),
+  get.subject.result.dirs(root_dir, 'E-TR'),
+  get.subject.result.dirs(root_dir, 'F-BL'),
+  get.subject.result.dirs(root_dir, 'F-TL')
+)
+
+
+caimg_result_dirs = Filter(
+  function(ca_img_dir) {file.exists(paste(ca_img_dir, 'traces_and_positions.csv', sep='/'))},
+  caimg_result_dirs)
+
+gen_imgs_dir = '/tmp/pf_stability/'
+```
+
+Create shuffles
+```{r}
+shift.trace = function(trace, min.shuffle=20 * 20) {
+  nframes = length(trace)
+  shift_i = runif(1, min=min.shuffle, max=nframes-1) %>% floor
+  shifted.trace = c(trace[shift_i:nframes], trace[1:(shift_i - 1)])
+  
+  return(shifted.trace)
+}
+```
+
+
+```{r}
+source('place_field.R')
+
+calc.spatial.info = function(data.traces, plot.dir='/tmp/pf_stability/', 
+                             generate.plots=FALSE, nshuffles=0) {
+  frame.hz = 20
+  data.traces = data.table(data.traces)
+  cells = unique(data.traces$cell_id) %>% sort
+  pci.df = data.frame()
+  fields = list()
+  occupancies = list()
+  #cl = makeCluster(3)
+  #registerDoParallel(cl)
+  #foreach::getDoParRegistered()
+  #foreach (cell_name = cells) %dopar% {
+  for (cell_name in cells) {
+    cell.df = data.traces[cell_id == cell_name & smooth_trans_x >= 0 & smooth_trans_y >= 0,]
+    cell.events = cell.df[nevents > 0,]
+    trace.col = 'deconv_trace'
+ 
+    pf = with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, deconv_trace))
+    
+    spatial.infos = rep(0, nshuffles)
+    for (shuffle_i in 1:nshuffles) {
+      shuffled.trace = shift.trace(cell.df$deconv_trace)
+      shuffled.pf = with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, shuffled.trace))
+      spatial.infos[shuffle_i] = shuffled.pf$spatial.information
+    }
+    signif.thresh = quantile(spatial.infos, 0.95)[[1]]
+    si.signif = pf$spatial.information >= signif.thresh
+
+    fields[[format(cell_name)]] = pf$field
+    occupancies[[format(cell_name)]] = pf$occupancy
+
+    pci.df = bind_rows(pci.df, data.frame(cell_id=cell_name,
+                                          spatial.information=pf$spatial.information,
+                                          signif.thresh=signif.thresh,
+                                          signif.si=si.signif,
+                                          field.centre.x=pf$field.centre[1],
+                                          field.centre.y=pf$field.centre[2],
+                                          field.size=pf$field.size,
+                                          spatial.information.perspike=pf$spatial.information.perspike,
+                                          #entropy=pf$entropy,
+                                          nevents=nrow(cell.events)))
+
+    cell_event_rate = nrow(cell.events) / nrow(cell.df) * frame.hz
+    trace.quantiles = quantile(cell.df[, ..trace.col][[1]], probs=c(0.2, 0.9))
+
+    if (generate.plots) {
+      g.placefield = plot.pf(pf$field, pf$occupancy, min.zscore = trace.quantiles[[1]], trace.quantiles[[2]]) +
+        labs(title=paste0('Cell ', cell_name, ' MER = ', format(cell_event_rate, digits=2), ' Hz',
+                          '\nSI = ', format(pf$spatial.information, digits=2),
+                          ifelse(si.signif, '*', ''),
+                          ' SI per spike = ', format(pf$spatial.information.perspike, digits=2)),
+             fill='Deconv trace') +
+        theme(text = element_text(size=4),
+              plot.title = element_text(size=4))
+  
+      dir.create(plot.dir, recursive=TRUE)
+      ggsave(paste0(plot.dir, 'place_field_cell_', cell_name, '.jpg'), g.placefield,
+             width=3.5, height=3.0, units='cm', dpi=300)
+    }
+  }
+
+  #stopCluster(cl)
+  return(list(df=pci.df, field=fields, occupancy=occupancies))
+}
+```
+
+
+```{r}
+source('trace_utils.R')
+
+#caimg_result_dirs = caimg_result_dirs[1:5]
+run.threshold = 2
+  
+all.trials.si = data.frame()
+run.trials.si = data.frame()
+odd.trials.si = data.frame()
+even.trials.si = data.frame()
+early.trials.si = data.frame()
+late.trials.si = data.frame()
+
+all.fields = list()
+all.occupancies = list()
+run.fields = list()
+run.occupancies = list()
+odd.fields = list()
+odd.occupancies = list()
+even.fields = list()
+even.occupancies = list()
+early.fields = list()
+early.occupancies = list()
+late.fields = list()
+late.occupancies = list()
+
+add.meta.cols = function(df, animal, date) {
+  df$animal = as.factor(rep(animal, nrow(df)))
+  df$date = as.factor(rep(date, nrow(df)))
+  return(df)
+}
+
+for (ca_img_result_dir in caimg_result_dirs) {
+  print(paste('Processing dir: ', ca_img_result_dir))
+  cellmapping_file = paste0(ca_img_result_dir, 'cell_mapping.csv')
+  cellmapping.df = read.csv(cellmapping_file)
+  traces_file = paste0(ca_img_result_dir, 'traces_and_positions.csv')
+  data = fread(traces_file)
+  data = data[exp_title == 'trial',]
+  data.traces = melt.traces(data)
+  data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
+  dir_parts = str_split(ca_img_result_dir, '/')
+  animal = dir_parts[[1]][length(dir_parts[[1]]) - 2]
+  data.traces$animal = rep(animal, nrow(data.traces))
+  date = data.traces$date[1]
+  data.traces = data.table(data.traces)
+  data.traces.run = data.traces[velocity >= run.threshold,]
+  
+  print('Analysing spatial information')
+  plot.dir.prefix = paste(gen_imgs_dir, animal, format(date), sep='/')
+  
+  tic("spatial info on all trials")
+  all.spatial = calc.spatial.info(data.traces,
+                                  plot.dir=paste0(plot.dir.prefix, '/all/'),
+                                  generate.plots=TRUE,
+                                  nshuffles=1000)
+  all.trials.si = bind_rows(all.trials.si, add.meta.cols(all.spatial$df, animal, date))
+  all.fields[[animal]][[format(date)]] = all.spatial$field
+  all.occupancies[[animal]][[format(date)]] = all.spatial$occupancy
+  toc()
+  
+  tic("spatial info on all trials running")
+  run.spatial = calc.spatial.info(data.traces.run,
+                                  plot.dir=paste0(plot.dir.prefix, '/run/'),
+                                  generate.plots=TRUE,
+                                  nshuffles=1000)
+  run.trials.si = bind_rows(run.trials.si, add.meta.cols(run.spatial$df, animal, date))
+  run.fields[[animal]][[format(date)]] = run.spatial$field
+  run.occupancies[[animal]][[format(date)]] = run.spatial$occupancy
+  toc()
+
+  # Odd vs Even
+  tic("spatial info on odd trials")
+  odd.spatial = calc.spatial.info(data.traces.run[trial %% 2 == 1,],
+                                  paste0(plot.dir.prefix, '/odd/'))
+  odd.trials.si = bind_rows(odd.trials.si, add.meta.cols(odd.spatial$df, animal, date))
+  odd.fields[[animal]][[format(date)]] = odd.spatial$field
+  odd.occupancies[[animal]][[format(date)]] = odd.spatial$occupancy
+  toc()
+
+  tic("spatial info on even trials")
+  even.spatial = calc.spatial.info(data.traces.run[trial %% 2 == 0,],
+                                   paste0(plot.dir.prefix, '/even/'))
+  even.trials.si = bind_rows(even.trials.si, add.meta.cols(even.spatial$df, animal, date))
+  even.fields[[animal]][[format(date)]] = even.spatial$field
+  even.occupancies[[animal]][[format(date)]] = even.spatial$occupancy
+  toc()
+
+  # Early vs late
+  half.trial = ceiling(max(data.traces$trial) / 2)
+  tic("spatial info on early trials")
+  early.spatial = calc.spatial.info(data.traces.run[trial <= half.trial,],
+                                    paste0(plot.dir.prefix, '/early/'))
+  early.trials.si = bind_rows(early.trials.si, add.meta.cols(early.spatial$df, animal, date))
+  early.fields[[animal]][[format(date)]] = early.spatial$field
+  early.occupancies[[animal]][[format(date)]] = early.spatial$occupancy
+  toc()
+
+  tic("spatial info on late trials")
+  late.spatial = calc.spatial.info(data.traces.run[trial > half.trial, ],
+                                   paste0(plot.dir.prefix, '/late/'))
+  late.trials.si = bind_rows(late.trials.si, add.meta.cols(late.spatial$df, animal, date))
+  late.fields[[animal]][[format(date)]] = late.spatial$field
+  late.occupancies[[animal]][[format(date)]] = late.spatial$occupancy
+  toc()
+}
+
+```
+# Find place cells
+
+How many cells per day per mouse
+```{r}
+si.thresh = 0.25
+all.trials.si$date = as.factor(all.trials.si$date)
+all.trials.si %>%
+  mutate(is.place.cell = signif.si & spatial.information >= si.thresh) %>%
+  group_by(date, animal) %>%
+  dplyr::summarise(pc.pct = sum(is.place.cell) / n() * 100) %>%
+  ggplot() +
+  geom_line(aes(x=date, y=pc.pct, group=animal, color=animal)) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab('Date') + 
+  ylab('Place cells (%)')
+```
+
+
+Dist of spatial information in deconv traces
+```{r}
+ggplot(all.trials.si) +
+  geom_histogram(aes(x=spatial.information)) +
+  xlab('Spatial information (bits/s)')
+  gtheme
+```
+
+Odd vs even
+```{r}
+bind_rows(odd.trials.si, even.trials.si) %>%
+  group_by(date, animal, cell_id) %>%
+  dplyr::summarise(si.change=diff(spatial.information)) -> pf.diff.df
+
+ggplot(pf.diff.df) +
+  geom_violin(aes(x=animal, y=si.change)) +
+  gtheme +
+  ylab('Spatial information diff (bits/s)')
+```
+First half vs second half
+```{r}
+bind_rows(early.trials.si, late.trials.si) %>%
+  group_by(date, animal, cell_id) %>%
+  dplyr::summarise(si.change=diff(spatial.information)) -> pf.diff.df
+
+ggplot(pf.diff.df) +
+  geom_violin(aes(x=animal, y=si.change)) +
+  gtheme +
+  ylab('Spatial information diff (bits/s)')
+```
+
+
+# Compare spatial.information between days
+```{r}
+
+```
+

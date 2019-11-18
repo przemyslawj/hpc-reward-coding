@@ -1,8 +1,14 @@
+library(data.table)
+library(foreach)
+
+
 zscore = function(trace) {
   x = trace - mean(trace)
   sd_est = IQR(x) / 1.349
   return(x / sd_est)
 }
+
+sem = function(x) sqrt( var(x, na.rm=TRUE) / length(x))
 
 zscore.traces = function(data) {
   ddply(data, .(animal, date, trial_id, cell), plyr::mutate,
@@ -15,6 +21,19 @@ zscore.traces = function(data) {
         nevents = nevents,
         trace = trace,
         ztrace=zscore(trace))
+}
+
+# Fast implementation of melting with data.tables
+melt.traces = function(data) {
+  trace.measure.vars = colnames(data)[stringr::str_starts(colnames(data), 'trace_')]
+  events.measure.vars = colnames(data)[stringr::str_starts(colnames(data), 'events_')]
+  deconv.measure.vars = colnames(data)[stringr::str_starts(colnames(data), 'deconvTrace_')]
+  melted.df = melt(data, 
+       measure = list(trace.measure.vars, events.measure.vars, deconv.measure.vars), 
+       value.name = c('trace', 'nevents', 'deconv_trace'))
+  
+  melted.df = melted.df[, ('cell') := variable %>% trimws %>% as.integer][order(date,trial_id,cell,timestamp), !'variable']
+  return(melted.df)
 }
 
 gather.traces = function(data) {

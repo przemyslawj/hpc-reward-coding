@@ -44,7 +44,8 @@ data = gather.traces(data)
 ```
 
 ```{r}
-data = zscore.traces(data)
+data = zscore.traces(data) %>%
+  filter(exp_title=='trial')
 ```
 
 ```{r}
@@ -142,14 +143,11 @@ get_place_field_centre = function(events.df) {
   return(c(x, y))
 }
 
-get_dist = function(pt1, pt2_x, pt2_y) {
-  dist = sqrt((pt1[1] - pt2_x)^2 + (pt1[2] - pt2_y)^2)
-}
 ```
 
 ```{r warning=FALSE}
 source('place_field.R')
-cells = unique(data$cell) %>% sort
+cells = unique(data$cell_id) %>% sort
 pci.df = data.frame(cell_id=numeric(), day=character(), pci=numeric())
 
 standard.distance = function(pt_centre, x, y) {
@@ -162,41 +160,52 @@ standard.distance = function(pt_centre, x, y) {
 
 days = seq(first_learning_day, last_day, by=1)
 for (i in 1:length(days)) {
-  for (cell_id in cells) {
+  for (cell_name in cells) {
     day.str = as.character(days[i])
-    cell.df = filter(data, cell == cell_id, date == day.str) 
+    cell.df = filter(data, cell_id == cell_name, date == day.str) 
     cell.df$trial = as.factor(cell.df$trial)
     cell.events = filter(cell.df, nevents > 0) 
-    field_centre = get_place_field_centre(cell.events)
-    if (nrow(cell.events) > 5) {
+    if (nrow(cell.events) > 0) {
       cell.df.run = filter(cell.df, velocity >= run.threshold)
-      pf = getPlaceField(cell.df.run)
-      pci = pf$pci
+      trace.col = 'deconv_trace'
+      pf = getPlaceField(cell.df.run, trace.col)
+      trace.pf = getPlaceField(cell.df.run, 'trace')
       entropy = pf$entropy
+      
+      field_centre = get_place_field_centre(cell.events)
       cell.events = mutate(cell.events, sd.dist = standard.distance(field_centre, smooth_trans_x, smooth_trans_y))
+      
       pci.df = bind_rows(pci.df, data.frame(cell_id=cell_id, day=day.str, 
-                                            pci=pci, entropy=entropy,
+                                            spatial.information=pf$spatial.information,
+                                            spatial.information.trace=trace.pf$spatial.information,
+                                            spatial.information.trace.perspike=trace.pf$spatial.information.perspike,
+                                            spatial.information.perspike=pf$spatial.information.perspike,
+                                            entropy=entropy,
                                             nevents=nrow(cell.events),
                                             event_spread=cell.events$sd.dist[1],
                                             field_centre.x=field_centre[1],
                                             field_centre.y=field_centre[2]))
       
       cell_event_rate = nrow(cell.events) / nrow(cell.df) * frame.hz
-      zscore.quantiles = quantile(cell.df.run$ztrace, probs=c(0.2, 0.9))
-      g.placefield = plot.pf(pf$field, pf$occupancy, min.zscore = zscore.quantiles[[1]], zscore.quantiles[[2]]) + 
-        labs(title=paste0('Cell ', cell_id, ' MER = ', format(cell_event_rate, digits=2), ' Hz'),
-             fill='Mean zscored\ndF/F') +
+      trace.quantiles = quantile(cell.df.run[, trace.col], probs=c(0.2, 0.9))
+      g.placefield = plot.pf(pf$field, pf$occupancy, min.zscore = trace.quantiles[[1]], trace.quantiles[[2]]) + 
+        labs(title=paste0('Cell ', cell_id, ' MER = ', format(cell_event_rate, digits=2), ' Hz',
+                          '\nSI = ', format(pf$spatial.information, digits=2),
+                          ' SI per spike = ', format(pf$spatial.information.perspike, digits=2)),
+             fill='Deconv trace') +
         theme(text = element_text(size=4),
-              plot.title = element_text(size = 6))
-      ggsave(paste0(gen_imgs_dir, 'place_field_cell_', cell_id, '.jpg'), g.placefield,
+              plot.title = element_text(size=4))
+      ggsave(paste0(gen_imgs_dir, 'place_field_cell_', cell_name, '.jpg'), g.placefield,
              width=4.0, height=3.5, units='cm')
     }
   }
 }
 
-pci.df = arrange(pci.df, desc(pci))
+pci.df = arrange(pci.df, desc(spatial.information))
 datatable(pci.df) %>% 
-  formatRound(c('pci', 'entropy', 'event_spread'),digits = 2) %>%
+  formatRound(c('spatial.information', 'spatial.information.perspike', 
+                'spatial.information.trace', 'spatial.information.trace.perspike',
+                'entropy', 'event_spread'),digits = 2) %>%
   formatRound(c('field_centre.x', 'field_centre.y'),digits = 0)
 ```
 
@@ -239,7 +248,7 @@ for (cell_id in unique(data$cell)) {
 
 ```{r}
 pci.df = mutate(pci.df, cell_desc=paste0('Cell ', cell_id, 
-                                        ' PCI=', round(pci,1), 
+                                        ' SI=', round(spatial.information,1), 
                                         ' sd dist.=', round(event_spread, 1), ' (cm)'))
 
 
@@ -444,7 +453,6 @@ aligned.data.df = filter(data, is_test == FALSE) %>%
 ```{r}
 #day.str = '2019-03-08'
 day.str = '2019-03-20'
-cell_id = 3
 cell_id = 3
 day.df = filter(aligned.data.df, cell == cell_id, date == day.str)
 
@@ -721,21 +729,33 @@ g
 ```
 
 ```{r}
-day.str = '2019-03-08'
-trial.df = filter(data, cell %in% cells.selected, date==day.str)
+day.str = '2019-08-28'
+cells.selected = c(3,4)
+trial.df = filter(data, cell %in% cells.selected, date==day.str, exp_title == 'trial')
 trial.df$cell_name=as.factor(trial.df$cell) %>% as.integer
 trial.events.df = filter(trial.df, nevents > 0)
 g = ggplot(trial.df) +
-  geom_line(aes(x=timestamp/1000, y=norm_trace, group=1)) +
-  geom_point(data=trial.events.df, aes(x=timestamp/1000, y=norm_trace + 1), shape=8, colour='red') +
-  facet_grid(cell_name ~ .) +
+  geom_line(aes(x=timestamp/1000, y=trace, group=1)) +
+  geom_point(data=trial.events.df, aes(x=timestamp/1000, y=trace + 10), shape=8, colour='red') +
+  facet_grid(cell_name ~ trial_id) +
   gtheme +
   xlab('Time (sec)') +
-  ylab('z-scored dF/F') 
+  ylab('z-scored dF/F') +
+  xlim(c(0,20))
 
-ggsave(paste0(gen_imgs_dir, 'traces.svg'), g)
+#ggsave(paste0(gen_imgs_dir, 'traces.svg'), g)
 g
 
+```
+```{r}
+ggplot(trial.df) +
+  geom_line(aes(x=timestamp/1000, y=deconv_trace, group=1)) +
+  geom_point(data=trial.events.df, aes(x=timestamp/1000, y=deconv_trace + 1), shape=8, colour='red') +
+  facet_grid(cell_name ~ trial_id) +
+  gtheme +
+  xlab('Time (sec)') +
+  ylab('z-scored dF/F') +
+  xlim(c(0,20))
 ```
 
 
