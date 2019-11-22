@@ -80,7 +80,7 @@ create.pf.df = function(M, occupancyM, min.zscore=0, max.zscore=2, min.occupancy
   min.occupancy = min.occupancy.sec * frame.rate
   min.smoothed.occupancy = min.occupancy * 1/(2*pi*sigma^2)
   smoothedOccupancy = gauss2dsmooth(occupancyM,lambda=sigma, nx=11, ny=11)
-  mid.pt = median(1:max.y)
+  mid.pt = mean(1:max.y)
   df_org = reshape2::melt(smoothedOccupancy) %>%
     filter(value >= min.smoothed.occupancy) %>%
     filter(norm2(Var1 - mid.pt, Var2 - mid.pt) <= mid.pt)

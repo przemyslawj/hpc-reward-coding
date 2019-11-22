@@ -1,0 +1,129 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup} 
+library(dplyr)
+library(plyr)
+library(pracma)
+library(readr)
+library(tidyr)
+library(tibble)
+library(stringr)
+library(DT)
+library(data.table)
+
+
+library(ggplot2)
+library(cowplot)
+gtheme = theme_minimal() + theme_cowplot() +
+  theme(text = element_text(size=18), axis.text = element_text(size=15))
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+
+source('place_field.R')
+source('trace_utils.R')
+Rcpp::sourceCpp('place_field.cpp')
+```
+
+```{r}
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+day = '2019-09-07'
+exp_title = 'learning'
+animal_name = 'E-BL'
+ca_img_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered')
+
+cellmapping_file = file.path(ca_img_result_dir, 'cell_mapping.csv')
+cellmapping.df = read.csv(cellmapping_file)
+traces_file = file.path(ca_img_result_dir, 'traces_and_positions.csv')
+data = fread(traces_file)
+data = data[exp_title == 'trial',]
+data.traces = melt.traces(data)
+data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
+data.traces = data.table(data.traces)
+```
+
+
+```{r}
+cell_name = 355
+
+cell.df = data.traces[cell_id == cell_name & smooth_trans_x >= 0 & smooth_trans_y >= 0,]
+cell.events = cell.df[nevents > 0,]
+trace.col = 'deconv_trace'
+frame.hz = 20
+nshuffles = 100
+pf = with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, deconv_trace, nshuffles, frame.hz/2))
+
+trial.df = cell.df
+```
+
+```{r}
+run.threshold=2
+field.x = pf$field.centre[1]
+field.y = pf$field.centre[2]
+trial.df = trial.df %>%
+  mutate(peak.dist = norm2(smooth_trans_x - field.x, smooth_trans_y - field.y),
+         min.rew.dist = pmin(dist_reward0, dist_reward1))
+
+fst.arrived.timestamp = function(dist, velocity, timestamps, max.velocity=100) {
+  min.dist.thr = 8
+  i = which(velocity <= max.velocity & dist <= min.dist.thr)
+  if (length(i) == 0) {
+    i = which.min(dist)
+  } else {
+    i = i[[1]]
+  }
+  return(timestamps[i])
+}
+
+arrived.peak.df = trial.df %>%
+  ddply(.(date, animal, cell_id, trial), summarize, 
+        arrived.timestamp = fst.arrived.timestamp(peak.dist, velocity, timestamp)) %>%
+  select(date, animal, cell_id, trial, arrived.timestamp)
+
+arrived.rew0.df = trial.df %>%
+  ddply(.(date, animal, cell_id, trial), summarize, 
+        arrived.timestamp = fst.arrived.timestamp(dist_reward0, velocity, timestamp)) %>%
+  select(date, animal, cell_id, trial, arrived.timestamp)
+
+centered.trial.df = left_join(trial.df, 
+                              arrived.rew0.df, 
+                              by=c('date', 'animal', 'cell_id', 'trial')) %>%
+  mutate(centered.timestamp = timestamp - arrived.timestamp) %>%
+  filter(centered.timestamp >= -10 * 1000, centered.timestamp <= 5 * 1000)
+
+trial_no = c(1,2,6)
+g.trace = centered.trial.df %>%
+  filter(trial %in% trial_no) %>%
+  ggplot() +
+  geom_line(aes(x=centered.timestamp/1000, y=trace, group=trial), color='grey20') + 
+  geom_line(aes(x=centered.timestamp/1000, y=deconv_trace, group=trial)) + 
+  facet_grid(trial ~ ., scales = 'free_y') +
+  xlab('') +
+  gtheme
+
+g.dist = centered.trial.df %>%
+  filter(trial %in% trial_no) %>%
+  ggplot() +
+  #geom_line(aes(x=centered.timestamp/1000, y=peak.dist, group=trial)) +
+  geom_line(aes(x=centered.timestamp/1000, y=min.rew.dist, group=trial), col='red') +
+  geom_hline(yintercept = 0, linetype='dashed') +
+  facet_grid(trial ~ .) +
+  xlab('Time (s)') +
+  gtheme
+
+plot_grid(g.trace, g.dist, ncol=1)
+```
+```{r}
+
+jet.colours = colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
+
+centered.trial.df$trial = as.factor(centered.trial.df$trial)
+centered.trial.df %>%
+  ggplot(aes(x=centered.timestamp, y=trial)) +
+  geom_tile(aes(fill=trace), width=100) +
+  scale_fill_gradientn(colours=jet.colours(7))
+```
+

@@ -36,7 +36,7 @@ geom_rewards = function(rewards.df, subject, day=NULL) {
   }
   rew.col = 'gold'
   rew.shape = 0
-  rew.size = 5
+  rew.size = 3
   geom_point(data=dayreward.df, aes(x=trans_x / 3, y=(100 - trans_y) / 3), 
              shape=rew.shape,
              color=rew.col, 
@@ -156,9 +156,10 @@ run.trials.si %>%
   distinct() -> tmp.df
 
 for (i in 1:nrow(tmp.df)) {
-  save.field.comparison(tmp.df$animal[i],
-                        tmp.df$date[i],
-                        tmp.df$cell_id[i])
+   tryCatch({save.field.comparison(tmp.df$animal[i],
+                                   tmp.df$date[i],
+                                   tmp.df$cell_id[i])},
+  error=function(e){cat("ERROR for row i=", num2str(i), ":",conditionMessage(e), "\n")})
 }
 ```
 

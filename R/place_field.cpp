@@ -133,6 +133,7 @@ SEXP getCppPlaceField(NumericVector& x,
   std::fill(field.begin(), field.end(), NAN_FIELD);
 
   NumericVector fieldCentre = NumericVector(2);
+  NumericVector fieldMaxXY = NumericVector(2);
   NumericVector shuffleSI = NumericVector(nshuffles);
 
   List result;
@@ -144,6 +145,7 @@ SEXP getCppPlaceField(NumericVector& x,
   result["field.centre"] = fieldCentre;
   result["field.size"] = 0;
   result["field.max"] = 0;
+  result["field.max.xy"] = fieldMaxXY;
   result["shuffle.si"]= shuffleSI;
   
   if (trace.size() == 0) {
@@ -160,7 +162,11 @@ SEXP getCppPlaceField(NumericVector& x,
     for (int xx = 0; xx < nXbins; ++xx) {
       if (occupancyMap(xx,yy) > 0) {
         field(xx,yy) = totalActivityMap(xx,yy) / occupancyMap(xx,yy);
-        maxField = std::max(field(xx,yy), maxField);
+        if (field(xx,yy) >= maxField) {
+          maxField = field(xx,yy);
+          fieldMaxXY[0] = xx * binSizeX;
+          fieldMaxXY[1] = yy * binSizeY;
+        }
       } else {
         field(xx,yy) = NAN_FIELD;
       }
@@ -211,6 +217,7 @@ SEXP getCppPlaceField(NumericVector& x,
   }
   for (int i = 0; i < nshuffles; ++i) {
     NumericVector shuffledTrace(trace.size());
+    // TODO: shuffle only within the trial?
     std::shuffle(std::begin(chunkShuffle), std::end(chunkShuffle), rng);
     int offset = std::rand() % ((int) shuffleChunkLength/2);
     for (int chunk = 0; chunk < nchunks; ++chunk) {
@@ -240,6 +247,7 @@ SEXP getCppPlaceField(NumericVector& x,
   result["field.centre"] = fieldCentre;
   result["field.size"] = ((double) nFieldBins) / (nXbins * nYbins) * 100.0;
   result["field.max"] = maxField;
+  result["field.max.xy"] = fieldMaxXY;
   result["shuffle.si"] = shuffleSI;
   return(result);
 }
