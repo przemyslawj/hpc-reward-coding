@@ -2,30 +2,41 @@ library(dplyr)
 
 is.date <- function(x) !is.na(as.Date(x, '%Y-%m-%d'))
 
+get.subdirs = function(path) {
+  subdirs = list.files(path, full.names=TRUE)
+  return(subdirs[file.info(subdirs)$isdir])
+}
+
 read_locations = function(root.data.dir) {
-  merged.df = data.frame()
-  cheeseboard.map = read.csv(paste0(root.data.dir, '/cheeseboard_map.csv')) %>%
+  cheeseboard.map = read.csv(file.path(root.data.dir, 'cheeseboard_map.csv')) %>%
     select(Row_X, Row_Y, trans_x, trans_y)
   
-  all_subfiles = list.files(root.data.dir, full.names=TRUE)
-  dated_subdirs = all_subfiles[file.info(all_subfiles)$isdir]
-  for (dated_dir in dated_subdirs) {
-    date_str = basename(dated_dir)
-    
-    is_test = FALSE
-    if (endsWith(date_str, '_test')) {
-      date_str = substring(date_str, 1, nchar(date_str) - nchar('_test'))
-      is_test = TRUE
-    }
-    if (is.date(date_str)) {
-      print(dated_dir)
-      fpath = paste0(dated_dir, '/locations.csv')
-      if (file.exists(fpath)) {
-        locations.df = read.csv(fpath, stringsAsFactors=TRUE)
-        locations.df$date = rep(date_str, nrow(locations.df))
-        locations.df$is_test = rep(is_test, nrow(locations.df))
-        locations.df.pos = left_join(locations.df, cheeseboard.map, by=c("Well_row"="Row_X", "Well_col"="Row_Y"))
-        merged.df = bind_rows(merged.df, locations.df.pos)
+  expdirs = get.subdirs(root.data.dir)
+  merged.df = data.frame()
+  for (expdir in expdirs) {
+    dated_subdirs = get.subdirs(expdir)
+  
+    for (dated_dir in dated_subdirs) {
+      date_str = basename(dated_dir)
+      
+      exp_titles = get.subdirs(dated_dir)
+      for (exp_titledir in exp_titles) {
+        is_test = FALSE
+        if (endsWith(exp_titledir, 'test')) {
+          #date_str = substring(date_str, 1, nchar(date_str) - nchar('_test'))
+          is_test = TRUE
+        }
+        if (is.date(date_str)) {
+          print(paste('Reading locations from: ', dated_dir))
+          fpath = file.path(exp_titledir, 'locations.csv')
+          if (file.exists(fpath)) {
+            locations.df = read.csv(fpath, stringsAsFactors=TRUE)
+            locations.df$date = rep(date_str, nrow(locations.df))
+            locations.df$is_test = rep(is_test, nrow(locations.df))
+            locations.df.pos = left_join(locations.df, cheeseboard.map, by=c("Well_row"="Row_X", "Well_col"="Row_Y"))
+            merged.df = bind_rows(merged.df, locations.df.pos)
+          }
+        }
       }
     }
   }

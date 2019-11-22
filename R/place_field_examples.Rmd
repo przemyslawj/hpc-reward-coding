@@ -1,0 +1,164 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r setup} 
+library(dplyr)
+library(plyr)
+library(pracma)
+library(readr)
+library(tidyr)
+library(tibble)
+library(stringr)
+library(DT)
+library(data.table)
+
+
+library(ggplot2)
+library(cowplot)
+gtheme = theme_minimal() + theme_cowplot() +
+  theme(text = element_text(size=18), axis.text = element_text(size=15))
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+source('place_field.R')
+```
+
+
+```{r}
+geom_rewards = function(rewards.df, subject, day=NULL) {
+  dayreward.df = filter(rewards.df,
+                        animal==subject)
+  if (!is.null(day)) {
+    dayreward.df = filter(dayreward.df, date==day)
+  }
+  rew.col = 'gold'
+  rew.shape = 0
+  rew.size = 5
+  geom_point(data=dayreward.df, aes(x=trans_x / 3, y=(100 - trans_y) / 3), 
+             shape=rew.shape,
+             color=rew.col, 
+             size=rew.size,
+             stroke=2,
+             alpha=0.8)
+}
+```
+
+```{r}
+
+f1 = odd.fields[[animal_name]][[day]][[paste(cell_name)]]
+oc1 = odd.occupancies[[animal_name]][[day]][[paste(cell_name)]]
+
+f2 = even.fields[[animal_name]][[day]][[paste(cell_name)]]
+oc2 = even.occupancies[[animal_name]][[day]][[paste(cell_name)]]
+odd.field = create.pf.df(f1, oc1)
+even.field = create.pf.df(f2, oc2)
+
+oddeven.cor = field.cor(odd.field, even.field, make.cor.plot=TRUE)
+cor.title = paste0('Odd vs Even cor=', format(oddeven.cor$cor, digits=2))
+oddeven.cor$g + labs(title=cor.title, fill='Correlation')
+
+```
+
+
+```{r}
+create.partial.df = function(fieldList, occupancyList, animal_name, day, cell_name,
+                             group_name, max.zscore) {
+  df = create.pf.df(fieldList[[animal_name]][[day]][[paste(cell_name)]],
+               occupancyList[[animal_name]][[day]][[paste(cell_name)]],
+               min.zscore=0,
+               max.zscore=max.zscore * 0.8)
+  df$group = group_name
+  return(df)
+}
+
+
+plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
+  
+  max.zscore = max(filter(odd.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max,
+                   filter(even.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max,
+                   filter(early.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max,
+                   filter(late.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max)
+  
+  odd.pf = create.partial.df(odd.fields, odd.occupancies, animal_name, day, cell_name, 'Odd', max.zscore)
+  even.pf = create.partial.df(even.fields, even.occupancies, animal_name, day, cell_name, 'Even', max.zscore)
+  early.pf = create.partial.df(early.fields, early.occupancies, animal_name, day, cell_name, 'Early', max.zscore)
+  late.pf = create.partial.df(late.fields, late.occupancies,  animal_name, day, cell_name, 'Late', max.zscore)
+  
+  cell.row = run.trials.si %>% filter(animal==animal_name, date==day, cell_id==cell_name)
+  
+  text.theme = theme(text = element_text(size=6),
+                     plot.title = element_text(size=6))
+  
+  g.placefield = bind_rows(odd.pf, even.pf, early.pf, late.pf) %>%
+    plot.pf() +
+    facet_wrap(. ~ group, ncol = 2) +
+    geom_rewards(rewards.df, animal_name, day) +
+    labs(title=paste0(animal_name,
+                      ', ', day,
+                      ', cell ', cell_name, 
+                      '\nSI = ', format(cell.row$spatial.information, digits=2), ' bits/s',
+                      ifelse(cell.row$signif.si, ' *', ''),
+                      ', ', format(cell.row$spatial.information.perspike, digits=2), ' bits/spike'),
+         fill='Deconv\ntrace') +
+    text.theme
+
+  
+  oddeven.cor = field.cor(odd.pf, even.pf, make.cor.plot=TRUE)
+  cor.title = paste0('cor=', format(oddeven.cor$cor, digits=2))
+  g.oddeven.cor = oddeven.cor$g + labs(title=cor.title, fill='') + text.theme
+  
+  earlylate.cor = field.cor(early.pf, late.pf, make.cor.plot=TRUE)
+  cor.title = paste0('cor=', format(earlylate.cor$cor, digits=2))
+  g.earlylate.cor = earlylate.cor$g + labs(title=cor.title, fill='') + text.theme +
+    theme(legend.position='none')
+  
+  g.cors = plot_grid(g.earlylate.cor, g.oddeven.cor, ncol=2, rel_widths=c(1, 1.7))
+  
+  g = plot_grid(g.placefield, g.cors, ncol=1, rel_heights=c(2,1))
+  if (!is.na(plot.dir)) {
+    if (cell.row$signif.si) {
+      plot.subdir = file.path(plot.dir, 'signif')
+    } else {
+      plot.subdir = file.path(plot.dir, 'other')
+    }
+    dir.create(plot.subdir, recursive=TRUE)
+    fname = paste0('place_field_cell_', cell_name, '.jpg')
+    ggsave(file.path(plot.subdir, fname), 
+           g,
+           width=5.5, height=8, units='cm', dpi=300)
+  }
+  return(g)
+}
+```
+
+
+```{r}
+animal_name = 'E-BL'
+day = '2019-08-27'
+cell_name = 0
+plot.dir = file.path('/tmp/pf_stability/', animal_name, day)
+plot.field.comparison(animal_name, day, cell_name, plot.dir=plot.dir) + 
+      theme(text = element_text(size=12), plot.title = element_text(size=12))
+```
+
+```{r}
+save.field.comparison = function(animal_name, day, cell_name) {
+  plot.dir = file.path('/mnt/DATA/Prez/cheeseboard-pf', animal_name, day)
+  plot.field.comparison(animal_name, day, cell_name, plot.dir)
+  return(1)
+}
+
+run.trials.si %>%
+  select(animal, date, cell_id) %>%
+  distinct() -> tmp.df
+
+for (i in 1:nrow(tmp.df)) {
+  save.field.comparison(tmp.df$animal[i],
+                        tmp.df$date[i],
+                        tmp.df$cell_id[i])
+}
+```
+

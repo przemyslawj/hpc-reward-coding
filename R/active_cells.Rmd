@@ -308,9 +308,8 @@ ggplot(data=summary.cell.overlap) +
   ylim(c(0, 70))
 ```
 
-Total days a cell active
+Total days a cell active during trial
 ```{r}
-
 active.day.df %>%
   filter(cell.active, exp_title=='trial', date >= fst.learning.day) %>%
   group_by(animal, cell_id) %>%
@@ -324,7 +323,7 @@ active.day.df %>%
   xlab('Days active')
 ```
 
-Number of consecutive days
+Number of consecutive days a cell active during trial
 ```{r}
 source('utils.R')
 
