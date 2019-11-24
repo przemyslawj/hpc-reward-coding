@@ -41,9 +41,21 @@ read_locations = function(root.data.dir) {
     }
   }
  
+  if (nrow(merged.df) == 0) {
+    return(merged.df)
+  }
   
   merged.df$Animal = as.factor(merged.df$Animal)
+  
+  return(add_location_set(merged.df))
+}
+  
+add_location_set = function(merged.df) {
   result.df = data.frame()
+  
+  if (nrow(merged.df) == 0) {
+    return(merged.df)
+  }
   
   # Add location_set column 
   merged.df$location_set = rep(0, nrow(merged.df))
@@ -51,6 +63,7 @@ read_locations = function(root.data.dir) {
     animal.locations = filter(merged.df, Animal == animal) %>% 
       arrange(date, desc(is_test))
     location_set = 0
+    animal_locs = c()
     prev_locs = c()
     prev_date = '0000-00-00'
     for (i in 1:nrow(animal.locations)) {
@@ -64,13 +77,23 @@ read_locations = function(root.data.dir) {
           prev_date = animal.locations$date[i]
         }
       }
+      if (!loc %in% animal_locs) {
+        animal_locs = append(animal_locs, loc)
+      }
+      
       animal.locations$location_set[i] = location_set
+      animal.locations$location_ordinal[i] = which(loc == animal_locs)
       
     }
     
     result.df = bind_rows(result.df, animal.locations)
   }
   
+  # Make location set consistent in one day: if one reward changed then update
+  # the location set for all rewards
+  result.df = ddply(result.df, .(Animal, date, is_test), mutate,
+                    location_set = max(location_set)) %>%
+    arrange(Animal, date, desc(is_test))
   return(result.df)
 }
 

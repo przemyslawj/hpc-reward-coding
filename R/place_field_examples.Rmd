@@ -26,6 +26,14 @@ summarize = dplyr::summarize
 source('place_field.R')
 ```
 
+Setup example variables
+```{r}
+animal_name = 'F-BL'
+day = '2019-09-02'
+cell_name = 256
+```
+
+
 
 ```{r}
 geom_rewards = function(rewards.df, subject, day=NULL) {
@@ -34,9 +42,10 @@ geom_rewards = function(rewards.df, subject, day=NULL) {
   if (!is.null(day)) {
     dayreward.df = filter(dayreward.df, date==day)
   }
-  rew.col = 'gold'
-  rew.shape = 0
-  rew.size = 3
+  rew.col = 'black'
+  #rew.shape = 0
+  rew.shape = 2
+  rew.size = 2
   geom_point(data=dayreward.df, aes(x=trans_x / 3, y=(100 - trans_y) / 3), 
              shape=rew.shape,
              color=rew.col, 
@@ -87,7 +96,7 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
   early.pf = create.partial.df(early.fields, early.occupancies, animal_name, day, cell_name, 'Early', max.zscore)
   late.pf = create.partial.df(late.fields, late.occupancies,  animal_name, day, cell_name, 'Late', max.zscore)
   
-  cell.row = run.trials.si %>% filter(animal==animal_name, date==day, cell_id==cell_name)
+  cell.row = run.trials.pc %>% filter(animal==animal_name, date==day, cell_id==cell_name)
   
   text.theme = theme(text = element_text(size=6),
                      plot.title = element_text(size=6))
@@ -108,18 +117,22 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
   
   oddeven.cor = field.cor(odd.pf, even.pf, make.cor.plot=TRUE)
   cor.title = paste0('cor=', format(oddeven.cor$cor, digits=2))
-  g.oddeven.cor = oddeven.cor$g + labs(title=cor.title, fill='') + text.theme
+  g.oddeven.cor = oddeven.cor$g + labs(title=cor.title, fill='') + 
+    geom_rewards(rewards.df, animal_name, day) + text.theme
   
   earlylate.cor = field.cor(early.pf, late.pf, make.cor.plot=TRUE)
   cor.title = paste0('cor=', format(earlylate.cor$cor, digits=2))
-  g.earlylate.cor = earlylate.cor$g + labs(title=cor.title, fill='') + text.theme +
+  g.earlylate.cor = earlylate.cor$g + labs(title=cor.title, fill='') + 
+    geom_rewards(rewards.df, animal_name, day) + text.theme +
     theme(legend.position='none')
   
   g.cors = plot_grid(g.earlylate.cor, g.oddeven.cor, ncol=2, rel_widths=c(1, 1.7))
   
   g = plot_grid(g.placefield, g.cors, ncol=1, rel_heights=c(2,1))
   if (!is.na(plot.dir)) {
-    if (cell.row$signif.si) {
+    if (cell.row$is.place.cell) {
+      plot.subdir = file.path(plot.dir, 'place_cell')
+    } else if (cell.row$is.place.cell) {
       plot.subdir = file.path(plot.dir, 'signif')
     } else {
       plot.subdir = file.path(plot.dir, 'other')
@@ -136,9 +149,6 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
 
 
 ```{r}
-animal_name = 'E-BL'
-day = '2019-08-27'
-cell_name = 0
 plot.dir = file.path('/tmp/pf_stability/', animal_name, day)
 plot.field.comparison(animal_name, day, cell_name, plot.dir=plot.dir) + 
       theme(text = element_text(size=12), plot.title = element_text(size=12))
