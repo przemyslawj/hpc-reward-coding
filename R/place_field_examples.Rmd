@@ -203,6 +203,8 @@ cell.df = data.traces[cell_id == cell_name & velocity >= run.threshold]
 ```{r}
 
 plot.cell.trials = function(cell.df) {
+  trace.col = 'deconv_trace'
+  timebin.size = 2
   if (nrow(cell.df) == 0) {
     return(ggplot(data.frame()))
   }
@@ -214,8 +216,10 @@ plot.cell.trials = function(cell.df) {
   all.pf.df = data.frame()
   for (trial_no in trials) {
     pf = cell.spatial.info(cell.df[trial == trial_no],
-                            generate.plots=FALSE,
-                            nshuffles=100)
+                           generate.plots=FALSE,
+                           nshuffles=100,
+                           trace.col=trace.col,
+                           timebin.size=timebin.size)
     pf.df = create.pf.df(pf$field, pf$occupancy, 
                          min.zscore=pf$cell_info$quantile20, 
                          max.zscore=pf$cell_info$quantile90, 
@@ -225,8 +229,10 @@ plot.cell.trials = function(cell.df) {
   }
   
   pf = cell.spatial.info(cell.df,
-                          generate.plots=FALSE,
-                          nshuffles=100)
+                         generate.plots=FALSE,
+                         nshuffles=100,
+                         trace.col=trace.col,
+                         timebin.size=timebin.size)
   pf.df = create.pf.df(pf$field, pf$occupancy, 
                          min.zscore=pf$cell_info$quantile20, 
                          max.zscore=pf$cell_info$quantile90, 

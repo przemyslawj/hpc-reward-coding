@@ -65,21 +65,25 @@ gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
 ```
 
 ```{r}
-cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0) {
+cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
+                             trace.col='deconv_trace',
+                             timebin.size=1) {
   cell.events = cell.df[nevents > 0,]
-  trace.col = 'deconv_trace'
-  trace.vals=cell.df[[trace.col]]
+  trace.vals = cell.df[[trace.col]]
+  trace.vals = trace.vals - min(trace.vals)
 
   trial_ends = c(which(diff(cell.df$timestamp) < 0), nrow(cell.df))
-  trace.quantiles = quantile(trace.vals, c(0.85, 0.95, 1.0)) %>% unname + 0.01
+  trace.quantiles = quantile(trace.vals, c(0.85, 0.95, 1.0), na.rm=TRUE) %>% unname + 0.01
   pf = with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, trace.vals, 
-                                      trace.quantiles, trial_ends, nshuffles, frame.hz/2))
+                                      trace.quantiles, trial_ends, nshuffles, 
+                                      frame.hz/2,
+                                      timebin.size))
   
-  si.signif.thresh = quantile(pf$shuffle.si, 0.95)[[1]]
+  si.signif.thresh = quantile(pf$shuffle.si, 0.95, na.rm=TRUE)[[1]]
   si.signif = pf$spatial.information >= si.signif.thresh
-  mi.signif.thresh = quantile(pf$shuffle.mi, 0.95)[[1]]
+  mi.signif.thresh = quantile(pf$shuffle.mi, 0.95, na.rm=TRUE)[[1]]
   mi.signif = pf$spatial.information >= mi.signif.thresh
-  trace.quantiles = quantile(cell.df[, ..trace.col][[1]], probs=c(0.2, 0.9))
+  trace2090.quantiles = quantile(trace.vals, probs=c(0.2, 0.9), na.rm=TRUE)
 
   cell_info = list(cell_id=cell_name,
                    spatial.information=pf$spatial.information,
@@ -97,8 +101,8 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0) {
                    mutual.info=pf$mutual.info,
                    mutual.info.bias=pf$mutual.info.bias,
                    field.max=pf$field.max,
-                   quantile20=trace.quantiles[[1]],
-                   quantile90=trace.quantiles[[2]],
+                   quantile20=trace2090.quantiles[[1]],
+                   quantile90=trace2090.quantiles[[2]],
                    #entropy=pf$entropy,
                    nevents=nrow(cell.events))
 
@@ -106,7 +110,7 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0) {
   if (generate.plots) {
     cell_event_rate = nrow(cell.events) / nrow(cell.df) * frame.hz
     
-    pf.df = create.pf.df(pf$field, pf$occupancy, min.zscore=trace.quantiles[[1]], max.zscore=trace.quantiles[[2]],
+    pf.df = create.pf.df(pf$field, pf$occupancy, min.zscore=trace2090.quantiles[[1]], max.zscore=trace2090.quantiles[[2]],
                          max.xy=getNBinsXY())
     g.placefield = plot.pf(pf.df, max.xy=getNBinsXY()) +
       labs(title=paste0('Cell ', cell_name, ' MER = ', format(cell_event_rate, digits=2), ' Hz',

@@ -70,7 +70,8 @@ SpatialInfoData calculateSpatialInformation(NumericVector& x,
                                             NumericVector& y, 
                                             NumericVector trace,
                                             // Quantiles for binning trace values
-                                            NumericVector& traceQuantiles) {
+                                            NumericVector& traceQuantiles,
+                                            int timebin_size) {
   
   NumericMatrix totalActivityMap = NumericMatrix(N_BINS_X,N_BINS_Y);
   NumericMatrix occupancyMap = NumericMatrix(N_BINS_X,N_BINS_Y);
@@ -89,13 +90,26 @@ SpatialInfoData calculateSpatialInformation(NumericVector& x,
   std::fill(responseCount.begin(), responseCount.end(), 0);
   
   // Calculate occupancy and total activity maps
+  int binned_trace_size = trace.size() / timebin_size;
   Debug("Trace Quantiles size=" << traceQuantiles.size() << std::endl);
   double mfr = 0;
-  for (int i = 0; i < trace.size(); ++i) {
-    int xx = std::min(N_BINS_X, std::max(0, (int) std::floor(x[i] / binSizeX)));
-    int yy = std::min(N_BINS_Y, std::max(0, (int) std::floor(y[i] / binSizeY)));
+  std::vector<int> bin_x(timebin_size);
+  std::vector<int> bin_y(timebin_size);
+  for (int i = 0; i < trace.size(); i += timebin_size) {
+    std::fill(bin_x.begin(), bin_x.end(), 0);
+    std::fill(bin_y.begin(), bin_y.end(), 0);
+    double trace_binval = 0.0;
+    for (int j = 0; j < timebin_size; ++j) {
+      bin_x[j] = std::min(N_BINS_X, std::max(0, (int) std::floor(x[i+j] / binSizeX)));
+      bin_y[j] = std::min(N_BINS_Y, std::max(0, (int) std::floor(y[i+j] / binSizeY)));
+      trace_binval += trace[i+j];
+    }
+    int xx = std::round(((double) std::accumulate(bin_x.begin(), bin_x.end(), 0)) / bin_x.size());
+    int yy = std::round(((double) std::accumulate(bin_y.begin(), bin_y.end(), 0)) / bin_y.size());
+    
     occupancyMap(xx,yy) += 1;
-    totalActivityMap(xx,yy) += trace[i];
+    trace_binval = trace_binval / timebin_size;
+    totalActivityMap(xx,yy) += trace_binval;
     
     auto responseBinIt = std::lower_bound(traceQuantiles.begin(), traceQuantiles.end(), trace[i]);
     int responseBin = traceQuantiles.size() - 1;
@@ -105,7 +119,7 @@ SpatialInfoData calculateSpatialInformation(NumericVector& x,
     ++binnedResponse[responseBin](xx,yy);
     ++responseCount[responseBin];
     
-    mfr += trace[i] / trace.size();
+    mfr += trace_binval / binned_trace_size;
   }
   Debug("Response 0 count: " << responseCount[0] << " Response 1 count:" << responseCount[1] << std::endl);
   
@@ -122,8 +136,10 @@ SpatialInfoData calculateSpatialInformation(NumericVector& x,
     }
   }
   
+  //TODO: decide if want to keep the offset, if yes, uncomment below
+  // fr_offset -= 10e-10;
   // Avoid FR==0, so the log's can be calculated everywhere
-  fr_offset -= 10e-10;
+  fr_offset = -10e-10;
   
   // Update firing rates by the offset
   for (int yy = 0; yy < N_BINS_Y; ++yy) {
@@ -140,11 +156,10 @@ SpatialInfoData calculateSpatialInformation(NumericVector& x,
     printf("MFR=0.0, calculation of spatial information aborted");
     return SpatialInfoData();
   }
-  
   double MI = 0.0;
   double SI = 0.0;
   const int S = N_BINS_X * N_BINS_Y;
-  const int N = trace.size();
+  const int N = binned_trace_size;
   int totalResponseBins = 0;
   for (int yy = 0; yy < N_BINS_Y; ++yy) {
     for (int xx = 0; xx < N_BINS_X; ++xx) {
@@ -153,7 +168,11 @@ SpatialInfoData calculateSpatialInformation(NumericVector& x,
         Debug(" xx=" << xx);
         Debug(" yy=" << yy << std::endl);
         double p_occupancy = (double) occupancyMap(xx,yy) / N;
-        SI += p_occupancy * fr(xx,yy) / mfr * log2(fr(xx,yy) / mfr);
+        if (fr(xx,yy) > 0.0) {
+          double r_SI = p_occupancy * fr(xx,yy) / mfr * log2(fr(xx,yy) / mfr);
+          Debug("partial SI=" << r_SI << std::endl);
+          SI += r_SI;
+        }
         
         for (int r = 0; r < traceQuantiles.size(); ++r) {
           double p_response = ((double) responseCount[r]) / N;
@@ -200,7 +219,8 @@ SEXP getCppPlaceField(NumericVector& x,
                       NumericVector& traceQuantiles,
                       NumericVector& trialEnds,
                       int nshuffles,
-                      int shuffleChunkLength) {
+                      int shuffleChunkLength,
+                      int timebin_size) {
 
   
   NumericMatrix field = NumericMatrix(N_BINS_X,N_BINS_Y);
@@ -228,7 +248,8 @@ SEXP getCppPlaceField(NumericVector& x,
     return(result);
   }
   
-  SpatialInfoData spatialInfoData = calculateSpatialInformation(x, y, trace, traceQuantiles);
+  SpatialInfoData spatialInfoData = calculateSpatialInformation(x, y, trace, traceQuantiles,
+                                                                timebin_size);
   NumericMatrix occupancyMap = spatialInfoData.occupancyMap;
   NumericMatrix totalActivityMap = spatialInfoData.totalActivityMap;
   NumericMatrix fr = spatialInfoData.fr;
@@ -321,7 +342,8 @@ SEXP getCppPlaceField(NumericVector& x,
       }
     }
     
-    SpatialInfoData shuffleData = calculateSpatialInformation(x, y, shuffledTrace, traceQuantiles);
+    SpatialInfoData shuffleData = calculateSpatialInformation(x, y, shuffledTrace, 
+                                                              traceQuantiles, timebin_size);
     shuffleSI[i] = shuffleData.SI;
     shuffleMI[i] = shuffleData.MI;
   }
@@ -351,15 +373,16 @@ SEXP getCppPlaceField(NumericVector& x,
 // run after the compilation.
 //
 /*** R
-x=0:10
-y=0:10
-trace=rep(0, 11)
-trace[4:6] = 1
+x=0:9
+y=0:9
+trace=rep(0, 10)
+trace[6:10] = 1
 
-pf = getCppPlaceField(x,y,trace, c(0.5, 0.9), c(7, length(trace)), 2, 2)
-#pf=with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, deconv_trace, traceQuantiles, 10,2))
+pf = getCppPlaceField(x,y,trace, c(0.5, 0.9), c(7, length(trace)), 0, 2, 1)
+#pf=with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, deconv_trace, traceQuantiles, 10,2), 4)
 pf$spatial.information
 pf$mutual.info
+pf$mfr
 
 getNBinsXY()
 */
