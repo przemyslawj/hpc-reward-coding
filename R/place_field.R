@@ -69,8 +69,8 @@ norm2 = function(x, y) {
 }
 
 # Create df with smoothed values from matrix representation
-create.pf.df = function(M, occupancyM, min.zscore=0, max.zscore=2, min.occupancy.sec=1, frame.rate=20, max.y=34) {
-  sigma = 2
+create.pf.df = function(M, occupancyM, min.zscore=0, max.zscore=2, min.occupancy.sec=1, frame.rate=20, max.xy=34) {
+  sigma = 1.4
   M1=gauss2dsmooth(M,lambda=sigma, nx=11, ny=11)
   df1 = reshape2::melt(M1) %>%
     mutate(value = ifelse(value < min.zscore, min.zscore, value)) %>%
@@ -80,7 +80,7 @@ create.pf.df = function(M, occupancyM, min.zscore=0, max.zscore=2, min.occupancy
   min.occupancy = min.occupancy.sec * frame.rate
   min.smoothed.occupancy = min.occupancy * 1/(2*pi*sigma^2)
   smoothedOccupancy = gauss2dsmooth(occupancyM,lambda=sigma, nx=11, ny=11)
-  mid.pt = mean(1:max.y)
+  mid.pt = mean(1:max.xy)
   df_org = reshape2::melt(smoothedOccupancy) %>%
     filter(value >= min.smoothed.occupancy) %>%
     filter(norm2(Var1 - mid.pt, Var2 - mid.pt) <= mid.pt)
@@ -90,13 +90,14 @@ create.pf.df = function(M, occupancyM, min.zscore=0, max.zscore=2, min.occupancy
   return(df2)
 }
   
-plot.pf = function(df, min.zscore=0, max.zscore=2, max.y=34) {
+plot.pf = function(df, max.xy=34) {
   jet.colours = colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
   
   ggplot() +
-    geom_raster(data=df, aes(x=Var1, y=max.y-Var2, fill=value.conv), interpolate=FALSE) +
+    geom_raster(data=df, aes(x=Var1, y=max.xy-Var2, fill=value.conv), interpolate=FALSE) +
     scale_fill_gradientn(colours=jet.colours(7)) +
                          #limits=c(min.zscore, max.zscore)) +
+    xlim(c(0, max.xy)) + ylim(c(0, max.xy)) +
     theme_void() 
 }
 

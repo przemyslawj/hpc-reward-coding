@@ -64,19 +64,68 @@ caimg_result_dirs = Filter(
 gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
 ```
 
-Create shuffles
 ```{r}
-shuffle.trace = function(trace, timestamps, min.shuffle=10 * 20) {
-  trial.ends = c(which(diff(timestamps) < 0), length(timestamps))
-  trial.starts = c(1, 1 + which(diff(timestamps) < 0))
+cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0) {
+  cell.events = cell.df[nevents > 0,]
+  trace.col = 'deconv_trace'
+  trace.vals=cell.df[[trace.col]]
+
+  trial_ends = c(which(diff(cell.df$timestamp) < 0), nrow(cell.df))
+  trace.quantiles = quantile(trace.vals, c(0.85, 0.95, 1.0)) %>% unname + 0.01
+  pf = with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, trace.vals, 
+                                      trace.quantiles, trial_ends, nshuffles, frame.hz/2))
   
-  shifted.trace = c()
-  for (i in 1:length(trial.starts)) {
-    trial.trace = trace[trial.starts[i]:trial.ends[i]]
-    shifted.trace = c(shifted.trace, shuffle(trial.trace))
+  si.signif.thresh = quantile(pf$shuffle.si, 0.95)[[1]]
+  si.signif = pf$spatial.information >= si.signif.thresh
+  mi.signif.thresh = quantile(pf$shuffle.mi, 0.95)[[1]]
+  mi.signif = pf$spatial.information >= mi.signif.thresh
+  trace.quantiles = quantile(cell.df[, ..trace.col][[1]], probs=c(0.2, 0.9))
+
+  cell_info = list(cell_id=cell_name,
+                   spatial.information=pf$spatial.information,
+                   si.signif.thresh=si.signif.thresh,
+                   signif.si=si.signif,
+                   mi.signif.thresh=mi.signif.thresh,
+                   signif.mi=mi.signif,
+                   field.centre.x=pf$field.centre[1],
+                   field.centre.y=pf$field.centre[2],
+                   field.max.x=pf$field.max.xy[1],
+                   field.max.y=pf$field.max.xy[2],
+                   field.size=pf$field.size,
+                   spatial.information.perspike=pf$spatial.information.perspike,
+                   mfr=pf$mfr,
+                   mutual.info=pf$mutual.info,
+                   mutual.info.bias=pf$mutual.info.bias,
+                   field.max=pf$field.max,
+                   quantile20=trace.quantiles[[1]],
+                   quantile90=trace.quantiles[[2]],
+                   #entropy=pf$entropy,
+                   nevents=nrow(cell.events))
+
+  g.placefield=NA
+  if (generate.plots) {
+    cell_event_rate = nrow(cell.events) / nrow(cell.df) * frame.hz
+    
+    pf.df = create.pf.df(pf$field, pf$occupancy, min.zscore=trace.quantiles[[1]], max.zscore=trace.quantiles[[2]],
+                         max.xy=getNBinsXY())
+    g.placefield = plot.pf(pf.df, max.xy=getNBinsXY()) +
+      labs(title=paste0('Cell ', cell_name, ' MER = ', format(cell_event_rate, digits=2), ' Hz',
+                        '\nSI = ', format(pf$spatial.information, digits=2),
+                        ifelse(si.signif, '*', ''),
+                        ' SI per spike = ', format(pf$spatial.information.perspike, digits=2),
+                        '\nMI - bias = ', format(pf$mutual.info - pf$mutual.info.bias, digits=3),
+                        ifelse(mi.signif, '*', '')),
+           fill='Deconv trace') +
+      theme(text = element_text(size=4),
+            plot.title = element_text(size=4))
+
+
   }
-  
-  return(shifted.trace)
+
+  return(list(cell_info=cell_info,
+             field=pf$field,
+             occupancy=pf$occupancy,
+             g=g.placefield))
 }
 ```
 
@@ -90,65 +139,24 @@ calc.spatial.info = function(data.traces, plot.dir='/tmp/pf_stability/',
   pci.df = data.frame()
   fields = list()
   occupancies = list()
+
   #cl = makeCluster(3)
   #registerDoParallel(cl)
   #foreach::getDoParRegistered()
   #foreach (cell_name = cells, .packages = "Rcpp",.noexport = "getCppPlaceField") %dopar% {
   for (cell_name in cells) {
-    #Rcpp::sourceCpp('place_field.cpp')
     cell.df = data.traces[cell_id == cell_name & smooth_trans_x >= 0 & smooth_trans_y >= 0,]
-    cell.events = cell.df[nevents > 0,]
-    trace.col = 'deconv_trace'
- 
-    pf = with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, deconv_trace, nshuffles, frame.hz/2))
+    pf = cell.spatial.info(cell.df, generate.plots, nshuffles)
     
-    #spatial.infos = rep(0, nshuffles)
-    #if (nshuffles > 0) {
-    #  for (shuffle_i in 1:nshuffles) {
-    #    shuffled.trace = shuffle.trace(cell.df$deconv_trace, cell.df$timestamp)
-    #    shuffled.pf = with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, shuffled.trace))
-    #    spatial.infos[shuffle_i] = shuffled.pf$spatial.information
-    #  }
-    #}
-    signif.thresh = quantile(pf$shuffle.si, 0.95)[[1]]
-    si.signif = pf$spatial.information >= signif.thresh
-
     fields[[format(cell_name)]] = pf$field
     occupancies[[format(cell_name)]] = pf$occupancy
-
-    pci.df = bind_rows(pci.df, data.frame(cell_id=cell_name,
-                                          spatial.information=pf$spatial.information,
-                                          signif.thresh=signif.thresh,
-                                          signif.si=si.signif,
-                                          field.centre.x=pf$field.centre[1],
-                                          field.centre.y=pf$field.centre[2],
-                                          field.max.x=pf$field.max.xy[1],
-                                          field.max.y=pf$field.max.xy[2],
-                                          field.size=pf$field.size,
-                                          spatial.information.perspike=pf$spatial.information.perspike,
-                                          mfr=pf$mfr,
-                                          field.max=pf$field.max,
-                                          #entropy=pf$entropy,
-                                          nevents=nrow(cell.events)))
-
-    if (generate.plots) {
-      cell_event_rate = nrow(cell.events) / nrow(cell.df) * frame.hz
-      trace.quantiles = quantile(cell.df[, ..trace.col][[1]], probs=c(0.2, 0.9))
-      pf.df = create.pf.df(pf$field, pf$occupancy, min.zscore=trace.quantiles[[1]], max.zscore=trace.quantiles[[2]])
-      g.placefield = plot.pf(pf.df, min.zscore=trace.quantiles[[1]], max.zscore=trace.quantiles[[2]]) +
-        labs(title=paste0('Cell ', cell_name, ' MER = ', format(cell_event_rate, digits=2), ' Hz',
-                          '\nSI = ', format(pf$spatial.information, digits=2),
-                          ifelse(si.signif, '*', ''),
-                          ' SI per spike = ', format(pf$spatial.information.perspike, digits=2)),
-             fill='Deconv trace') +
-        theme(text = element_text(size=4),
-              plot.title = element_text(size=4))
-  
+    pci.df = bind_rows(pci.df, pf$cell_info)
+    
+    if (!is.na(plot.dir)) {
       dir.create(plot.dir, recursive=TRUE)
-      ggsave(paste0(plot.dir, 'place_field_cell_', cell_name, '.jpg'), g.placefield,
+      ggsave(paste0(plot.dir, 'place_field_cell_', cell_name, '.jpg'), pf$g,
              width=3.5, height=3.0, units='cm', dpi=300)
     }
-    
   }
 
   #stopCluster(cl)
@@ -190,9 +198,9 @@ add.meta.cols = function(df, animal, date) {
 
 for (ca_img_result_dir in caimg_result_dirs) {
   print(paste('Processing dir: ', ca_img_result_dir))
-  cellmapping_file = paste0(ca_img_result_dir, 'cell_mapping.csv')
+  cellmapping_file = file.path(ca_img_result_dir, 'cell_mapping.csv')
   cellmapping.df = read.csv(cellmapping_file)
-  traces_file = paste0(ca_img_result_dir, 'traces_and_positions.csv')
+  traces_file = file.path(ca_img_result_dir, 'traces_and_positions.csv')
   data = fread(traces_file)
   data = data[exp_title == 'trial',]
   data.traces = melt.traces(data)
@@ -220,7 +228,7 @@ for (ca_img_result_dir in caimg_result_dirs) {
   tic("spatial info on all trials running")
   run.spatial = calc.spatial.info(data.traces.run,
                                   plot.dir=paste0(plot.dir.prefix, '/run/'),
-                                  generate.plots=FALSE,
+                                  generate.plots=TRUE,
                                   nshuffles=100)
   run.trials.si = bind_rows(run.trials.si, add.meta.cols(run.spatial$df, animal, date))
   run.fields[[animal]][[format(date)]] = run.spatial$field
@@ -356,11 +364,13 @@ compare.day.trials = function(day.trials.comparison, fields1, fields2, occupanci
       day.trials %>%
         group_by(animal, cell_id) %>% 
         dplyr::summarise(spatial.info.mean = mean(spatial.information),
+                         spatial.info.min = min(spatial.information),
                          spatial.info.diff = pairdiff(spatial.information),
                          field.centre.x.diff = pairdiff(field.centre.x, 100),
                          field.centre.y.diff = pairdiff(field.centre.y, 100),
                          field.size.diff = pairdiff(field.size, 100),
                          field.size.mean = mean(field.size),
+                         field.size.max = max(field.size),
                          field.max.diff = pairdiff(field.max, 0),
                          field.max.mean = mean(field.max),
                          signif.si.mean = mean(signif.si),
@@ -404,24 +414,35 @@ late.trials.si$group = 'late'
 early.late.trials = bind_rows(early.trials.si, late.trials.si)
 early.late.comparison = compare.day.trials(early.late.trials, early.fields, late.fields, early.occupancies, late.occupancies) 
 
-odd.even.comparison$group = 'oddeven'
-early.late.comparison$group = 'earlylate'
+odd.even.comparison$group = 'odd vs even'
+early.late.comparison$group = 'early vs late'
 ```
 Do cells with signif spatial information retain their field from early to late trials?
 ```{r}
-bind_rows(odd.even.comparison, early.late.comparison) %>%
-  filter(spatial.info.mean > 0) %>%
-  mutate(is.place.cell = spatial.info.mean >= 0) %>%
-  ggplot(aes(x=spatial.info.mean, y=field.cor)) +
-  geom_point(alpha=0.2, size=1) +
-  geom_rug(col=rgb(.5,0,0,alpha=.009)) +
-  geom_vline(xintercept=si.thresh, linetype='dashed') +
-  geom_hline(yintercept=field.min.cor, linetype='dashed') +
+day.comparison = bind_rows(odd.even.comparison, early.late.comparison)
+day.comparison$signif.si.factor = as.factor(day.comparison$signif.si.mean)
+g.day.stability = day.comparison %>%
+  filter(signif.si.mean > 0) %>% 
+  filter(field.size.max < 5) %>%
+  filter(date=='2019-08-29' | date == '2019-09-02') %>%
+  mutate(is.signif = signif.si.mean  == 1,
+         is.nearby = field.xy.dist < 10) %>%
+  #ggplot(aes(x=spatial.info.mean, y=field.cor, color=is.signif)) +
+  ggplot(aes(x=spatial.info.min, y=field.xy.dist, color=signif.si.factor)) +
+  geom_point(alpha=0.3, size=1) +
+  geom_rug(aes(color=signif.si.factor), alpha=0.3) +
+  #geom_vline(xintercept=si.thresh, linetype='dashed') +
+  #geom_hline(yintercept=field.min.cor, linetype='dashed') +
+  #geom_hline(yintercept=10, linetype='dashed') +
   gtheme +
-  facet_grid(. ~ group) +
-  xlab('Mean spatial information (bits/s)') +
-  ylab('Correlation of place field between trials') +
-  labs(color='Place cell', title='Early vs Late, Odd vs Even')
+  theme(axis.text.x = element_text(angle = -90, hjust = 1)) +
+  facet_grid(date ~ group) +
+  xlab('Min spatial information (bits/s)') +
+  ylab('Shift of the place field peak  (%)') +
+  labs(color='Day-stable\nplace cell', title='Early vs Late, Odd vs Even')
+g.day.stability
+ggsave(file.path(gen_imgs_dir, 'pc_stability-even_odd.jpg'), g.day.stability,
+       width = 14, height = 10, units = 'cm')
 ```
 
 
@@ -450,15 +471,20 @@ field.min.cor = 0.2
 
 # Classification of place cells based on SI on each subset of day sessions
 day.comparison.mean = day.comparison.mean %>%
-  mutate(is.place.cell = m.signif.si == 1 & 
+  mutate(is.day.pc = m.signif.si > 0.5 & 
            m.spatial.info >= si.thresh &
-           #m.field.xy.dist <= 50 &
+           m.field.xy.dist <= 20 &
            m.field.size <= field.size.thresh &
-           m.field.max >= field.peak.thresh &
-           m.field.cor >= field.min.cor) 
+           m.field.max >= field.peak.thresh,
+           #m.field.cor >= field.min.cor) 
+         is.halfday.pc = m.signif.si >= 0.5 &
+           m.spatial.info >= si.thresh &
+           m.field.size <= field.size.thresh &
+           m.field.max >= field.peak.thresh)
 
 place.cell.db = day.comparison.mean %>%
-  select(date, animal, cell_id, is.place.cell)
+  select(date, animal, cell_id, is.day.pc, is.halfday.pc) %>%
+  ungroup()
 
 run.trials.si.field = day.comparison.mean %>%
   left_join(run.trials.si, by=c('animal', 'date', 'cell_id'))
@@ -485,31 +511,41 @@ Correlation betwen field correlations and spatial information during the day
 #run.trials.pc  %>%
 #  ggplot(aes(x=spatial.information, y=m.field.cor, color=is.place.cell)) +
 day.comparison.mean  %>%
-  ggplot(aes(x=m.spatial.info, y=m.field.cor, color=is.place.cell)) +
+  mutate(si.signif = m.signif.si > 0.5) %>%
+  ggplot(aes(x=m.spatial.info, y=m.field.cor, color=is.day.pc)) +
   geom_point(alpha=0.2, size=1) +
   geom_rug(col=rgb(.5,0,0,alpha=.009)) +
-  geom_vline(xintercept=si.thresh, linetype='dashed') +
+  #geom_vline(xintercept=si.thresh, linetype='dashed') +
   geom_hline(yintercept=field.min.cor, linetype='dashed') +
   gtheme +
-  facet_grid(. ~ signif.si) +
+  facet_grid(. ~ si.signif) +
   xlab('Mean spatial information (bits/s)') +
-  ylab('Correlation of place field between trials') +
+  ylab('Correlation of place field\nbetween trials') +
   labs(color='Place cell', title='Significant SI')
+
+ggsave(file.path(gen_imgs_dir, 'pc_choice.jpg'),
+       width = 14, height = 10, units = 'cm')
 ```
 
 
 
 ## How many place cells per day
 ```{r}
-run.trials.pc %>%
+run.trials.si.field %>%
   group_by(date, animal) %>%
-  dplyr::summarise(pc.pct = sum(is.place.cell) / n() * 100) %>%
+  dplyr::summarise(pc.pct = sum(is.day.pc) / n() * 100, 
+                   half.pc.pct = sum(is.halfday.pc) / n() * 100) %>%
   ggplot() +
-  geom_line(aes(x=date, y=pc.pct, group=animal, color=animal)) +
+  geom_line(aes(x=date, y=pc.pct, group=animal, color='black')) +
+  geom_line(aes(x=date, y=half.pc.pct, group=animal, color='red')) +
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_color_discrete(name='Place cell stability', labels = c('Full day', 'Half day')) +
   xlab('Date') + 
   ylab('Place cells (%)')
+
+ggsave(file.path(gen_imgs_dir, 'pc_count.jpg'),
+       width = 14, height = 10, units = 'cm')
 ```
 
 
@@ -569,6 +605,9 @@ for (i in 1:ncol(day.comb)) {
                        field.max.diff = pairdiff(field.max, 0),
                        max.signif = max(signif.si, FALSE),
                        signif.si.changed = !pairequal(signif.si),
+                       max.day.pc = max(is.day.pc, FALSE),
+                       is.day.pc.changed = !pairequal(is.day.pc),
+                       is.halfday.pc.changed = !pairequal(is.halfday.pc),
                        same_rew_loc = pairequal(location_set),
                        days.diff = days_i[2] - days_i[1],
                        date.diff=paste(format(days[2]), ' - ', format(days[1])),
@@ -605,11 +644,11 @@ for (i in 1:ncol(day.comb)) {
 How many place cells remained place cells
 ```{r}
 pc.change.df %>%
-  filter(max.signif == 1) %>%
+  filter(max.day.pc > 0) %>%
   filter(n>1) %>%
   filter(same_rew_loc) %>%
   filter(days.diff <= 4) %>%
-  mutate(pc.unchanged = (!signif.si.changed)) -> x
+  mutate(pc.unchanged = (!is.day.pc.changed)) -> x
 
 DT::datatable(x)
 
@@ -628,9 +667,9 @@ pc.change.df2 = filter(pc.change.df, days.diff <= 4)
 pc.change.df2$days.diff = as.factor(pc.change.df2$days.diff)
 pc.change.df2 %>%
   filter(n > 1) %>%
-  filter(max.signif == 1) %>%
+  filter(max.day.pc > 0) %>%
   filter(same_rew_loc) %>%
-  filter(!signif.si.changed) %>%
+  filter(!is.day.pc.changed) %>%
   ggplot() +
   geom_violin(aes(x=days.diff, y=field.xy.dist, color=animal))
 ```
@@ -648,7 +687,7 @@ calc.min.rew.dist = function(day, animal_name, field.x, field.y) {
 }
 
 pc.rew.dist.df = merged.run.trials.pc %>%
-  filter(!is.na(location_set), is.place.cell) %>%
+  filter(!is.na(location_set), is.day.pc) %>%
   ddply(.(date, animal, cell_id), mutate, 
         #min.rew.dist=calc.min.rew.dist(date[1], animal[1], field.centre.x[1], field.centre.y[1]))
         min.rew.dist=calc.min.rew.dist(date[1], animal[1], field.max.x[1], field.max.y[1]))

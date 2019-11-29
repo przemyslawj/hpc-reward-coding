@@ -29,6 +29,7 @@ source('place_field.R')
 Setup example variables
 ```{r}
 animal_name = 'F-BL'
+exp_title='learning'
 day = '2019-09-02'
 cell_name = 256
 ```
@@ -46,7 +47,8 @@ geom_rewards = function(rewards.df, subject, day=NULL) {
   #rew.shape = 0
   rew.shape = 2
   rew.size = 2
-  geom_point(data=dayreward.df, aes(x=trans_x / 3, y=(100 - trans_y) / 3), 
+  bin.size = ceil(100 / getNBinsXY())
+  geom_point(data=dayreward.df, aes(x=trans_x / bin.size, y=(100 - trans_y) / bin.size), 
              shape=rew.shape,
              color=rew.col, 
              size=rew.size,
@@ -78,7 +80,8 @@ create.partial.df = function(fieldList, occupancyList, animal_name, day, cell_na
   df = create.pf.df(fieldList[[animal_name]][[day]][[paste(cell_name)]],
                occupancyList[[animal_name]][[day]][[paste(cell_name)]],
                min.zscore=0,
-               max.zscore=max.zscore * 0.8)
+               max.zscore=max.zscore * 0.8,
+               max.xy=getNBinsXY())
   df$group = group_name
   return(df)
 }
@@ -172,4 +175,84 @@ for (i in 1:nrow(tmp.df)) {
   error=function(e){cat("ERROR for row i=", num2str(i), ":",conditionMessage(e), "\n")})
 }
 ```
+
+# Place field for each trial separately
+
+Load the traces
+```{r}
+animal_name = 'E-BL'
+exp_title='habituation'
+day = '2019-08-28'
+cell_name = 15
+#cell_name = 47
+
+
+ca_img_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered')
+cellmapping_file = file.path(ca_img_result_dir, 'cell_mapping.csv')
+cellmapping.df = read.csv(cellmapping_file)
+traces_file = file.path(ca_img_result_dir, 'traces_and_positions.csv')
+data = fread(traces_file)
+data = data[exp_title == 'trial',]
+data.traces = melt.traces(data)
+data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no')) %>% data.table()
+
+
+cell.df = data.traces[cell_id == cell_name & velocity >= run.threshold]
+```
+
+```{r}
+
+plot.cell.trials = function(cell.df) {
+  if (nrow(cell.df) == 0) {
+    return(ggplot(data.frame()))
+  }
+  animal_name = cell.df$animal[1]
+  day = cell.df$date[1]
+  trials = unique(cell.df$trial)
+  
+  trials.spatial = c()
+  all.pf.df = data.frame()
+  for (trial_no in trials) {
+    pf = cell.spatial.info(cell.df[trial == trial_no],
+                            generate.plots=FALSE,
+                            nshuffles=100)
+    pf.df = create.pf.df(pf$field, pf$occupancy, 
+                         min.zscore=pf$cell_info$quantile20, 
+                         max.zscore=pf$cell_info$quantile90, 
+                         max.xy=getNBinsXY())
+    pf.df$trial = trial_no
+    all.pf.df = bind_rows(all.pf.df, pf.df)
+  }
+  
+  pf = cell.spatial.info(cell.df,
+                          generate.plots=FALSE,
+                          nshuffles=100)
+  pf.df = create.pf.df(pf$field, pf$occupancy, 
+                         min.zscore=pf$cell_info$quantile20, 
+                         max.zscore=pf$cell_info$quantile90, 
+                         max.xy=getNBinsXY())
+  pf.df$trial = 0
+  all.pf.df = bind_rows(all.pf.df, pf.df)
+  
+  cell_info = pf$cell_info
+  g = plot.pf(all.pf.df, 
+          max.xy=getNBinsXY()) +
+    facet_wrap(. ~  trial, ncol=3) +
+    labs(fill='Deconv trace',
+         title=paste0(format(day), ' ', animal_name, ' Cell ', cell_name, 
+                      '\nSI = ', format(cell_info$spatial.information, digits=2),
+                      ifelse(cell_info$signif.si, '*', ''),
+                      ' SI per spike = ', format(cell_info$spatial.information.perspike, digits=2),
+                      '\nMI - bias = ', format(cell_info$mutual.info - cell_info$mutual.info.bias, digits=3),
+                      ifelse(cell_info$signif.mi, '*', '')))
+  
+  
+  print(pf$cell_info$spatial.information)
+  print(pf$cell_info$mutual.info)
+  return(g)
+}
+
+plot.cell.trials(cell.df)
+```
+
 

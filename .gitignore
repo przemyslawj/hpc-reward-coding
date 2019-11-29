@@ -25,3 +25,8 @@ codegen/
 *.autosave
 
 *.svg
+
+# Ignore R internal files
+*.RData
+*.Rhistory
+
