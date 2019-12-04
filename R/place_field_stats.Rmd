@@ -1,0 +1,213 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+The code assumes data frames with place fields information are loaded in the environment.
+
+Distribution of mutual information
+```{r}
+ggplot(run.trials.si) +
+  geom_boxplot(aes(x=date, y=mutual.info-mutual.info.bias, color=signif.mi)) +
+  #geom_boxplot(aes(x=date, y=field.max, color=signif.si)) +
+  geom_boxplot(aes(x=date, y=spatial.information, color=signif.si)) + ylim(c(0,1)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+```
+```{r}
+run.trials.si %>%
+  filter(date == '2019-08-27') %>%
+  ggplot() +
+  geom_point(aes(x=field.max, y=mutual.info, color=signif.si), alpha=0.1)
+```
+
+
+```{r classify place cells}
+mi.thresh = 0.0
+field.size.thresh = 5
+field.peak.thresh = 10
+
+is.place.cell = function(signif.si, mutual.info.wo.bias, field.size, field.max, mfr) {
+  signif.si & 
+    #mutual.info.wo.bias >= mi.thresh &
+    field.size <= field.size.thresh &
+    field.max >= field.peak.thresh
+}
+
+# Classification of place cells based on SI on each subset of day sessions
+run.trials.pc = run.trials.si %>%
+  mutate(is.pc = is.place.cell(signif.si, mutual.info - mutual.info.bias, field.size, field.max, mfr))
+
+place.cell.db = run.trials.pc %>%
+  select(date, animal, cell_id, is.pc) %>%
+  ungroup()
+
+```
+
+## How many place cells per day
+```{r}
+run.trials.pc %>%
+  group_by(date, animal) %>%
+  dplyr::summarise(pc.pct = sum(is.pc) / n() * 100) %>% 
+  ggplot() +
+  geom_line(aes(x=date, y=pc.pct, group=animal, color=animal)) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab('Date') + 
+  ylab('Place cells (%)')
+```
+# Pct of place cells within goal
+Load reward locations
+```{r}
+locations.rootdir = "/mnt/DATA/Prez/cheeseboard/2019-08/"
+rewards.df = read_locations(locations.rootdir) %>%
+  filter(!is_test) %>%
+  dplyr::rename(animal=Animal)
+  
+locations.df = rewards.df %>%
+  select(date, animal, location_set) %>%
+  dplyr::distinct()
+
+locations.df = data.table(locations.df)
+setkey(locations.df, date, animal)
+```
+Distance of place fields to goal
+```{r}
+rewards.df = data.table(rewards.df)
+calc.min.rew.dist = function(day, animal_name, field.x, field.y) {
+  rews = rewards.df[date==format(day) & animal == animal_name, ]
+  dist1 = norm2(rews$trans_x[1] - field.x, rews$trans_y[1] - field.y)
+  dist2 = norm2(rews$trans_x[2] - field.x, rews$trans_y[2] - field.y)
+  return(min(dist1, dist2))
+}
+
+merged.run.trials.pc = left_join(run.trials.pc, locations.df, by=c('animal', 'date'))
+
+pc.rew.dist.df = merged.run.trials.pc %>%
+  filter(!is.na(location_set), is.pc) %>%
+  ddply(.(date, animal, cell_id), mutate, 
+        #min.rew.dist=calc.min.rew.dist(date[1], animal[1], field.centre.x[1], field.centre.y[1]))
+        min.rew.dist=calc.min.rew.dist(date[1], animal[1], field.max.x[1], field.max.y[1]))
+
+ggplot(pc.rew.dist.df) +
+  geom_violin(aes(x=date, y=min.rew.dist)) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab('') + ylab('Field dist from reward')
+  
+```
+
+## Pct during the trials
+```{r}
+pc.rew.dist.df %>%
+  mutate(is.goal.cell = min.rew.dist < 10) %>%
+  group_by(date, animal) %>%
+  dplyr::summarise(pct.goal = sum(is.goal.cell) / n() * 100) -> goal.cells.df
+
+mean(goal.cells.df$pct.goal)
+sem(goal.cells.df$pct.goal)
+
+goal.cells.df %>%
+  ggplot() +
+  geom_point(aes(x=date, y=pct.goal)) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab('') + ylab('Goal cells (% of place cells)')
+```
+
+##During the test trial vs during the habituation
+```{r}
+test.rewards.df = read_locations(locations.rootdir) %>%
+  filter(is_test) %>%
+  dplyr::rename(animal=Animal)
+```
+
+```{r}
+habit.run.trials.pc = merged.run.trials.pc %>%
+  filter(is.na(location_set)) %>%
+  filter(is.pc) %>%
+  left_join(test.rewards.df, by=c('animal')) %>%
+  mutate(rew.dist = norm2(field.max.x - trans_x, field.max.y - trans_y))  %>%
+  group_by(animal, date.x, cell_id) %>% 
+  dplyr::top_n(1, wt=desc(rew.dist))
+  
+# select place cells
+pc.test.df = test.trials.si %>%
+  mutate(is.pc = is.place.cell(signif.si, mutual.info - mutual.info.bias, field.size, field.max, mfr))
+# Place cell stats during test runs
+pc.test.df %>% group_by(date, animal) %>%
+  dplyr::summarise(pc.pct=sum(is.pc)/n())
+
+# calc dist to rew
+pc.test.df = pc.test.df %>%
+  ddply(.(date, animal, cell_id), mutate, 
+        min.rew.dist=calc.min.rew.dist(date[1], animal[1], field.max.x[1], field.max.y[1]))
+
+ggplot() +
+  geom_violin(data=habit.run.trials.pc, aes(x=date.y,y=rew.dist)) +
+  geom_violin(data=pc.test.df, aes(x=date, y=min.rew.dist), col='red', alpha=0.2) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab('') + ylab('Field dist from reward')
+```
+
+Plot location of the place field centres with regards to the rewards
+```{r}
+
+plot.field.locs = function(pc.df, rewards.day) {
+  pc.df %>%
+    ggplot() +
+    geom_jitter(aes(x=field.max.x, y=100-field.max.y, size=mutual.info-mutual.info.bias), alpha=0.1, width=1, height=1) +
+    geom_point(data=filter(test.rewards.df, date==rewards.day), mapping=aes(trans_x, 100-trans_y), color='red') +
+    facet_wrap(. ~ animal, ncol=2) +
+    xlim(c(0,100)) + ylim(c(0,100)) +
+    labs(size='Mutual info')
+}
+
+plot.field.locs(filter(pc.test.df, date=='2019-09-04'), '2019-09-04') +
+  labs(title='Test on 2019-09-04')
+plot.field.locs(filter(habit.run.trials.pc, date.x=='2019-08-27'), '2019-09-04') +
+  labs(title='Habituation on 2019-08-27')
+```
+
+```{r}
+plot.field.locs(filter(pc.test.df, date=='2019-09-06'), '2019-09-06') +
+  labs(title='Test on 2019-09-06')
+plot.field.locs(filter(habit.run.trials.pc, date.x=='2019-08-29'), '2019-09-06') +
+  labs(title='Habituation on 2019-08-29')
+```
+
+```{r}
+plot.field.locs(filter(pc.test.df, date=='2019-09-08'), '2019-09-08') +
+  labs(title='Test on 2019-09-08')
+plot.field.locs(filter(habit.run.trials.pc, date.x=='2019-08-29'), '2019-09-08') +
+  labs(title='Habituation on 2019-08-29')
+```
+
+Pct of place cells at reward
+```{r}
+dist.thr = 10
+
+summary.habit.trials.pc = habit.run.trials.pc %>%
+  group_by(date.y, animal) %>%
+  dplyr::summarise(pct.reward=sum(rew.dist <= dist.thr) / n())
+
+summary.pc.test.df = pc.test.df %>%
+  group_by(date, animal) %>%
+  dplyr::summarise(pct.reward=sum(min.rew.dist <= dist.thr) / n())
+
+ggplot() +
+  geom_point(data=summary.habit.trials.pc, aes(x=date.y,y=pct.reward)) +
+  geom_point(data=summary.pc.test.df, aes(x=date, y=pct.reward), col='red') +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab('') + ylab('Place cells (%)')
+
+```
+I don't see an increase in proportion of place cells.
+Could Dupret see an increase due to shifting towards the path?- if the same number of place cells, then in a shorter path their firing will 
+be condensed. Higher density of place cells?
+The maps on test trials suspicious - check occupation fields or running fields very incomplete?
+
+First of all -- verify quality of the place cells.
+
+ISSUE: found a bug in matlab for merging trial tracking

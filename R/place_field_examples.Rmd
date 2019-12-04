@@ -203,8 +203,8 @@ cell.df = data.traces[cell_id == cell_name & velocity >= run.threshold]
 ```{r}
 
 plot.cell.trials = function(cell.df) {
-  trace.col = 'deconv_trace'
-  timebin.size = 2
+  trace.col = 'trace'
+  timebin.size = 1
   if (nrow(cell.df) == 0) {
     return(ggplot(data.frame()))
   }

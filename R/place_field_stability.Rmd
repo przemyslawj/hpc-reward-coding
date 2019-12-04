@@ -30,281 +30,26 @@ summarize = dplyr::summarize
 source('locations.R')
 source('place_field.R')
 source('trace_utils.R')
-Rcpp::sourceCpp('place_field.cpp')
 
 ```
 
 
-```{r}
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
-
-list.subdir = function(subdir) {
-  learning_datestr = list.files(subdir)
-  sapply(learning_datestr, FUN=function(x) {paste(subdir, x, sep='/')}) %>% unname
-}
-
-get.subject.result.dirs = function(root_dir, subject) {
-  dated_dirs = c(list.subdir(paste(root_dir, 'habituation', sep='/')),
-                 list.subdir(paste(root_dir, 'learning', sep='/')))
-  sapply(dated_dirs, FUN=function(x) {paste0(x, '/caiman/', subject, '/filtered/')})
-}
-
-caimg_result_dirs = c(
-  get.subject.result.dirs(root_dir, 'E-BL'),
-  get.subject.result.dirs(root_dir, 'E-TR'),
-  get.subject.result.dirs(root_dir, 'F-BL'),
-  get.subject.result.dirs(root_dir, 'F-TL')
-)
-
-
-caimg_result_dirs = Filter(
-  function(ca_img_dir) {file.exists(paste(ca_img_dir, 'traces_and_positions.csv', sep='/'))},
-  caimg_result_dirs)
-
-gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
-```
-
-```{r}
-cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
-                             trace.col='deconv_trace',
-                             timebin.size=1) {
-  cell.events = cell.df[nevents > 0,]
-  trace.vals = cell.df[[trace.col]]
-  trace.vals = trace.vals - min(trace.vals)
-
-  trial_ends = c(which(diff(cell.df$timestamp) < 0), nrow(cell.df))
-  trace.quantiles = quantile(trace.vals, c(0.85, 0.95, 1.0), na.rm=TRUE) %>% unname + 0.01
-  pf = with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, trace.vals, 
-                                      trace.quantiles, trial_ends, nshuffles, 
-                                      frame.hz/2,
-                                      timebin.size))
-  
-  si.signif.thresh = quantile(pf$shuffle.si, 0.95, na.rm=TRUE)[[1]]
-  si.signif = pf$spatial.information >= si.signif.thresh
-  mi.signif.thresh = quantile(pf$shuffle.mi, 0.95, na.rm=TRUE)[[1]]
-  mi.signif = pf$spatial.information >= mi.signif.thresh
-  trace2090.quantiles = quantile(trace.vals, probs=c(0.2, 0.9), na.rm=TRUE)
-
-  cell_info = list(cell_id=cell_name,
-                   spatial.information=pf$spatial.information,
-                   si.signif.thresh=si.signif.thresh,
-                   signif.si=si.signif,
-                   mi.signif.thresh=mi.signif.thresh,
-                   signif.mi=mi.signif,
-                   field.centre.x=pf$field.centre[1],
-                   field.centre.y=pf$field.centre[2],
-                   field.max.x=pf$field.max.xy[1],
-                   field.max.y=pf$field.max.xy[2],
-                   field.size=pf$field.size,
-                   spatial.information.perspike=pf$spatial.information.perspike,
-                   mfr=pf$mfr,
-                   mutual.info=pf$mutual.info,
-                   mutual.info.bias=pf$mutual.info.bias,
-                   field.max=pf$field.max,
-                   quantile20=trace2090.quantiles[[1]],
-                   quantile90=trace2090.quantiles[[2]],
-                   #entropy=pf$entropy,
-                   nevents=nrow(cell.events))
-
-  g.placefield=NA
-  if (generate.plots) {
-    cell_event_rate = nrow(cell.events) / nrow(cell.df) * frame.hz
-    
-    pf.df = create.pf.df(pf$field, pf$occupancy, min.zscore=trace2090.quantiles[[1]], max.zscore=trace2090.quantiles[[2]],
-                         max.xy=getNBinsXY())
-    g.placefield = plot.pf(pf.df, max.xy=getNBinsXY()) +
-      labs(title=paste0('Cell ', cell_name, ' MER = ', format(cell_event_rate, digits=2), ' Hz',
-                        '\nSI = ', format(pf$spatial.information, digits=2),
-                        ifelse(si.signif, '*', ''),
-                        ' SI per spike = ', format(pf$spatial.information.perspike, digits=2),
-                        '\nMI - bias = ', format(pf$mutual.info - pf$mutual.info.bias, digits=3),
-                        ifelse(mi.signif, '*', '')),
-           fill='Deconv trace') +
-      theme(text = element_text(size=4),
-            plot.title = element_text(size=4))
-
-
-  }
-
-  return(list(cell_info=cell_info,
-             field=pf$field,
-             occupancy=pf$occupancy,
-             g=g.placefield))
-}
-```
-
-
-```{r}
-calc.spatial.info = function(data.traces, plot.dir='/tmp/pf_stability/', 
-                             generate.plots=FALSE, nshuffles=0) {
-  frame.hz = 20
-  data.traces = data.table(data.traces)
-  cells = unique(data.traces$cell_id) %>% sort
-  pci.df = data.frame()
-  fields = list()
-  occupancies = list()
-
-  #cl = makeCluster(3)
-  #registerDoParallel(cl)
-  #foreach::getDoParRegistered()
-  #foreach (cell_name = cells, .packages = "Rcpp",.noexport = "getCppPlaceField") %dopar% {
-  for (cell_name in cells) {
-    cell.df = data.traces[cell_id == cell_name & smooth_trans_x >= 0 & smooth_trans_y >= 0,]
-    pf = cell.spatial.info(cell.df, generate.plots, nshuffles)
-    
-    fields[[format(cell_name)]] = pf$field
-    occupancies[[format(cell_name)]] = pf$occupancy
-    pci.df = bind_rows(pci.df, pf$cell_info)
-    
-    if (!is.na(plot.dir)) {
-      dir.create(plot.dir, recursive=TRUE)
-      ggsave(paste0(plot.dir, 'place_field_cell_', cell_name, '.jpg'), pf$g,
-             width=3.5, height=3.0, units='cm', dpi=300)
-    }
-  }
-
-  #stopCluster(cl)
-  #stopImplicitCluster()
-  return(list(df=pci.df, field=fields, occupancy=occupancies))
-}
-```
-
-
-```{r}
-#caimg_result_dirs = caimg_result_dirs[1:5]
-run.threshold = 2
-  
-all.trials.si = data.frame()
-run.trials.si = data.frame()
-odd.trials.si = data.frame()
-even.trials.si = data.frame()
-early.trials.si = data.frame()
-late.trials.si = data.frame()
-
-all.fields = list()
-all.occupancies = list()
-run.fields = list()
-run.occupancies = list()
-odd.fields = list()
-odd.occupancies = list()
-even.fields = list()
-even.occupancies = list()
-early.fields = list()
-early.occupancies = list()
-late.fields = list()
-late.occupancies = list()
-
-add.meta.cols = function(df, animal, date) {
-  df$animal = as.factor(rep(animal, nrow(df)))
-  df$date = as.factor(rep(date, nrow(df)))
-  return(df)
-}
-
-for (ca_img_result_dir in caimg_result_dirs) {
-  print(paste('Processing dir: ', ca_img_result_dir))
-  cellmapping_file = file.path(ca_img_result_dir, 'cell_mapping.csv')
-  cellmapping.df = read.csv(cellmapping_file)
-  traces_file = file.path(ca_img_result_dir, 'traces_and_positions.csv')
-  data = fread(traces_file)
-  data = data[exp_title == 'trial',]
-  data.traces = melt.traces(data)
-  data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
-  dir_parts = str_split(ca_img_result_dir, '/')
-  animal = dir_parts[[1]][length(dir_parts[[1]]) - 2]
-  data.traces$animal = rep(animal, nrow(data.traces))
-  date = data.traces$date[1]
-  data.traces = data.table(data.traces)
-  data.traces.run = data.traces[velocity >= run.threshold,]
-  
-  print('Analysing spatial information')
-  plot.dir.prefix = paste(gen_imgs_dir, animal, format(date), sep='/')
-  
-  tic("spatial info on all trials")
-  all.spatial = calc.spatial.info(data.traces,
-                                  plot.dir=paste0(plot.dir.prefix, '/all/'),
-                                  generate.plots=TRUE,
-                                  nshuffles=100)
-  all.trials.si = bind_rows(all.trials.si, add.meta.cols(all.spatial$df, animal, date))
-  all.fields[[animal]][[format(date)]] = all.spatial$field
-  all.occupancies[[animal]][[format(date)]] = all.spatial$occupancy
-  toc()
-  
-  tic("spatial info on all trials running")
-  run.spatial = calc.spatial.info(data.traces.run,
-                                  plot.dir=paste0(plot.dir.prefix, '/run/'),
-                                  generate.plots=TRUE,
-                                  nshuffles=100)
-  run.trials.si = bind_rows(run.trials.si, add.meta.cols(run.spatial$df, animal, date))
-  run.fields[[animal]][[format(date)]] = run.spatial$field
-  run.occupancies[[animal]][[format(date)]] = run.spatial$occupancy
-  toc()
-
-  # Odd vs Even
-  tic("spatial info on odd trials")
-  odd.spatial = calc.spatial.info(data.traces.run[trial %% 2 == 1,],
-                                  paste0(plot.dir.prefix, '/odd/'),
-                                  nshuffles=100)
-  odd.trials.si = bind_rows(odd.trials.si, add.meta.cols(odd.spatial$df, animal, date))
-  odd.fields[[animal]][[format(date)]] = odd.spatial$field
-  odd.occupancies[[animal]][[format(date)]] = odd.spatial$occupancy
-  toc()
-
-  tic("spatial info on even trials")
-  even.spatial = calc.spatial.info(data.traces.run[trial %% 2 == 0,],
-                                   paste0(plot.dir.prefix, '/even/'),
-                                   nshuffles=100)
-  even.trials.si = bind_rows(even.trials.si, add.meta.cols(even.spatial$df, animal, date))
-  even.fields[[animal]][[format(date)]] = even.spatial$field
-  even.occupancies[[animal]][[format(date)]] = even.spatial$occupancy
-  toc()
-
-  # Early vs late
-  half.trial = ceiling(max(data.traces$trial) / 2)
-  tic("spatial info on early trials")
-  early.spatial = calc.spatial.info(data.traces.run[trial <= half.trial,],
-                                    paste0(plot.dir.prefix, '/early/'),
-                                    nshuffles=100)
-  early.trials.si = bind_rows(early.trials.si, add.meta.cols(early.spatial$df, animal, date))
-  early.fields[[animal]][[format(date)]] = early.spatial$field
-  early.occupancies[[animal]][[format(date)]] = early.spatial$occupancy
-  toc()
-
-  tic("spatial info on late trials")
-  late.spatial = calc.spatial.info(data.traces.run[trial > half.trial, ],
-                                   paste0(plot.dir.prefix, '/late/'),
-                                   nshuffles=100)
-  late.trials.si = bind_rows(late.trials.si, add.meta.cols(late.spatial$df, animal, date))
-  late.fields[[animal]][[format(date)]] = late.spatial$field
-  late.occupancies[[animal]][[format(date)]] = late.spatial$occupancy
-  toc()
-}
-
-```
 # Assess place information metrics and stability
 
 ```{r}
 run.trials.si %>%
   ggplot() +
-  geom_histogram(aes(x=spatial.information, color=signif.si)) +
+  geom_histogram(aes(x=spatial.information, color=signif.mi)) +
   facet_grid(. ~ animal) +
   xlab('Spatial information')
 ```
 
 
-Dist of spatial information in deconv traces
-```{r}
-ggplot(run.trials.si) +
-  geom_histogram(aes(x=spatial.information)) +
-  xlab('Spatial information (bits/s)') + 
-  facet_grid(. ~ date) +
-  gtheme
-```
-
 Odd vs even
 ```{r}
 bind_rows(odd.trials.si, even.trials.si) %>%
   group_by(date, animal, cell_id) %>%
-  dplyr::summarise(si.change=diff(spatial.information)) -> pf.diff.df
+  dplyr::summarise(si.change=diff(mutual.info - mutual.info.bias)) -> pf.diff.df
 
 pf.diff.df %>%
   ggplot() +
@@ -312,22 +57,9 @@ pf.diff.df %>%
   geom_hline(aes(yintercept=0), linetype='dashed') +
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  ylab('Spatial information diff (bits/s)')
+  ylab('Mutual information diff (bits/s)')
 ```
-First half vs second half
-```{r}
-bind_rows(early.trials.si, late.trials.si) %>%
-  group_by(date, animal, cell_id, signif.si) %>%
-  dplyr::summarise(si.change=diff(spatial.information)) -> pf.diff.df
 
-pf.diff.df %>%
-  ggplot() +
-  geom_violin(aes(x=date, y=si.change)) +
-  geom_hline(aes(yintercept=0), linetype='dashed') +
-  gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  ylab('Spatial information diff (bits/s)')
-```
 # Within day comparison of place fields
 
 Utility functions
@@ -353,6 +85,21 @@ pairequal = function(x) {
 
 ```
 
+First half vs second half
+```{r}
+bind_rows(early.trials.si, late.trials.si) %>%
+  group_by(date, animal, cell_id, signif.si) %>%
+  dplyr::summarise(si.change=pairdiff(spatial.information)) -> pf.diff.df
+
+pf.diff.df %>%
+  ggplot() +
+  geom_violin(aes(x=date, y=si.change)) +
+  geom_hline(aes(yintercept=0), linetype='dashed') +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab('Spatial information diff (bits/s)')
+```
+
 Calculate stats for changes between odd and even trials
 ```{r}
 
@@ -360,10 +107,12 @@ all.days = unique(run.trials.si$date) %>% as.Date
 
 compare.day.trials = function(day.trials.comparison, fields1, fields2, occupancies1, occupancies2) {
   pc.change.df = data.frame()
+  day.trials.comparison = data.table(day.trials.comparison)
   for (i in 1:length(all.days)) {
     day = all.days[i]
-    for (animal_name in unique(day.trials.comparison$animal)) {
-      day.trials = filter(day.trials.comparison, animal_name == animal, date == day) %>%
+    df = day.trials.comparison[date==format(day),]
+    for (animal_name in unique(df$animal)) {
+      day.trials = df[animal == animal_name, ] %>%
           arrange(animal, cell_id, group)
       day.trials %>%
         group_by(animal, cell_id) %>% 
@@ -378,6 +127,13 @@ compare.day.trials = function(day.trials.comparison, fields1, fields2, occupanci
                          field.max.diff = pairdiff(field.max, 0),
                          field.max.mean = mean(field.max),
                          signif.si.mean = mean(signif.si),
+                         mutual.info.mean = mean(mutual.info),
+                         mutual.info.min = min(mutual.info),
+                         mutual.info.diff = pairdiff(mutual.info),
+                         mutual.info.wo.bias.mean = mean(mutual.info - mutual.info.bias),
+                         mutual.info.wo.bias.min = min(mutual.info - mutual.info.bias),
+                         mutual.info.wo.bias.diff = pairdiff(mutual.info - mutual.info.bias),
+                         signif.mi.mean = mean(signif.mi),
                          date=day,
                          n=n()) %>%
         mutate(field.xy.dist = norm2(field.centre.x.diff, field.centre.y.diff)) %>%
@@ -421,27 +177,29 @@ early.late.comparison = compare.day.trials(early.late.trials, early.fields, late
 odd.even.comparison$group = 'odd vs even'
 early.late.comparison$group = 'early vs late'
 ```
+
 Do cells with signif spatial information retain their field from early to late trials?
 ```{r}
 day.comparison = bind_rows(odd.even.comparison, early.late.comparison)
 day.comparison$signif.si.factor = as.factor(day.comparison$signif.si.mean)
+day.comparison$signif.mi.factor = as.factor(day.comparison$signif.mi.mean)
 g.day.stability = day.comparison %>%
-  filter(signif.si.mean > 0) %>% 
+  filter(signif.mi.mean > 0) %>% 
   filter(field.size.max < 5) %>%
-  filter(date=='2019-08-29' | date == '2019-09-02') %>%
-  mutate(is.signif = signif.si.mean  == 1,
+  filter(date=='2019-08-27' | date == '2019-09-02') %>%
+  mutate(is.signif = signif.mi.mean  == 1,
          is.nearby = field.xy.dist < 10) %>%
-  #ggplot(aes(x=spatial.info.mean, y=field.cor, color=is.signif)) +
-  ggplot(aes(x=spatial.info.min, y=field.xy.dist, color=signif.si.factor)) +
+  #ggplot(aes(x=spatial.info.min, y=field.xy.dist, color=signif.si.factor)) +
+  ggplot(aes(x=mutual.info.wo.bias.min, y=field.xy.dist, color=signif.mi.factor)) +
   geom_point(alpha=0.3, size=1) +
-  geom_rug(aes(color=signif.si.factor), alpha=0.3) +
+  geom_rug(aes(color=signif.mi.factor), alpha=0.3) +
   #geom_vline(xintercept=si.thresh, linetype='dashed') +
   #geom_hline(yintercept=field.min.cor, linetype='dashed') +
   #geom_hline(yintercept=10, linetype='dashed') +
   gtheme +
   theme(axis.text.x = element_text(angle = -90, hjust = 1)) +
   facet_grid(date ~ group) +
-  xlab('Min spatial information (bits/s)') +
+  xlab('Min mutual information (bits/s)') +
   ylab('Shift of the place field peak  (%)') +
   labs(color='Day-stable\nplace cell', title='Early vs Late, Odd vs Even')
 g.day.stability
@@ -461,28 +219,32 @@ day.comparison.mean = bind_rows(odd.even.comparison, early.late.comparison) %>%
                    m.field.xy.dist=mean(field.xy.dist),
                    m.spatial.info.diff=mean(spatial.info.diff),
                    m.spatial.info=mean(spatial.info.mean),
-                   m.signif.si=mean(signif.si.mean))
+                   m.signif.si=mean(signif.si.mean),
+                   m.mutual.info=mean(mutual.info.mean),
+                   m.mutual.info.wo.bias=mean(mutual.info.wo.bias.mean),
+                   m.signif.mi=mean(signif.mi.mean))
 ```
 
 
-Classify place cells
+Classify place cells based on stability between odd vs even, early vs late sessions.
 
 ```{r}
 si.thresh = 0.2
+mi.thresh = 0.2
 field.size.thresh = 10
 field.peak.thresh = 0.1
 field.min.cor = 0.2
 
 # Classification of place cells based on SI on each subset of day sessions
 day.comparison.mean = day.comparison.mean %>%
-  mutate(is.day.pc = m.signif.si > 0.5 & 
-           m.spatial.info >= si.thresh &
+  mutate(is.day.pc = m.signif.mi > 0.5 & 
+           m.mutual.info.wo.bias >= mi.thresh &
            m.field.xy.dist <= 20 &
            m.field.size <= field.size.thresh &
            m.field.max >= field.peak.thresh,
            #m.field.cor >= field.min.cor) 
-         is.halfday.pc = m.signif.si >= 0.5 &
-           m.spatial.info >= si.thresh &
+         is.halfday.pc = m.signif.mi >= 0.5 &
+           m.mutual.info.wo.bias >= mi.thresh &
            m.field.size <= field.size.thresh &
            m.field.max >= field.peak.thresh)
 
@@ -515,17 +277,18 @@ Correlation betwen field correlations and spatial information during the day
 #run.trials.pc  %>%
 #  ggplot(aes(x=spatial.information, y=m.field.cor, color=is.place.cell)) +
 day.comparison.mean  %>%
-  mutate(si.signif = m.signif.si > 0.5) %>%
-  ggplot(aes(x=m.spatial.info, y=m.field.cor, color=is.day.pc)) +
+  #mutate(si.signif = m.signif.si > 0.5) %>%
+  mutate(mi.signif = m.signif.mi > 0.5) %>%
+  ggplot(aes(x=m.mutual.info.wo.bias, y=m.field.cor, color=is.day.pc)) +
   geom_point(alpha=0.2, size=1) +
   geom_rug(col=rgb(.5,0,0,alpha=.009)) +
   #geom_vline(xintercept=si.thresh, linetype='dashed') +
   geom_hline(yintercept=field.min.cor, linetype='dashed') +
   gtheme +
-  facet_grid(. ~ si.signif) +
+  facet_grid(. ~ mi.signif) +
   xlab('Mean spatial information (bits/s)') +
   ylab('Correlation of place field\nbetween trials') +
-  labs(color='Place cell', title='Significant SI')
+  labs(color='Place cell', title='Significant MI')
 
 ggsave(file.path(gen_imgs_dir, 'pc_choice.jpg'),
        width = 14, height = 10, units = 'cm')
@@ -678,46 +441,4 @@ pc.change.df2 %>%
   geom_violin(aes(x=days.diff, y=field.xy.dist, color=animal))
 ```
 
-
-# Distance of place fields to goal
-```{r}
-
-rewards.df = data.table(rewards.df)
-calc.min.rew.dist = function(day, animal_name, field.x, field.y) {
-  rews = rewards.df[date==day & animal == animal_name, ]
-  dist1 = norm2(rews$trans_x[1] - field.x, rews$trans_y[1] - field.y)
-  dist2 = norm2(rews$trans_x[2] - field.x, rews$trans_y[2] - field.y)
-  return(min(dist1, dist2))
-}
-
-pc.rew.dist.df = merged.run.trials.pc %>%
-  filter(!is.na(location_set), is.day.pc) %>%
-  ddply(.(date, animal, cell_id), mutate, 
-        #min.rew.dist=calc.min.rew.dist(date[1], animal[1], field.centre.x[1], field.centre.y[1]))
-        min.rew.dist=calc.min.rew.dist(date[1], animal[1], field.max.x[1], field.max.y[1]))
-
-ggplot(pc.rew.dist.df) +
-  geom_violin(aes(x=date, y=min.rew.dist)) +
-  gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  xlab('') + ylab('Field dist from reward')
-  
-```
-Pct of place cells within goal - to be infromative should compare with early trials or with habituation?
-```{r}
-pc.rew.dist.df %>%
-  mutate(is.goal.cell = min.rew.dist < 15) %>%
-  group_by(date, animal) %>%
-  dplyr::summarise(pct.goal = sum(is.goal.cell) / n() * 100) -> goal.cells.df
-
-mean(goal.cells.df$pct.goal)
-sem(goal.cells.df$pct.goal)
-
-goal.cells.df %>%
-  ggplot() +
-  geom_point(aes(x=date, y=pct.goal)) +
-  gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  xlab('') + ylab('Goal cells (% of place cells)')
-```
 
