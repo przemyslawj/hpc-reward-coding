@@ -60,8 +60,11 @@ for session_i = 1:numel(session_info.session_fpaths)
     sessionTimestamps = timestampsBySession{session_i}';
     sessionNo = str2num(replace(session_fpath_parts{end}, 'Session', ''));
 
-	trackingDir = fullfile(datedRootDir, 'trial', 'movie', 'tracking');
+	trackingDir = fullfile(datedRootDir, exp_title, 'movie', 'tracking');
 	trackingFile = [ dateStr '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
+    if strcmp(exp_title, 'test')
+        trackingFile = [ dateStr '-test_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
+    end
 	trackingFilepath = [trackingDir filesep trackingFile]
     if strcmp(exp_title, 'homecage') || ...
            ~exist(trackingFilepath, 'file')
