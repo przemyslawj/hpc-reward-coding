@@ -28,9 +28,9 @@ source('place_field.R')
 
 Setup example variables
 ```{r}
-animal_name = 'F-BL'
+animal_name = 'F-TL'
 exp_title='learning'
-day = '2019-09-02'
+day = '2019-09-06'
 cell_name = 256
 ```
 
@@ -64,10 +64,10 @@ oc1 = odd.occupancies[[animal_name]][[day]][[paste(cell_name)]]
 
 f2 = even.fields[[animal_name]][[day]][[paste(cell_name)]]
 oc2 = even.occupancies[[animal_name]][[day]][[paste(cell_name)]]
-odd.field = create.pf.df(f1, oc1)
-even.field = create.pf.df(f2, oc2)
+odd.field = create.pf.df(f1, oc1, max.xy=getNBinsXY())
+even.field = create.pf.df(f2, oc2, max.xy=getNBinsXY())
 
-oddeven.cor = field.cor(odd.field, even.field, make.cor.plot=TRUE)
+oddeven.cor = field.cor(odd.field, even.field, make.cor.plot=TRUE, max.xy=getNBinsXY())
 cor.title = paste0('Odd vs Even cor=', format(oddeven.cor$cor, digits=2))
 oddeven.cor$g + labs(title=cor.title, fill='Correlation')
 
@@ -76,12 +76,15 @@ oddeven.cor$g + labs(title=cor.title, fill='Correlation')
 
 ```{r}
 create.partial.df = function(fieldList, occupancyList, animal_name, day, cell_name,
-                             group_name, max.zscore) {
-  df = create.pf.df(fieldList[[animal_name]][[day]][[paste(cell_name)]],
-               occupancyList[[animal_name]][[day]][[paste(cell_name)]],
-               min.zscore=0,
-               max.zscore=max.zscore * 0.8,
-               max.xy=getNBinsXY())
+                             group_name, max.zscore=0.0) {
+  field = fieldList[[animal_name]][[day]][[paste(cell_name)]]
+  if (is.null(field)) {
+    #print(paste('Field not found for', animal_name, day, cell_name))
+    return(data.frame())
+  }
+  df = create.pf.df(field,
+                    occupancyList[[animal_name]][[day]][[paste(cell_name)]],
+                    max.xy=getNBinsXY())
   df$group = group_name
   return(df)
 }
@@ -105,7 +108,7 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
                      plot.title = element_text(size=6))
   
   g.placefield = bind_rows(odd.pf, even.pf, early.pf, late.pf) %>%
-    plot.pf() +
+    plot.pf(max.xy=getNBinsXY()) +
     facet_wrap(. ~ group, ncol = 2) +
     geom_rewards(rewards.df, animal_name, day) +
     labs(title=paste0(animal_name,
@@ -118,12 +121,12 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
     text.theme
 
   
-  oddeven.cor = field.cor(odd.pf, even.pf, make.cor.plot=TRUE)
+  oddeven.cor = field.cor(odd.pf, even.pf, make.cor.plot=TRUE, max.xy=getNBinsXY())
   cor.title = paste0('cor=', format(oddeven.cor$cor, digits=2))
   g.oddeven.cor = oddeven.cor$g + labs(title=cor.title, fill='') + 
     geom_rewards(rewards.df, animal_name, day) + text.theme
   
-  earlylate.cor = field.cor(early.pf, late.pf, make.cor.plot=TRUE)
+  earlylate.cor = field.cor(early.pf, late.pf, make.cor.plot=TRUE, max.xy=getNBinsXY())
   cor.title = paste0('cor=', format(earlylate.cor$cor, digits=2))
   g.earlylate.cor = earlylate.cor$g + labs(title=cor.title, fill='') + 
     geom_rewards(rewards.df, animal_name, day) + text.theme +
@@ -133,9 +136,9 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
   
   g = plot_grid(g.placefield, g.cors, ncol=1, rel_heights=c(2,1))
   if (!is.na(plot.dir)) {
-    if (cell.row$is.place.cell) {
+    if (cell.row$is.pc) {
       plot.subdir = file.path(plot.dir, 'place_cell')
-    } else if (cell.row$is.place.cell) {
+    } else if (cell.row$is.pc) {
       plot.subdir = file.path(plot.dir, 'signif')
     } else {
       plot.subdir = file.path(plot.dir, 'other')
@@ -180,10 +183,10 @@ for (i in 1:nrow(tmp.df)) {
 
 Load the traces
 ```{r}
-animal_name = 'E-BL'
-exp_title='habituation'
-day = '2019-08-28'
-cell_name = 15
+animal_name = 'F-TL'
+exp_title='learning'
+day = '2019-09-03'
+cell_name = 140
 #cell_name = 47
 
 
@@ -197,7 +200,10 @@ data.traces = melt.traces(data)
 data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no')) %>% data.table()
 
 
-cell.df = data.traces[cell_id == cell_name & velocity >= run.threshold]
+cell.df = data.traces[cell_id == cell_name 
+                      #& velocity >= -1 
+                      #& (atReward0 == 1 | atReward1 == 1)
+                      , ]
 ```
 
 ```{r}
@@ -224,7 +230,7 @@ plot.cell.trials = function(cell.df) {
                          min.zscore=pf$cell_info$quantile20, 
                          max.zscore=pf$cell_info$quantile90, 
                          max.xy=getNBinsXY())
-    pf.df$trial = trial_no
+    pf.df$trial = num2str(trial_no, fmt=0)
     all.pf.df = bind_rows(all.pf.df, pf.df)
   }
   
@@ -237,12 +243,13 @@ plot.cell.trials = function(cell.df) {
                          min.zscore=pf$cell_info$quantile20, 
                          max.zscore=pf$cell_info$quantile90, 
                          max.xy=getNBinsXY())
-  pf.df$trial = 0
+  pf.df$trial = 'all'
   all.pf.df = bind_rows(all.pf.df, pf.df)
   
   cell_info = pf$cell_info
   g = plot.pf(all.pf.df, 
           max.xy=getNBinsXY()) +
+    geom_rewards(rewards.df, animal_name, day) +
     facet_wrap(. ~  trial, ncol=3) +
     labs(fill='Deconv trace',
          title=paste0(format(day), ' ', animal_name, ' Cell ', cell_name, 
@@ -259,6 +266,90 @@ plot.cell.trials = function(cell.df) {
 }
 
 plot.cell.trials(cell.df)
+```
+
+# Changes in PF over days
+```{r}
+#selected.days = c('2019-08-29', '2019-08-30', '2019-09-03', '2019-09-04', '2019-09-06','2019-09-07', '2019-09-08')
+selected.days = format(all.days)
+
+create.selected.pf.df = function(animal_name, cell_name) {
+  ndays = length(selected.days)
+  data.frame(animal=rep(animal_name, ndays), cell_id=rep(format(cell_name), ndays), day=selected.days)  
+}
+
+rowwise.partial.df = function(row) {
+  animal_name = as.character(row$animal)
+  cell_name = format(row$cell_id)
+  day = format(row$day)
+  
+  field = run.fields[[animal_name]][[day]][[cell_name]]
+  if (is.null(field)) {
+    #print(paste('Field not found for', animal_name, day, cell_name))
+    return(data.frame())
+  }
+  df = create.pf.df(field,
+                    run.occupancies[[animal_name]][[day]][[cell_name]],
+                    max.xy=getNBinsXY())
+
+  df$animal = animal_name
+  df$cell_id = cell_name
+  return(df)
+}
+
+goal.cell.db = data.table(goal.cell.db)
+
+
+rowwise.cell.desc = function(row) {
+  animal_name = as.character(row$animal)
+  cell_name = format(row$cell_id)
+  day = format(row$day)
+  goal.db.row = goal.cell.db[animal==animal_name & cell_id==cell_name & date==day,]
+  row$desc = 'NI'
+  if (nrow(goal.db.row) > 0) {
+    row$desc = paste0(ifelse(goal.db.row$is.pc, 'PC ', 'NPC'), ifelse(goal.db.row$is.goal.cell, ' & GC', ''))
+  }
+  row
+}
+
+plot.all.day.fields = function(animal_name, cell_id) {
+  selected.cells.df = create.selected.pf.df(animal_name, cell_id)
+  pf = selected.cells.df %>%
+    adply(.margins=1, .fun=rowwise.partial.df) %>%
+    dplyr::rename(date=day)
+  
+  cell.desc.df = selected.cells.df %>%
+    adply(.margins=1, .fun=rowwise.cell.desc) %>%
+    dplyr::rename(date=day)
+  
+  plot.pf(pf, max.xy=getNBinsXY()) +
+    facet_wrap(. ~ date, ncol=3) +
+    geom_text(data=cell.desc.df, mapping=aes(x=1, y=getNBinsXY() - 2, label=desc), size=3, hjust=0)+
+    geom_rewards(filter(rewards.df, date %in% selected.days), animal_name) 
+}
+
+plot.all.day.fields('F-TL', 10)
+```
+Save place fields for all days
+```{r}
+animal.cells.df = goal.cell.db %>%
+  select(animal, cell_id) %>% 
+  dplyr::distinct()
+
+plot.rootdir = "/mnt/DATA/Prez/pf-shuffled/"
+for (i in 1:nrow(animal.cells.df)) {
+  row = animal.cells.df[i, ]
+  animal_name = as.character(row$animal)
+  cell_name = format(row$cell_id)
+  g = plot.all.day.fields(animal_name, cell_name) +
+    labs(title = paste(animal_name, cell_name))
+  plot.dir = file.path(plot.rootdir, animal_name)
+  if (!file.exists(plot.dir)) {
+    dir.create(plot.dir, recursive=TRUE)
+  }
+  ggsave(file.path(plot.dir, paste0(row$cell_id, '.jpg')),
+         g, width=10, height=10, units='cm')
+}
 ```
 
 

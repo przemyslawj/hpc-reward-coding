@@ -73,7 +73,7 @@ add_location_set = function(merged.df) {
           prev_locs = append(prev_locs, loc)
         } else {
           location_set = location_set + 1
-          prev_locs = c(loc)
+          prev_locs = c(prev_locs, loc)
           prev_date = animal.locations$date[i]
         }
       }

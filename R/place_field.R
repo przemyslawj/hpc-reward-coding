@@ -4,6 +4,8 @@ library(data.table)
 library(reshape2) # for melt
 Rcpp::sourceCpp('place_field.cpp')
 
+source('utils.R')
+
 get.entropy = function(freqs) {
   -sum(freqs * log2(freqs))
 }
@@ -30,8 +32,6 @@ getPlaceField = function(trial.df, trace.col) {
   for (i in 1:length(trace)) {
     x = max(1, round(trial.df$smooth_trans_x[i] / binSizeX))
     y = max(1, round(trial.df$smooth_trans_y[i] / binSizeY))
-    #x = max(1, trial.df$binned_posx[i])
-    #y = max(1, trial.df$binned_posy[i])
     occupancyMap[x, y] = occupancyMap[x, y] + 1
     totalActivityMap[x, y] = totalActivityMap[x, y] + trace[i]
   }
@@ -69,7 +69,7 @@ norm2 = function(x, y) {
 }
 
 # Create df with smoothed values from matrix representation
-create.pf.df = function(M, occupancyM, min.zscore=0, max.zscore=2, min.occupancy.sec=1, frame.rate=20, max.xy=34) {
+create.pf.df = function(M, occupancyM, max.xy, min.occupancy.sec=1, frame.rate=20) {
   sigma = 1.4
   M1=gauss2dsmooth(M,lambda=sigma, nx=11, ny=11)
   df1 = reshape2::melt(M1) #%>%
@@ -85,12 +85,11 @@ create.pf.df = function(M, occupancyM, min.zscore=0, max.zscore=2, min.occupancy
     filter(value >= min.smoothed.occupancy) %>%
     filter(norm2(Var1 - mid.pt, Var2 - mid.pt) <= mid.pt)
   df2 = left_join(df_org, df1, by=c('Var1'='Var1', 'Var2'='Var2'), suffix=c('.occupancy', '.conv'))
-    #filter(value.conv > -10.0)
   
   return(df2)
 }
   
-plot.pf = function(df, max.xy=34) {
+plot.pf = function(df, max.xy) {
   jet.colours = colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
   
   ggplot() +
@@ -101,7 +100,7 @@ plot.pf = function(df, max.xy=34) {
 }
 
 
-field.cor = function(field1, field2, make.cor.plot=FALSE, max.xy=34) {
+field.cor = function(field1, field2, max.xy, make.cor.plot=FALSE) {
   result = list()
   joined.fields = inner_join(field1, field2, by=c('Var1', 'Var2')) %>%
     # Avoid calculating correlation on the edges: the blue highly correlated and increases the overall correlation
@@ -122,6 +121,7 @@ field.cor = function(field1, field2, make.cor.plot=FALSE, max.xy=34) {
     g = ggplot(joined.fields) +
       geom_raster(aes(x=Var1, y=max.xy-Var2, fill=value.conv), interpolate=FALSE) +
       scale_fill_gradient2(low = 'blue', mid = 'white', high='red', midpoint = 0.0) +
+      xlim(c(0, max.xy)) + ylim(c(0, max.xy)) +
       theme_void()
     result$g = g
   }
@@ -145,12 +145,13 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
                 g=NULL))
   }
   cell_name = cell.df$cell_id[1]
-
-  trial_ends = c(which(diff(cell.df$timestamp) < 0), nrow(cell.df))
-  trace.quantiles = quantile(trace.vals, c(0.85, 0.95, 1.0), na.rm=TRUE) %>% unname + 0.01
-  trace.quantiles = c(0.5, 1000.0)
+  trial_ends = get.trial.ends(cell.df$timestamp)
+  #trace.quantiles = quantile(trace.vals, c(0.85, 0.95, 1.0), na.rm=TRUE) %>% unname + 0.01
+  #trace.quantiles = c(0.5, 1000.0)
+  trace.quantiles = quantile(trace.vals, c(0.2, 0.95, 0.99, 1.0), na.rm=TRUE)  + 0.01
   pf = with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, trace.vals,
-                                      trace.quantiles, trial_ends, nshuffles,
+                                      c(trace.quantiles[["95%"]], trace.quantiles[["100%"]]), 
+                                      trial_ends, nshuffles,
                                       2 * frame.hz,
                                       timebin.size))
 
@@ -158,7 +159,6 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
   si.signif = pf$spatial.information >= si.signif.thresh
   mi.signif.thresh = quantile(pf$shuffle.mi, 0.95, na.rm=TRUE)[[1]]
   mi.signif = pf$spatial.information >= mi.signif.thresh
-  trace2099.quantiles = quantile(trace.vals, probs=c(0.2, 0.99), na.rm=TRUE)
 
   cell_info = list(cell_id=cell_name,
                    spatial.information=pf$spatial.information,
@@ -170,16 +170,17 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
                    field.centre.y=pf$field.centre[2],
                    field.max.x=pf$field.max.xy[1],
                    field.max.y=pf$field.max.xy[2],
-                   field.size=pf$field.size,
+                   field.size.50=pf$field.size.50,
+                   field.size.25=pf$field.size.25,
                    spatial.information.perspike=pf$spatial.information.perspike,
                    mfr=pf$mfr,
                    mutual.info=pf$mutual.info,
                    mutual.info.bias=pf$mutual.info.bias,
                    space.sampling.factor = pf$space.sampling.factor,
                    field.max=pf$field.max,
-                   quantile20=trace2099.quantiles[[1]],
-                   quantile99=trace2099.quantiles[[2]],
-                   #entropy=pf$entropy,
+                   sparsity = pf$sparsity,
+                   quantile20=trace.quantiles[["20%"]],
+                   quantile99=trace.quantiles[["99%"]],
                    nevents=nrow(cell.events))
 
   g.placefield=NA

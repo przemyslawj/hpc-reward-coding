@@ -1,5 +1,5 @@
   ---
-title: "Analysis of place field stability across days and sessions"
+title: "Analysis of place field stability within sessions on the same day"
 output: html_notebook
 ---
 
@@ -62,29 +62,6 @@ pf.diff.df %>%
 
 # Within day comparison of place fields
 
-Utility functions
-```{r}
-pairdiff = function(x, empty.val=0) {
-  if (length(x) == 0) {
-    return(0)
-  }
-  if (length(x) == 1) {
-    x=c(x, empty.val)
-  }
-  diff(x)[[1]]
-}
-
-pairequal = function(x) {
-  if (length(x) < 2) {
-    return(TRUE)
-  }
-  # make two NAs return TRUE
-  x[is.na(x)] = -1
-  return(x[[1]] == x[[2]])
-}
-
-```
-
 First half vs second half
 ```{r}
 bind_rows(early.trials.si, late.trials.si) %>%
@@ -102,7 +79,7 @@ pf.diff.df %>%
 
 Calculate stats for changes between odd and even trials
 ```{r}
-
+max.xy = getNBinsXY()
 all.days = unique(run.trials.si$date) %>% as.Date
 
 compare.day.trials = function(day.trials.comparison, fields1, fields2, occupancies1, occupancies2) {
@@ -121,9 +98,9 @@ compare.day.trials = function(day.trials.comparison, fields1, fields2, occupanci
                          spatial.info.diff = pairdiff(spatial.information),
                          field.centre.x.diff = pairdiff(field.centre.x, 100),
                          field.centre.y.diff = pairdiff(field.centre.y, 100),
-                         field.size.diff = pairdiff(field.size, 100),
-                         field.size.mean = mean(field.size),
-                         field.size.max = max(field.size),
+                         field.size.diff = pairdiff(field.size.50, 100),
+                         field.size.mean = mean(field.size.50),
+                         field.size.max = max(field.size.50),
                          field.max.diff = pairdiff(field.max, 0),
                          field.max.mean = mean(field.max),
                          signif.si.mean = mean(signif.si),
@@ -151,8 +128,9 @@ compare.day.trials = function(day.trials.comparison, fields1, fields2, occupanci
         
         max.zscore = max(max(m1), max(m2))
         
-        cor.res = field.cor(create.pf.df(m1, o1, max.zscore=max.zscore), 
-                            create.pf.df(m2, o2, max.zscore=max.zscore))
+        cor.res = field.cor(create.pf.df(m1, o1, max.xy=max.xy), 
+                            create.pf.df(m2, o2, max.xy=max.xy),
+                            max.xy=max.xy)
         pc.change[date==day & animal==animal_name & cell_id==cell_name,]$field.cor = cor.res$cor
       }
       
@@ -333,112 +311,5 @@ locations.df = data.table(locations.df)
 setkey(locations.df, date, animal)
 ```
 
-Calculate stats for changes between day combinations.
-```{r}
-
-all.days = unique(run.trials.pc$date) %>% as.Date
-day.comb = combn(1:length(all.days), 2)
-merged.run.trials.pc = left_join(run.trials.pc, locations.df, by=c('animal', 'date'))
-pc.change.df = data.frame()
-for (i in 1:ncol(day.comb)) {
-  days_i = day.comb[,i]
-  days = all.days[days_i]
-  for (animal_name in unique(run.trials.pc$animal)) {
-    # run.trials.si[animal_name == animal & (date == days[1] | date == days[2]),
-    #                .(animal, cell_id,
-    #                  spatial.info.diff = pairdiff(spatial.information),
-    #                  field.centre.x.diff = pairdiff(field.centre.x, 100),
-    #                  field.centre.y.diff = pairdiff(field.centre.y, 100),
-    #                  field.size.diff = pairdiff(field.size, 100),
-    #                  field.max.diff = pairdiff(field.max, 0),
-    #                  max.signif = max(signif.si, FALSE),
-    #                  signif.si.changed = pairdiff(signif.si, FALSE) != 0,
-    #                  days.diff = days_i[2] - days_i[1],
-    #                  date.fst = days[1],
-    #                  date.snd = days[2],
-    #                  n=.N),
-    #               by=.(animal, cell_id)] -> cell.fields
-    # cell.fields$date.diff = paste(format(days[2]), ' - ', format(days[1]))
-    # setkey(cell.fields, date.fst, date.snd, animal, cell_id, is.place.cell)
-    # merge(locations.df, cell.fields)
-    filter(merged.run.trials.pc, animal_name == animal, date == days[1] | date == days[2]) %>%
-      arrange(animal, cell_id, desc(date)) %>%
-      group_by(animal, cell_id) %>% 
-      dplyr::summarise(spatial.info.diff = pairdiff(spatial.information),
-                       m.field.cor.diff = pairdiff(m.field.cor, 0),
-                       field.centre.x.diff = pairdiff(field.centre.x, 100),
-                       field.centre.y.diff = pairdiff(field.centre.y, 100),
-                       field.size.diff = pairdiff(field.size, 100),
-                       field.max.diff = pairdiff(field.max, 0),
-                       max.signif = max(signif.si, FALSE),
-                       signif.si.changed = !pairequal(signif.si),
-                       max.day.pc = max(is.day.pc, FALSE),
-                       is.day.pc.changed = !pairequal(is.day.pc),
-                       is.halfday.pc.changed = !pairequal(is.halfday.pc),
-                       same_rew_loc = pairequal(location_set),
-                       days.diff = days_i[2] - days_i[1],
-                       date.diff=paste(format(days[2]), ' - ', format(days[1])),
-                       date.fst = days[1],
-                       date.snd = days[2],
-                       n=n()) %>%
-      mutate(field.xy.dist = norm2(field.centre.x.diff, field.centre.y.diff)) %>%
-      select(-field.centre.x.diff, -field.centre.y.diff)-> pc.change
-    
-      pc.change = data.table(pc.change)
-      setkey(pc.change, date.fst, date.snd, animal, cell_id)
-      cells = unique(pc.change$cell_id)
-      pc.change$field.cor = rep(0, length(cells))
-      for (cell_name in cells) {
-        m1 = run.fields[[animal_name]][[format(days[1])]][[paste(cell_name)]]
-        m2 = run.fields[[animal_name]][[format(days[2])]][[paste(cell_name)]]
-        if (!is.null(m1) && !is.null(m2)) {  # check the cell present on both days
-          o1 = run.occupancies[[animal_name]][[format(days[1])]][[paste(cell_name)]]
-          o2 = run.occupancies[[animal_name]][[format(days[2])]][[paste(cell_name)]]
-          
-          max.zscore = max(max(m1), max(m2))
-          
-          cor.res = field.cor(create.pf.df(m1, o1, max.zscore=max.zscore), 
-                              create.pf.df(m2, o2, max.zscore=max.zscore))
-          pc.change[date==day & animal==animal_name & cell_id==cell_name,]$field.cor = cor.res$cor
-        }
-      }
-    
-    pc.change.df = bind_rows(pc.change.df, pc.change)
-  }
-}
-```
-
-How many place cells remained place cells
-```{r}
-pc.change.df %>%
-  filter(max.day.pc > 0) %>%
-  filter(n>1) %>%
-  filter(same_rew_loc) %>%
-  filter(days.diff <= 4) %>%
-  mutate(pc.unchanged = (!is.day.pc.changed)) -> x
-
-DT::datatable(x)
-
-x %>%
-  group_by(animal, days.diff) %>%
-  dplyr::summarise(pct.unchanged=sum(pc.unchanged) / n() * 100) %>%
-  ggplot() +
-  geom_line(aes(x=days.diff, y=pct.unchanged, color=animal, group=animal))
-```
-
-How many place cells kept their field
-```{r}
-max.moved.dist = 10
-
-pc.change.df2 = filter(pc.change.df, days.diff <= 4)
-pc.change.df2$days.diff = as.factor(pc.change.df2$days.diff)
-pc.change.df2 %>%
-  filter(n > 1) %>%
-  filter(max.day.pc > 0) %>%
-  filter(same_rew_loc) %>%
-  filter(!is.day.pc.changed) %>%
-  ggplot() +
-  geom_violin(aes(x=days.diff, y=field.xy.dist, color=animal))
-```
 
 

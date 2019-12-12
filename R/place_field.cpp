@@ -9,10 +9,11 @@
 #include <cmath>
 #include <float.h>
 #include <vector>
-#include <random>
 #include <iostream>
 #include <iterator>
 #include <algorithm>
+//#include "trace_algorithm.cpp" - can not be included using Rcpp
+
 
 using namespace Rcpp;
 
@@ -39,11 +40,12 @@ public:
   NumericMatrix totalActivityMap;
   NumericMatrix occupancyMap;
   NumericMatrix fr;
-  double mfr;
-  double SI;
-  double MI;
-  double MI_bias;
-  double space_sampling_factor;
+  double mfr = 0.0;
+  double SI = 0.0;
+  double MI = 0.0;
+  double MI_bias = 0.0;
+  double space_sampling_factor = 0.0;
+  double sparsity = 0.0;
 
   SpatialInfoData() {
     totalActivityMap = NumericMatrix(1,1);
@@ -58,7 +60,8 @@ public:
                   double SI,
                   double MI,
                   double MI_bias,
-                  double space_sampling_factor) {
+                  double space_sampling_factor,
+                  double sparsity) {
     this->totalActivityMap = totalActivityMap;
     this->occupancyMap = occupancyMap;
     this->fr = fr;
@@ -67,6 +70,7 @@ public:
     this->MI = MI;
     this->MI_bias = MI_bias;
     this->space_sampling_factor = space_sampling_factor;
+    this->sparsity = sparsity;
   }
 };
 
@@ -126,11 +130,14 @@ SpatialInfoData calculateSpatialInformation(NumericVector& x,
 
   // Calculate firing rates
   double fr_offset = 100.0;
+  double sparsity = 0.0;
   for (int yy = 0; yy < N_BINS_Y; ++yy) {
     for (int xx = 0; xx < N_BINS_X; ++xx) {
       if (occupancyMap(xx,yy) > 0) {
         fr(xx,yy) = totalActivityMap(xx,yy) / occupancyMap(xx,yy);
         fr_offset = std::min(fr_offset, fr(xx,yy));
+        double p_s = (double) occupancyMap(xx, yy) / binned_trace_size;
+        sparsity += p_s * std::pow(fr(xx,yy), 2) / std::pow(mfr, 2);
       } else {
         fr(xx,yy) = NAN;
       }
@@ -141,7 +148,6 @@ SpatialInfoData calculateSpatialInformation(NumericVector& x,
   // fr_offset -= 10e-10;
   // Avoid FR==0, so the log's can be calculated everywhere
   fr_offset = -10e-10;
-
   // Update firing rates by the offset
   for (int yy = 0; yy < N_BINS_Y; ++yy) {
     for (int xx = 0; xx < N_BINS_X; ++xx) {
@@ -202,12 +208,12 @@ SpatialInfoData calculateSpatialInformation(NumericVector& x,
 
   // Mutual information bias estimate from: Analytical estimates of limited sampling biases in different
   // information measures, Panzeri & Treves, 1996.
-  double MI_bias = (totalResponseBins - nresponse - occupiedBins - 1 )  / (2 * N * std::log(2));
+  double MI_bias = (totalResponseBins - nresponse - occupiedBins + 1 )  / (2 * N * std::log(2));
   Debug("totalResponseBins=" << totalResponseBins);
   Debug(",N=" << N);
   Debug(", MI_bias=" << MI_bias <<std::endl);
   double space_sampling_factor = ((double) occupiedBins) / S;
-  return SpatialInfoData(totalActivityMap, occupancyMap, fr, mfr, SI, MI, MI_bias, occupiedBins);
+  return SpatialInfoData(totalActivityMap, occupancyMap, fr, mfr, SI, MI, MI_bias, space_sampling_factor, sparsity);
 }
 
 
@@ -216,8 +222,63 @@ int getNBinsXY() {
   return N_BINS_X;
 }
 
-// Exports the C++ function to R using the Rcpp::sourceCpp
-// function.
+
+NumericVector chunkShuffle(NumericVector& trace,
+                           NumericVector& trialEnds, 
+                           int shuffleChunkLength) {
+  
+  // Shuffle the trace keeping the order within small chunks
+  int nchunks = std::ceil(((double) trace.size() / shuffleChunkLength));
+  std::vector<int> chunkShuffle(nchunks);
+  for (int j = 0; j < nchunks; ++j) {
+    chunkShuffle[j] = j;
+  }
+  
+  NumericVector shuffledTrace(trace.size(), 0);
+  
+  // Shuffle chunks only within the same trial
+  int trialStart = 0;
+  for (int trial_i = 0; trial_i < trialEnds.size(); ++trial_i) {
+    int trialEnd = trialEnds[trial_i] / shuffleChunkLength;
+    std::random_shuffle(chunkShuffle.begin() + trialStart, chunkShuffle.begin() + trialEnd);
+    trialStart = trialEnd;
+  }
+  
+  // Offset from the start to randomize chunk boundaries
+  int offset = std::rand() % ((int) shuffleChunkLength/2);
+  for (int chunk = 0; chunk < nchunks; ++chunk) {
+    int src_chunk_start = chunk * shuffleChunkLength + offset;
+    int target_chunk_start = chunkShuffle[chunk] * shuffleChunkLength + offset;
+    for (int j = 0; j < shuffleChunkLength; ++j) {
+      int src_index = (src_chunk_start + j) % trace.size();
+      int target_index = (target_chunk_start + j) % trace.size();
+      shuffledTrace[target_index] = trace[src_index];
+    }
+  }
+  
+  return shuffledTrace;
+}
+
+NumericVector randomShift(NumericVector& trace,
+                          NumericVector& trialEnds, 
+                          int minShift) {
+  NumericVector shiftedTrace(trace.size(), 0);
+  
+  int trialStart = 0;
+  for (int trial_i = 0; trial_i < trialEnds.size(); ++trial_i) {
+    int ntrial = trialEnds[trial_i] - trialStart;
+    int shift = std::rand() % (ntrial - 2 * minShift) + minShift;
+    for (int i = 0; i < ntrial; ++i) {
+      int within_trial_i = (i + shift) % ntrial;
+      shiftedTrace[trialStart + i] = trace[trialStart + within_trial_i];
+    }
+    
+    trialStart = trialEnds[trial_i];
+  }
+  
+  return shiftedTrace;
+}
+
 // [[Rcpp::export]]
 SEXP getCppPlaceField(NumericVector& x,
                       NumericVector& y,
@@ -246,11 +307,14 @@ SEXP getCppPlaceField(NumericVector& x,
   result["spatial.information"] = 0.0;
   result["spatial.information.perspike"] = 0.0;
   result["field.centre"] = fieldCentre;
-  result["field.size"] = 0;
+  result["field.size.50"] = 0;
+  result["field.size.25"] = 0;
   result["field.max"] = 0;
   result["field.max.xy"] = fieldMaxXY;
   result["shuffle.si"]= shuffleSI;
   result["shuffle.mi"]= shuffleMI;
+  result["space.sampling.factor"] = 0.0;
+  result["sparsity"] = 0.0;
 
   if (trace.size() == 0) {
     return(result);
@@ -284,7 +348,8 @@ SEXP getCppPlaceField(NumericVector& x,
   double weightedFieldX = 0.0;
   double weigthedFieldY = 0.0;
   double totalWeights = 0.0;
-  int nFieldBins = 0;
+  int nFieldBins50 = 0;
+  int nFieldBins25 = 0;
   for (int yy = 0; yy < N_BINS_Y; ++yy) {
     for (int xx = 0; xx < N_BINS_X; ++xx) {
       if (field(xx,yy) != NAN_FIELD) {
@@ -296,7 +361,10 @@ SEXP getCppPlaceField(NumericVector& x,
           weightedFieldX += xx * weight;
           weigthedFieldY += yy * weight;
           totalWeights += weight;
-          ++nFieldBins;
+          ++nFieldBins50;
+        }
+        if (field(xx,yy) >= 0.25 * maxField) {
+          ++nFieldBins25;
         }
       }
     }
@@ -304,44 +372,20 @@ SEXP getCppPlaceField(NumericVector& x,
   fieldCentre[0] = weightedFieldX / std::max(0.01, totalWeights) * binSizeX;
   fieldCentre[1] = weigthedFieldY / std::max(0.01, totalWeights) * binSizeY;
 
-  double mean_field = fieldTotal / nfield;
-  for (int yy = 0; yy < N_BINS_Y; ++yy) {
-    for (int xx = 0; xx < N_BINS_X; ++xx) {
-      if (field(xx,yy) == NAN_FIELD) {
-        field(xx,yy) = mean_field;
-      }
-    }
-  }
+  // TODO: should remove the code below?
+  //double mean_field = fieldTotal / nfield;
+  //for (int yy = 0; yy < N_BINS_Y; ++yy) {
+  //  for (int xx = 0; xx < N_BINS_X; ++xx) {
+  //    if (field(xx,yy) == NAN_FIELD) {
+  //      field(xx,yy) = mean_field;
+  //    }
+  //  }
+  //}
 
-  // Shuffle the trace keeping the order within small chunks
-  int nchunks = std::ceil(((double) trace.size() / shuffleChunkLength));
-  std::vector<int> chunkShuffle(nchunks);
-  for (int j = 0; j < nchunks; ++j) {
-    chunkShuffle[j] = j;
-  }
   for (int i = 0; i < nshuffles; ++i) {
-    NumericVector shuffledTrace(trace.size(), 0);
 
-    // Shuffle chunks only within the same trial
-    int trialStart = 0;
-    for (int trial_i = 0; trial_i < trialEnds.size(); ++trial_i) {
-      int trialEnd = trialEnds[trial_i] / shuffleChunkLength;
-      std::random_shuffle(chunkShuffle.begin() + trialStart, chunkShuffle.begin() + trialEnd);
-      trialStart = trialEnd;
-    }
-
-    // Offset from the start to randomize chunk boundaries
-    int offset = std::rand() % ((int) shuffleChunkLength/2);
-    for (int chunk = 0; chunk < nchunks; ++chunk) {
-      int src_chunk_start = chunk * shuffleChunkLength + offset;
-      int target_chunk_start = chunkShuffle[chunk] * shuffleChunkLength + offset;
-      for (int j = 0; j < shuffleChunkLength; ++j) {
-        int src_index = (src_chunk_start + j) % trace.size();
-        int target_index = (target_chunk_start + j) % trace.size();
-        shuffledTrace[target_index] = trace[src_index];
-      }
-    }
-
+    NumericVector shuffledTrace = chunkShuffle(trace, trialEnds, shuffleChunkLength);
+    //NumericVector shuffledTrace = randomShift(trace, trialEnds, shuffleChunkLength * 2);
     SpatialInfoData shuffleData = calculateSpatialInformation(x, y, shuffledTrace,
                                                               traceQuantiles, timebin_size);
     shuffleSI[i] = shuffleData.SI;
@@ -358,7 +402,8 @@ SEXP getCppPlaceField(NumericVector& x,
   result["spatial.information.perspike"] = spatialInfoData.SI / spatialInfoData.mfr;
   result["mfr"] = spatialInfoData.mfr;
   result["field.centre"] = fieldCentre;
-  result["field.size"] = ((double) nFieldBins) / (N_BINS_X * N_BINS_Y) * 100.0;
+  result["field.size.50"] = ((double) nFieldBins50) / (N_BINS_X * N_BINS_Y) * 100.0;
+  result["field.size.25"] = ((double) nFieldBins25) / (N_BINS_X * N_BINS_Y) * 100.0;
   result["field.max"] = maxField;
   result["field.max.xy"] = fieldMaxXY;
   result["shuffle.si"] = shuffleSI;
@@ -366,6 +411,7 @@ SEXP getCppPlaceField(NumericVector& x,
   result["mutual.info.bias"] = spatialInfoData.MI_bias;
   result["shuffle.mi"] = shuffleMI;
   result["space.sampling.factor"] = spatialInfoData.space_sampling_factor;
+  result["sparsity"] = spatialInfoData.sparsity;
   return(result);
 }
 

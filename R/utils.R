@@ -16,3 +16,27 @@ max.consecutive.days = function(dates) {
   days.gap = diff(c(as.Date('2018-01-01'), ordered.dates, as.Date('2100-01-01')))
   max(diff(which(days.gap != 1)))
 }
+
+
+get.trial.ends = function(timestamps) {
+  c(which(diff(timestamps) < 0), length(timestamps))
+}
+
+pairdiff = function(x, empty.val=0) {
+  if (length(x) == 0) {
+    return(0)
+  }
+  if (length(x) == 1) {
+    x=c(x, empty.val)
+  }
+  diff(x)[[1]]
+}
+
+pairequal = function(x) {
+  if (length(x) < 2) {
+    return(TRUE)
+  }
+  # make two NAs return TRUE
+  x[is.na(x)] = -1
+  return(x[[1]] == x[[2]])
+}

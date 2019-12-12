@@ -122,15 +122,15 @@ for (ca_img_result_dir in caimg_result_dirs) {
   print('Analysing spatial information')
   plot.dir.prefix = paste(gen_imgs_dir, animal, format(date), sep='/')
 
-  #tic("spatial info on all trials")
-  #all.spatial = calc.spatial.info(data.traces[exp_title == 'trial'],
-  #                                plot.dir=paste0(plot.dir.prefix, '/all/'),
-  #                                generate.plots=TRUE,
-  #                                nshuffles=100)
-  #all.trials.si = bind_rows(all.trials.si, add.meta.cols(all.spatial$df, animal, date))
-  #all.fields[[animal]][[format(date)]] = all.spatial$field
-  #all.occupancies[[animal]][[format(date)]] = all.spatial$occupancy
-  #toc()
+  tic("spatial info on all trials")
+  all.spatial = calc.spatial.info(data.traces[exp_title == 'trial'],
+                                  plot.dir=paste0(plot.dir.prefix, '/all/'),
+                                  generate.plots=TRUE,
+                                  nshuffles=100)
+  all.trials.si = bind_rows(all.trials.si, add.meta.cols(all.spatial$df, animal, date))
+  all.fields[[animal]][[format(date)]] = all.spatial$field
+  all.occupancies[[animal]][[format(date)]] = all.spatial$occupancy
+  toc()
 
   tic("spatial info on all trials running")
   run.spatial = calc.spatial.info(data.traces.run[exp_title == 'trial'],
@@ -159,7 +159,7 @@ for (ca_img_result_dir in caimg_result_dirs) {
   tic("spatial info on odd trials")
   odd.spatial = calc.spatial.info(data.traces.run[exp_title == 'trial' & trial %% 2 == 1,],
                                   paste0(plot.dir.prefix, '/odd/'),
-                                  nshuffles=0)
+                                  nshuffles=100)
   odd.trials.si = bind_rows(odd.trials.si, add.meta.cols(odd.spatial$df, animal, date))
   odd.fields[[animal]][[format(date)]] = odd.spatial$field
   odd.occupancies[[animal]][[format(date)]] = odd.spatial$occupancy
@@ -168,7 +168,7 @@ for (ca_img_result_dir in caimg_result_dirs) {
   tic("spatial info on even trials")
   even.spatial = calc.spatial.info(data.traces.run[exp_title == 'trial' & trial %% 2 == 0,],
                                    paste0(plot.dir.prefix, '/even/'),
-                                   nshuffles=0)
+                                   nshuffles=100)
   even.trials.si = bind_rows(even.trials.si, add.meta.cols(even.spatial$df, animal, date))
   even.fields[[animal]][[format(date)]] = even.spatial$field
   even.occupancies[[animal]][[format(date)]] = even.spatial$occupancy
@@ -179,7 +179,7 @@ for (ca_img_result_dir in caimg_result_dirs) {
   tic("spatial info on early trials")
   early.spatial = calc.spatial.info(data.traces.run[exp_title == 'trial' & trial <= half.trial,],
                                     paste0(plot.dir.prefix, '/early/'),
-                                    nshuffles=0)
+                                    nshuffles=100)
   early.trials.si = bind_rows(early.trials.si, add.meta.cols(early.spatial$df, animal, date))
   early.fields[[animal]][[format(date)]] = early.spatial$field
   early.occupancies[[animal]][[format(date)]] = early.spatial$occupancy
@@ -188,7 +188,7 @@ for (ca_img_result_dir in caimg_result_dirs) {
   tic("spatial info on late trials")
   late.spatial = calc.spatial.info(data.traces.run[exp_title == 'trial' & trial > half.trial, ],
                                    paste0(plot.dir.prefix, '/late/'),
-                                   nshuffles=0)
+                                   nshuffles=100)
   late.trials.si = bind_rows(late.trials.si, add.meta.cols(late.spatial$df, animal, date))
   late.fields[[animal]][[format(date)]] = late.spatial$field
   late.occupancies[[animal]][[format(date)]] = late.spatial$occupancy
@@ -200,5 +200,5 @@ for (ca_img_result_dir in caimg_result_dirs) {
 
 
 print("Saving env variables")
-save.image(file="place_field_dfs_short.RData")
+save.image(file="place_field_dfs_shifted.RData")
 
