@@ -44,6 +44,22 @@ run.trials.si %>%
   xlab('Spatial information')
 ```
 
+# Mutual information over time
+```{r}
+run.trials.si %>%
+  filter(date < '2019-09-08') %>%
+  ggplot(aes(x=date,y=mutual.info - mutual.info.bias)) +
+  geom_violin(fill='grey80') + 
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(y='Mutual information w.o. bias', x='', color='Place cell\non both days')
+```
+
+```{r}
+wilcox.test((mutual.info - mutual.info.bias) ~ (as.Date(date) < fst.learning.day), data=run.trials.si)
+```
+
 
 Odd vs even
 ```{r}
@@ -96,8 +112,8 @@ compare.day.trials = function(day.trials.comparison, fields1, fields2, occupanci
         dplyr::summarise(spatial.info.mean = mean(spatial.information),
                          spatial.info.min = min(spatial.information),
                          spatial.info.diff = pairdiff(spatial.information),
-                         field.centre.x.diff = pairdiff(field.centre.x, 100),
-                         field.centre.y.diff = pairdiff(field.centre.y, 100),
+                         field.max.x.diff = pairdiff(field.max.x, 100),
+                         field.max.y.diff = pairdiff(field.max.y, 100),
                          field.size.diff = pairdiff(field.size.50, 100),
                          field.size.mean = mean(field.size.50),
                          field.size.max = max(field.size.50),
@@ -113,8 +129,8 @@ compare.day.trials = function(day.trials.comparison, fields1, fields2, occupanci
                          signif.mi.mean = mean(signif.mi),
                          date=day,
                          n=n()) %>%
-        mutate(field.xy.dist = norm2(field.centre.x.diff, field.centre.y.diff)) %>%
-        select(-field.centre.x.diff, -field.centre.y.diff)-> pc.change
+        mutate(field.xy.dist = norm2(field.max.x.diff, field.max.y.diff)) %>%
+        select(-field.max.x.diff, -field.max.y.diff)-> pc.change
       
       pc.change = data.table(pc.change)
       setkey(pc.change, date, animal, cell_id)
@@ -155,6 +171,23 @@ early.late.comparison = compare.day.trials(early.late.trials, early.fields, late
 odd.even.comparison$group = 'odd vs even'
 early.late.comparison$group = 'early vs late'
 ```
+
+Do place cells have stable field peaks from early to late trials
+```{r}
+left_join(early.late.comparison, place.cell.db, by=c('date', 'animal', 'cell_id')) %>%
+  filter(is.pc) %>%
+    group_by(animal, date) %>%
+    sample_n(50, replace = TRUE) %>%
+    ungroup() %>%
+  ggplot(aes(x=date, y=field.cor)) +
+  geom_violin(fill='grey80') +
+  geom_hline(aes(yintercept=0), linetype='dashed') +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x='Date', y='Field correlations') +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2)
+```
+
 
 Do cells with signif spatial information retain their field from early to late trials?
 ```{r}
@@ -221,14 +254,14 @@ day.comparison.mean = day.comparison.mean %>%
            m.field.size <= field.size.thresh &
            m.field.max >= field.peak.thresh,
            #m.field.cor >= field.min.cor) 
-         is.halfday.pc = m.signif.mi >= 0.5 &
+           is.halfday.pc = m.signif.mi >= 0.5 &
            m.mutual.info.wo.bias >= mi.thresh &
            m.field.size <= field.size.thresh &
            m.field.max >= field.peak.thresh)
 
-place.cell.db = day.comparison.mean %>%
-  select(date, animal, cell_id, is.day.pc, is.halfday.pc) %>%
-  ungroup()
+#place.cell.db = day.comparison.mean %>%
+#  select(date, animal, cell_id, is.day.pc, is.halfday.pc) %>%
+#  ungroup()
 
 run.trials.si.field = day.comparison.mean %>%
   left_join(run.trials.si, by=c('animal', 'date', 'cell_id'))

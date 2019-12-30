@@ -72,11 +72,8 @@ norm2 = function(x, y) {
 create.pf.df = function(M, occupancyM, max.xy, min.occupancy.sec=1, frame.rate=20) {
   sigma = 1.4
   M1=gauss2dsmooth(M,lambda=sigma, nx=11, ny=11)
-  df1 = reshape2::melt(M1) #%>%
-    #mutate(value = ifelse(value < min.zscore, min.zscore, value)) %>%
-    #mutate(value = ifelse(value > max.zscore, max.zscore, value)) 
+  df1 = reshape2::melt(M1) 
   
-  #smoothedOccupancy = gauss2dsmooth(occupancyM,lambda=1, nx=3, ny=3)
   min.occupancy = min.occupancy.sec * frame.rate
   min.smoothed.occupancy = min.occupancy * 1/(2*pi*sigma^2)
   smoothedOccupancy = gauss2dsmooth(occupancyM,lambda=sigma, nx=11, ny=11)
@@ -134,6 +131,7 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
                              trace.col='trace',
                              timebin.size=1,
                              frame.hz=20) {
+  nbins.xy = getNBinsXY()
   cell.events = cell.df[nevents > 0,]
   trace.vals = cell.df[[trace.col]]
   trace.vals = trace.vals - min(trace.vals)
@@ -148,9 +146,11 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
   trial_ends = get.trial.ends(cell.df$timestamp)
   #trace.quantiles = quantile(trace.vals, c(0.85, 0.95, 1.0), na.rm=TRUE) %>% unname + 0.01
   #trace.quantiles = c(0.5, 1000.0)
-  trace.quantiles = quantile(trace.vals, c(0.2, 0.95, 0.99, 1.0), na.rm=TRUE)  + 0.01
+  trace.quantiles = quantile(trace.vals, c(0.2, 0.5, 0.8, 0.9, 0.95, 0.99, 1.0), na.rm=TRUE)  + 0.01
   pf = with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, trace.vals,
-                                      c(trace.quantiles[["95%"]], trace.quantiles[["100%"]]), 
+                                      c(trace.quantiles[["20%"]], trace.quantiles[["50%"]],
+                                        trace.quantiles[["80%"]], trace.quantiles[["90%"]], 
+                                        trace.quantiles[["95%"]], trace.quantiles[["100%"]]), 
                                       trial_ends, nshuffles,
                                       2 * frame.hz,
                                       timebin.size))
@@ -166,10 +166,11 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
                    signif.si=si.signif,
                    mi.signif.thresh=mi.signif.thresh,
                    signif.mi=mi.signif,
-                   field.centre.x=pf$field.centre[1],
-                   field.centre.y=pf$field.centre[2],
-                   field.max.x=pf$field.max.xy[1],
-                   field.max.y=pf$field.max.xy[2],
+                   #field.centre.x=pf$field.centre[1],
+                   #field.centre.y=pf$field.centre[2],
+                   #field.max.x=pf$field.max.xy[1],
+                   #field.max.y=pf$field.max.xy[2],
+                   #field.max=pf$field.max,
                    field.size.50=pf$field.size.50,
                    field.size.25=pf$field.size.25,
                    spatial.information.perspike=pf$spatial.information.perspike,
@@ -177,25 +178,31 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
                    mutual.info=pf$mutual.info,
                    mutual.info.bias=pf$mutual.info.bias,
                    space.sampling.factor = pf$space.sampling.factor,
-                   field.max=pf$field.max,
                    sparsity = pf$sparsity,
                    quantile20=trace.quantiles[["20%"]],
                    quantile99=trace.quantiles[["99%"]],
                    nevents=nrow(cell.events))
 
+  # find field max value and pos in the smoothed values
+  pf.df = create.pf.df(pf$field, pf$occupancy, max.xy=nbins.xy)
+  max.row = pf.df[which.max(pf.df$value.conv),]
+  cell_info$field.max = max.row$value.conv
+  cell_info$field.mean = mean(pf.df$value.conv)
+  cell_info$field.max.x = max.row$Var1 / nbins.xy * 100
+  cell_info$field.max.y = max.row$Var2/ nbins.xy * 100
+  
   g.placefield=NA
   if (generate.plots) {
     cell_event_rate = nrow(cell.events) / nrow(cell.df) * frame.hz
 
-    pf.df = create.pf.df(pf$field, pf$occupancy, min.zscore=trace2099.quantiles[[1]], max.zscore=trace2099.quantiles[[2]],
-                         max.xy=getNBinsXY())
     g.placefield = plot.pf(pf.df, max.xy=getNBinsXY()) +
       labs(title=paste0('Cell ', cell_name, ' MER = ', format(cell_event_rate, digits=2), ' Hz',
                         '\nSI = ', format(pf$spatial.information, digits=2),
                         ifelse(si.signif, '*', ''),
                         ' SI per spike = ', format(pf$spatial.information.perspike, digits=2),
                         '\nMI - bias = ', format(pf$mutual.info - pf$mutual.info.bias, digits=3),
-                        ifelse(mi.signif, '*', '')),
+                        ifelse(mi.signif, '*', ''),
+                        '\nsparsity = ', format(pf$sparsity, digits=2)),
            fill='Deconv trace') +
       theme(text = element_text(size=4),
             plot.title = element_text(size=4))

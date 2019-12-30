@@ -108,6 +108,17 @@ cell.trial.activity.df %>%
   xlim(c(0,0.5))
 ```
 
+Count of active cells:
+```{r}
+filter(cell.day.activity.df, exp_title=='trial') %>%
+  group_by(animal, date) %>%
+  dplyr::summarise(n=n()) %>%
+  group_by(animal) %>%
+  dplyr::summarise(mean.n=mean(n),
+                   sem.n=sem(n))
+```
+
+
 # Cell activity across days and trials
 
 Show inactive cells as 0

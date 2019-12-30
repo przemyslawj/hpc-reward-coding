@@ -104,8 +104,8 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
   
   cell.row = run.trials.pc %>% filter(animal==animal_name, date==day, cell_id==cell_name)
   
-  text.theme = theme(text = element_text(size=6),
-                     plot.title = element_text(size=6))
+  text.theme = theme(text = element_text(size=10),
+                     plot.title = element_text(size=10))
   
   g.placefield = bind_rows(odd.pf, even.pf, early.pf, late.pf) %>%
     plot.pf(max.xy=getNBinsXY()) +
@@ -116,7 +116,10 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
                       ', cell ', cell_name, 
                       '\nSI = ', format(cell.row$spatial.information, digits=2), ' bits/s',
                       ifelse(cell.row$signif.si, ' *', ''),
-                      ', ', format(cell.row$spatial.information.perspike, digits=2), ' bits/spike'),
+                      ', ', format(cell.row$spatial.information.perspike, digits=2), ' bits/spike',
+                      '\nMI - bias = ', format(cell.row$mutual.info - cell.row$mutual.info.bias, digits=3),
+                      ifelse(cell.row$mi.signif, '*', ''),
+                      '\nsparsity = ', format(cell.row$sparsity, digits=2)),
          fill='Deconv\ntrace') +
     text.theme
 
@@ -156,13 +159,12 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
 
 ```{r}
 plot.dir = file.path('/tmp/pf_stability/', animal_name, day)
-plot.field.comparison(animal_name, day, cell_name, plot.dir=plot.dir) + 
-      theme(text = element_text(size=12), plot.title = element_text(size=12))
+plot.field.comparison(animal_name, day, cell_name, plot.dir=plot.dir)
 ```
 
 ```{r}
 save.field.comparison = function(animal_name, day, cell_name) {
-  plot.dir = file.path('/mnt/DATA/Prez/cheeseboard-pf', animal_name, day)
+  plot.dir = file.path('/mnt/DATA/Prez/pf-daystability', animal_name, day)
   plot.field.comparison(animal_name, day, cell_name, plot.dir)
   return(1)
 }
@@ -185,8 +187,8 @@ Load the traces
 ```{r}
 animal_name = 'F-TL'
 exp_title='learning'
-day = '2019-09-03'
-cell_name = 140
+day = '2019-09-06'
+cell_name = 215
 #cell_name = 47
 
 
@@ -201,12 +203,14 @@ data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no')) %>%
 
 
 cell.df = data.traces[cell_id == cell_name 
-                      #& velocity >= -1 
+                      & velocity >= run.threshold 
                       #& (atReward0 == 1 | atReward1 == 1)
                       , ]
 ```
 
 ```{r}
+Rcpp::sourceCpp('place_field.cpp')
+source('place_field.R')
 
 plot.cell.trials = function(cell.df) {
   trace.col = 'trace'
@@ -227,8 +231,6 @@ plot.cell.trials = function(cell.df) {
                            trace.col=trace.col,
                            timebin.size=timebin.size)
     pf.df = create.pf.df(pf$field, pf$occupancy, 
-                         min.zscore=pf$cell_info$quantile20, 
-                         max.zscore=pf$cell_info$quantile90, 
                          max.xy=getNBinsXY())
     pf.df$trial = num2str(trial_no, fmt=0)
     all.pf.df = bind_rows(all.pf.df, pf.df)
@@ -240,8 +242,6 @@ plot.cell.trials = function(cell.df) {
                          trace.col=trace.col,
                          timebin.size=timebin.size)
   pf.df = create.pf.df(pf$field, pf$occupancy, 
-                         min.zscore=pf$cell_info$quantile20, 
-                         max.zscore=pf$cell_info$quantile90, 
                          max.xy=getNBinsXY())
   pf.df$trial = 'all'
   all.pf.df = bind_rows(all.pf.df, pf.df)
@@ -328,7 +328,7 @@ plot.all.day.fields = function(animal_name, cell_id) {
     geom_rewards(filter(rewards.df, date %in% selected.days), animal_name) 
 }
 
-plot.all.day.fields('F-TL', 10)
+plot.all.day.fields('F-TL', 5)
 ```
 Save place fields for all days
 ```{r}

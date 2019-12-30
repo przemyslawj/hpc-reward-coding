@@ -293,8 +293,8 @@ SEXP getCppPlaceField(NumericVector& x,
   NumericMatrix field = NumericMatrix(N_BINS_X,N_BINS_Y);
   std::fill(field.begin(), field.end(), NAN_FIELD);
 
-  NumericVector fieldCentre = NumericVector(2);
-  NumericVector fieldMaxXY = NumericVector(2);
+  //NumericVector fieldCentre = NumericVector(2);
+  //NumericVector fieldMaxXY = NumericVector(2);
   NumericVector shuffleSI = NumericVector(nshuffles);
   NumericVector shuffleMI = NumericVector(nshuffles);
   std::fill(shuffleSI.begin(), shuffleSI.end(), 0);
@@ -306,11 +306,11 @@ SEXP getCppPlaceField(NumericVector& x,
   result["activity"] = NumericMatrix(N_BINS_X,N_BINS_Y);
   result["spatial.information"] = 0.0;
   result["spatial.information.perspike"] = 0.0;
-  result["field.centre"] = fieldCentre;
+  //result["field.centre"] = fieldCentre;
   result["field.size.50"] = 0;
   result["field.size.25"] = 0;
-  result["field.max"] = 0;
-  result["field.max.xy"] = fieldMaxXY;
+  //result["field.max"] = 0;
+  //result["field.max.xy"] = fieldMaxXY;
   result["shuffle.si"]= shuffleSI;
   result["shuffle.mi"]= shuffleMI;
   result["space.sampling.factor"] = 0.0;
@@ -333,8 +333,8 @@ SEXP getCppPlaceField(NumericVector& x,
         field(xx,yy) = totalActivityMap(xx,yy) / occupancyMap(xx,yy);
         if (field(xx,yy) >= maxField) {
           maxField = field(xx,yy);
-          fieldMaxXY[0] = xx * binSizeX;
-          fieldMaxXY[1] = yy * binSizeY;
+          //fieldMaxXY[0] = xx * binSizeX;
+          //fieldMaxXY[1] = yy * binSizeY;
         }
       } else {
         field(xx,yy) = NAN_FIELD;
@@ -369,8 +369,8 @@ SEXP getCppPlaceField(NumericVector& x,
       }
     }
   }
-  fieldCentre[0] = weightedFieldX / std::max(0.01, totalWeights) * binSizeX;
-  fieldCentre[1] = weigthedFieldY / std::max(0.01, totalWeights) * binSizeY;
+  //fieldCentre[0] = weightedFieldX / std::max(0.01, totalWeights) * binSizeX;
+  //fieldCentre[1] = weigthedFieldY / std::max(0.01, totalWeights) * binSizeY;
 
   // TODO: should remove the code below?
   //double mean_field = fieldTotal / nfield;
@@ -401,11 +401,11 @@ SEXP getCppPlaceField(NumericVector& x,
   result["spatial.information"] = (float) spatialInfoData.SI;
   result["spatial.information.perspike"] = spatialInfoData.SI / spatialInfoData.mfr;
   result["mfr"] = spatialInfoData.mfr;
-  result["field.centre"] = fieldCentre;
+  //result["field.centre"] = fieldCentre;
   result["field.size.50"] = ((double) nFieldBins50) / (N_BINS_X * N_BINS_Y) * 100.0;
   result["field.size.25"] = ((double) nFieldBins25) / (N_BINS_X * N_BINS_Y) * 100.0;
-  result["field.max"] = maxField;
-  result["field.max.xy"] = fieldMaxXY;
+  //result["field.max"] = maxField;
+  //result["field.max.xy"] = fieldMaxXY;
   result["shuffle.si"] = shuffleSI;
   result["mutual.info"] = spatialInfoData.MI;
   result["mutual.info.bias"] = spatialInfoData.MI_bias;
