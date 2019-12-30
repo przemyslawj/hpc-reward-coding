@@ -1,0 +1,49 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+source('bayesian_decoder.R')
+#timebinned.traces = timebin.traces(data.traces)
+#binned.traces = bin.responses(timebinned.traces)
+#eval.df = eval.decoder(binned.traces, cv=TRUE)
+```
+
+
+
+```{r}
+
+decoding.df = data.frame()
+
+for (ca_img_result_dir in caimg_result_dirs) {
+  print(paste('Processing dir: ', ca_img_result_dir))
+  cellmapping_file = file.path(ca_img_result_dir, 'cell_mapping.csv')
+  cellmapping.df = read.csv(cellmapping_file)
+  traces_file = file.path(ca_img_result_dir, 'traces_and_positions.csv')
+  data = fread(traces_file)
+  data = data[exp_title == 'trial',]
+
+  data.traces = melt.traces(data)
+  data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
+  dir_parts = str_split(ca_img_result_dir, '/')
+  animal = dir_parts[[1]][length(dir_parts[[1]]) - 2]
+  data.traces$animal = rep(animal, nrow(data.traces))
+  date = data.traces$date[1]
+  data.traces = data.table(data.traces)
+  data.traces = data.traces[smooth_trans_x > 0 & smooth_trans_y > 0, ]
+  data.traces.run = data.traces[velocity >= run.threshold,]
+  timebinned.traces = timebin.traces(data.traces.run)
+  quantile.fractions = c(0.2, 0.5, 0.8, 0.9, 0.95, 1.0)
+  binned.traces = bin.responses(timebinned.traces, quantile.fractions)
+  binned.traces = data.table(binned.traces)
+  
+  eval.df = eval.decoder(binned.traces, length(quantile.fractions), cv=FALSE)
+  eval.df$animal = animal
+  eval.df$date = date
+  
+  decoding.df = bind_rows(decoding.df, eval.df)
+}
+```
+
+
