@@ -122,15 +122,15 @@ for (ca_img_result_dir in caimg_result_dirs) {
   print('Analysing spatial information')
   plot.dir.prefix = paste(gen_imgs_dir, animal, format(date), sep='/')
 
-  tic("spatial info on all trials")
-  all.spatial = calc.spatial.info(data.traces[exp_title == 'trial'],
-                                  plot.dir=paste0(plot.dir.prefix, '/all/'),
-                                  generate.plots=TRUE,
-                                  nshuffles=100)
-  all.trials.si = bind_rows(all.trials.si, add.meta.cols(all.spatial$df, animal, date))
-  all.fields[[animal]][[format(date)]] = all.spatial$field
-  all.occupancies[[animal]][[format(date)]] = all.spatial$occupancy
-  toc()
+  #tic("spatial info on all trials")
+  #all.spatial = calc.spatial.info(data.traces[exp_title == 'trial'],
+  #                                plot.dir=paste0(plot.dir.prefix, '/all/'),
+  #                                generate.plots=TRUE,
+  #                                nshuffles=100)
+  #all.trials.si = bind_rows(all.trials.si, add.meta.cols(all.spatial$df, animal, date))
+  #all.fields[[animal]][[format(date)]] = all.spatial$field
+  #all.occupancies[[animal]][[format(date)]] = all.spatial$occupancy
+  #toc()
 
   tic("spatial info on all trials running")
   run.spatial = calc.spatial.info(data.traces.run[exp_title == 'trial'],
@@ -200,5 +200,5 @@ for (ca_img_result_dir in caimg_result_dirs) {
 
 
 print("Saving env variables")
-save.image(file="place_field_dfs_shifted.RData")
+save.image(file="data/place_field_dfs_shuffled_percentile20_50_80_90_95.RData")
 

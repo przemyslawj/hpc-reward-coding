@@ -1,0 +1,189 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r library setup}
+library(dplyr)
+library(plyr)
+library(pracma)
+library(readr)
+library(tidyr)
+library(tibble)
+library(stringr)
+library(DT)
+library(data.table)
+library(permute)
+#library(doParallel)
+#library(foreach)
+library(tictoc)
+
+library(ggplot2)
+library(cowplot)
+gtheme = theme_minimal() + theme_cowplot() +
+  theme(text = element_text(size=18), axis.text = element_text(size=15))
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+
+source('locations.R')
+source('place_field.R')
+source('trace_utils.R')
+
+```
+
+```{r data dirs setup}
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
+
+caimg_result_dirs = c(
+  get.subject.result.dirs(root_dir, 'E-BL'),
+  get.subject.result.dirs(root_dir, 'E-TR'),
+  get.subject.result.dirs(root_dir, 'F-BL'),
+  get.subject.result.dirs(root_dir, 'F-TL')
+)
+
+caimg_result_dirs = Filter(
+  function(ca_img_dir) {file.exists(paste(ca_img_dir, 'traces_and_positions.csv', sep='/'))},
+  caimg_result_dirs)
+
+```
+
+
+```{r}
+Rcpp::sourceCpp('mutual_info.cpp')
+
+fr.hz = 20
+
+calc.reward.info = function(data.traces) {
+  data.traces = mutate(data.traces,
+                       atAnyReward = pmin(1, atReward0 + atReward1))
+  data.traces = data.table(data.traces)
+  data.traces = data.traces[smooth_trans_x >= 0 & smooth_trans_y >= 0, ]
+  cells = unique(data.traces$cell_id) %>% sort
+  
+  res = data.frame()
+  for (cell_name in cells) {
+    cell.df = data.traces[cell_id == cell_name,]
+    trace.vals = cell.df[['trace']]
+    trace.quantiles = quantile(trace.vals, c(0.2, 0.5, 0.8, 0.9, 0.95, 1.0), na.rm=TRUE) %>% unname + 0.01
+    trial.ends = get.trial.ends(cell.df$timestamp)
+    
+    mi_anyreward = mutual_info_with_shuffles(
+      trace.vals,
+      cell.df$atAnyReward, 
+      trace.quantiles,
+      trial.ends,
+      nstim=2,
+      nshuffles=100,
+      shuffleChunkLength=2*fr.hz)
+    mi_anyreward.signif.thresh = quantile(mi_anyreward$shuffle.mi, 0.95, na.rm=TRUE)[[1]]
+    
+    mi_onereward = mutual_info_with_shuffles(
+      trace.vals,
+      cell.df$atReward0 + cell.df$atReward1 * 2,
+      trace.quantiles,
+      trial.ends,
+      nstim=3,
+      nshuffles=100,
+      shuffleChunkLength=2*fr.hz)
+    mi_onereward.signif.thresh = quantile(mi_onereward$shuffle.mi, 0.95, na.rm=TRUE)[[1]]
+    
+    cell_info = list(cell_id=cell_name,
+                     date=cell.df$date[[1]],
+                     animal=cell.df$animal[[1]],
+                     mi.anyrew = mi_anyreward[['mutual.info']],
+                     mi.anyrew.bias = mi_anyreward[['mutual.info.bias']],
+                     mi.anyrew.signif.thresh = mi_anyreward.signif.thresh,
+                     mi.anyrew.signif = mi_anyreward[['mutual.info']] > mi_anyreward.signif.thresh,
+                     mfr.norew = mi_anyreward[['field']][1],
+                     mfr.anyrew = mi_anyreward[['field']][2],
+                     mi.onerew = mi_onereward[['mutual.info']],
+                     mi.onerew.bias = mi_onereward[['mutual.info.bias']],
+                     mi.onerew.signif.thresh = mi_onereward.signif.thresh,
+                     mi.onerew.signif = mi_onereward[['mutual.info']] > mi_onereward.signif.thresh,
+                     mfr.rew0 = mi_onereward[['field']][2],
+                     mfr.rew1 = mi_onereward[['field']][3],
+                     mfr=mean(trace.vals))
+    res = bind_rows(res, cell_info)
+  }
+  
+  return(res)
+}
+```
+
+```{r}
+locations.rootdir = "/mnt/DATA/Prez/cheeseboard/2019-08/"
+rewards.df = read_locations(locations.rootdir) %>%
+  filter(!is_test) %>%
+  dplyr::rename(animal=Animal)
+```
+
+
+```{r}
+trial.reward.info = data.frame()
+
+for (ca_img_result_dir in caimg_result_dirs) {
+  dir_parts = str_split(ca_img_result_dir, '/')
+  animal_name = dir_parts[[1]][length(dir_parts[[1]]) - 2]
+  date_str = dir_parts[[1]][length(dir_parts[[1]]) - 4]
+  rewards.subset = filter(rewards.df, date==date_str, animal==animal_name)
+  if (nrow(rewards.subset) > 0) {
+    print(paste('Processing dir: ', ca_img_result_dir))
+    cellmapping_file = file.path(ca_img_result_dir, 'cell_mapping.csv')
+    cellmapping.df = read.csv(cellmapping_file)
+    traces_file = file.path(ca_img_result_dir, 'traces_and_positions.csv')
+    data = fread(traces_file)
+    data = data[exp_title == 'trial',]
+  
+    data.traces = melt.traces(data)
+    data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
+  
+    data.traces$animal = animal_name
+    
+    tic('Calculation of reward mutual information')
+    trial.reward.info = bind_rows(trial.reward.info, calc.reward.info(data.traces))
+    toc()
+  }
+}
+```
+
+Distribution of reward mutual information
+```{r}
+trial.reward.info %>%
+  ggplot() +
+  geom_violin(aes(x=date,y=mi.anyrew-mi.anyrew.bias, color=mi.anyrew.signif)) +
+  #geom_violin(aes(x=date,y=mi.onerew-mi.onerew.bias, color=mi.onerew.signif)) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+How many of them are place cells when running?
+```{r}
+trial.reward.pc = left_join(trial.reward.info, place.cell.db, by=c('date', 'animal', 'cell_id'))
+```
+
+
+```{r}
+trial.reward.pc %>%
+  mutate(active.rew = mfr.anyrew > mfr.norew,
+         active.rew0 = mfr.rew0 > mfr.norew,
+         active.rew1 = mfr.rew1 > mfr.norew,
+         is.rew.pc = is.pc & active.rew) %>%
+  group_by(date) %>%
+  dplyr::summarise(anyrew.n = (sum(mi.anyrew.signif) / n() * 100) %>% round,
+                   anyrew.active.n = (sum(mi.anyrew.signif & active.rew) / n() * 100) %>% round,
+                   pc.n = (sum(is.pc) / n()  * 100) %>% round,
+                   #rew.pc.n = sum(is.rew.pc) / n(),
+                   anyrew.pc.n = (sum(mi.anyrew.signif & is.rew.pc) / n() * 100) %>% round,
+                   onerew.n = (sum(mi.onerew.signif) / n() * 100) %>% round,
+                   onerew.active.n = (sum(mi.onerew.signif & (active.rew0 | active.rew1)) / n() * 100) %>% round,
+                   onerew.pc.n = (sum(mi.onerew.signif & is.rew.pc) / n() * 100) %>% round)
+                   
+  
+```
+Close to 30 % of cells active at reward, only 3-5 % of them are place cells. However these cells seem to be variable between trials as seen on the place fields.
+Could be SWRs related..
+
+
+- What if split time at reward into parts: level of activity vs time at reward. Need to look at population firing to see the timing of firing at reward.
