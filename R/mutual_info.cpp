@@ -140,6 +140,16 @@ ResponseModel createResponseModel(int nstim,
   return m;
 }
 
+// [[Rcpp::export]]
+SEXP createBayesModel2(int nstim, 
+                      int nresponse,
+                      IntegerMatrix& cellResponse,
+                      IntegerVector& stimulus) {
+  
+  return List();
+}
+
+
 NumericVector chunkShuffle(NumericVector& trace,
                            NumericVector& trialEnds, 
                            int shuffleChunkLength) {
@@ -259,3 +269,4 @@ res = mutual_info_with_shuffles(response, stimulus, c(1, 10), c(length(response)
 res$mutual.info
 res$mutual.info.bias
 */
+

@@ -4,7 +4,11 @@ output: html_notebook
 ---
 
 ```{r}
+Rcpp::sourceCpp('trace_utils.cpp')
+
 source('bayesian_decoder.R')
+source('utils.R')
+
 #timebinned.traces = timebin.traces(data.traces)
 #binned.traces = bin.responses(timebinned.traces)
 #eval.df = eval.decoder(binned.traces, cv=TRUE)
@@ -13,37 +17,105 @@ source('bayesian_decoder.R')
 
 
 ```{r}
+xybins = 20
+run.threshold = 2
 
-decoding.df = data.frame()
 
-for (ca_img_result_dir in caimg_result_dirs) {
-  print(paste('Processing dir: ', ca_img_result_dir))
-  cellmapping_file = file.path(ca_img_result_dir, 'cell_mapping.csv')
-  cellmapping.df = read.csv(cellmapping_file)
-  traces_file = file.path(ca_img_result_dir, 'traces_and_positions.csv')
-  data = fread(traces_file)
-  data = data[exp_title == 'trial',]
-
-  data.traces = melt.traces(data)
-  data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
-  dir_parts = str_split(ca_img_result_dir, '/')
-  animal = dir_parts[[1]][length(dir_parts[[1]]) - 2]
-  data.traces$animal = rep(animal, nrow(data.traces))
-  date = data.traces$date[1]
-  data.traces = data.table(data.traces)
-  data.traces = data.traces[smooth_trans_x > 0 & smooth_trans_y > 0, ]
-  data.traces.run = data.traces[velocity >= run.threshold,]
-  timebinned.traces = timebin.traces(data.traces.run)
-  quantile.fractions = c(0.2, 0.5, 0.8, 0.9, 0.95, 1.0)
-  binned.traces = bin.responses(timebinned.traces, quantile.fractions)
-  binned.traces = data.table(binned.traces)
+eval.parts = lapply(caimg_result_dirs, function(caimg_result_dir) {
+  data.traces = read.data.trace(caimg_result_dir, filter_exp_title = 'trial')
+  tic("Filtered running epochs")
+  setorder(data.traces, trial_id, cell_id, timestamp)
+  running.index = isRunning(data.traces, 2, 3, 500)
+  data.traces.run = data.traces[which(running.index), ]
+  toc()
   
-  eval.df = eval.decoder(binned.traces, length(quantile.fractions), cv=FALSE)
-  eval.df$animal = animal
-  eval.df$date = date
-  
-  decoding.df = bind_rows(decoding.df, eval.df)
-}
+  date_str = data.traces$date[1]
+  animal_name = data.traces$animal[1]
+  ## Keep only place cells
+  pc.cells = subset(place.cell.db, animal==animal_name & date==date_str & is.pc)$cell_id
+  data.traces.filtered = data.traces.run[cell_id %in% pc.cells, ]
+  #data.traces.filtered = data.traces.run
+
+  if (nrow(data.traces.filtered) == 0) {
+    return(data.frame())
+  } else {
+    timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec=200)
+    quantile.fractions = c(0.95, 1.0)
+    binned.traces = bin.responses(timebinned.traces, quantile.fractions)
+    binned.traces = data.table(binned.traces)
+    
+    print('Started evaluating the model')
+    tic("Built and evaluated the model")
+    eval.df = eval.decoder(binned.traces, length(quantile.fractions), cv=TRUE)
+    if (nrow(eval.df) > 0) {
+      eval.df$animal = animal_name
+      eval.df$date = date_str
+    }
+    toc()
+    
+    eval.df
+  }
+})
+
+decoding.df = do.call('rbind', eval.parts)
+summary(decoding.df$error)
+summary(decoding.df$random_error)
 ```
 
+
+```{r}
+eval.summary = decoding.df %>%
+  group_by(date, animal) %>%
+  dplyr::summarise(mean.error=mean(error),
+                   median.error=median(error),
+                   sd.error=sd(error),
+                   sem.error=sem(error))
+
+ggplot(eval.summary, aes(x=date,y=mean.error, group=animal, color=animal)) +
+  #geom_point() +
+  #geom_errorbar(aes(x=date, ymin=mean.error-sem.error, ymax=mean.error+sem.error), width=0.2)
+  geom_errorbar(aes(x=date, ymin=median.error-sem.error, ymax=median.error+sem.error), width=0.2) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Mean error per bin
+```{r}
+decoding.df %>%
+  group_by(date, animal, bin.xy) %>%
+  dplyr::summarise(mean.error=mean(error),
+                   median.error=median(error),
+                   sem.error=sem(error),
+                   ntests=n(),
+                   prior=prior[1]) -> mean.error.df
+mean.error.df %>%  
+  DT::datatable() %>%
+  DT::formatRound(columns=c('mean.error', 'median.error', 'sem.error', 'prior'), digits = 3)
+
+ggplot(mean.error.df)  + geom_point(aes(x=prior, y=mean.error), alpha=0.1) +
+  xlim(c(0,0.07))
+```
+
+
+# TEST
+Distribution of cell's calcium trace at a given location
+```{r}
+timebinned.traces %>%
+  filter(cell_id==0) %>%
+  mutate(bin.xy = to_1dim(bin.x, bin.y)) %>%
+  #filter(bin.xy == 97) %>%
+  group_by(bin.xy) %>%
+  ggplot() +
+  geom_histogram(aes(x=bin.trace)) +
+  facet_wrap(. ~ bin.xy, ncol=2, scales = 'free')
+```
+
+
+```{r}
+timebinned.traces %>%
+  filter(cell_id==0) %>%
+  mutate(bin.xy = to_1dim(bin.x, bin.y)) %>%
+  select(bin.trace, bin.xy, bin.x, bin.y, time_bin) %>%
+  filter(bin.xy==97) %>%
+  arrange(desc(bin.trace)) %>% DT::datatable()
+```
 

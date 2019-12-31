@@ -115,7 +115,7 @@ SpatialInfoData calculateSpatialInformation(NumericVector& x,
     trace_binval = trace_binval / timebin_size;
     totalActivityMap(xx,yy) += trace_binval;
 
-    auto responseBinIt = std::lower_bound(traceQuantiles.begin(), traceQuantiles.end(), trace[i]);
+    auto responseBinIt = std::lower_bound(traceQuantiles.begin(), traceQuantiles.end(), trace_binval);
     int responseBin = traceQuantiles.size() - 1;
     if (responseBinIt != traceQuantiles.end()) {
       responseBin = responseBinIt - traceQuantiles.begin();

@@ -1,6 +1,6 @@
 library(data.table)
-library(foreach)
 
+source('utils.R')
 
 zscore = function(trace) {
   x = trace - mean(trace)
@@ -9,6 +9,30 @@ zscore = function(trace) {
 }
 
 sem = function(x) sqrt( var(x, na.rm=TRUE) / length(x))
+
+
+read.data.trace = function(ca_img_result_dir, filter_exp_title = NA) {
+  print(paste('Processing dir: ', ca_img_result_dir))
+  cellmapping_file = file.path(ca_img_result_dir, 'cell_mapping.csv')
+  cellmapping.df = read.csv(cellmapping_file)
+  traces_file = file.path(ca_img_result_dir, 'traces_and_positions.csv')
+  data = fread(traces_file)
+  
+  if (!is.na(filter_exp_title)) {
+    data = data[exp_title == filter_exp_title,]  
+  }
+  
+  data.traces = melt.traces(data)
+  data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
+  dir_parts = str_split(ca_img_result_dir, '/')
+  animal = dir_parts[[1]][length(dir_parts[[1]]) - 2]
+  data.traces$animal = animal
+  data.traces = data.table(data.traces)
+  data.traces = data.traces[smooth_trans_x >= 0 & smooth_trans_y >= 0, ]
+  
+  return(data.traces)
+}
+
 
 zscore.traces = function(data) {
   ddply(data, .(animal, date, trial_id, cell), plyr::mutate,
@@ -61,3 +85,33 @@ gather.traces = function(data) {
   
   return(data)
 }
+
+
+# Filter based on velocity calculated for the time window. Filtering is done on epochs
+# Slow implementation, use isRunning to faster.
+filter.running = function(df, min.run.velocity=2, mean.run.velocity=3, window.dur.ms=500) {
+  df = data.table(df)
+  setorder(df, trial_id, exp_title, cell_id, timestamp)
+  is.running=rep(FALSE, nrow(df))
+  i = 1
+  while (i < nrow(df)) {
+    j = i + 1
+    while(j < nrow(df) && 
+          df$velocity[i] >= min.run.velocity && 
+          df$trial_id[i] == df$trial_id[j] &&
+          df$velocity[j] >= min.run.velocity) {
+      j = j + 1
+    }
+    j = j - 1
+    
+    dist = norm2(df$smooth_trans_x[j] - df$smooth_trans_x[i],
+                 df$smooth_trans_y[j] - df$smooth_trans_y[i])
+    dur.ms = max(df$timestamp[j] - df$timestamp[i], 1)
+    vel = dist / dur.ms * 1000
+    is.running[i:j] = (vel >= mean.run.velocity) && (dur.ms >= window.dur.ms)
+    i = j + 1
+  }
+  
+  df[which(is.running),]
+}
+

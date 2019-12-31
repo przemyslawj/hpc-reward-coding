@@ -23,6 +23,7 @@ source('locations.R')
 source('place_field.R')
 source('trace_utils.R')
 source('utils.R')
+Rcpp::sourceCpp('trace_utils.cpp')
 
 root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
 gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
@@ -102,23 +103,17 @@ add.meta.cols = function(df, animal, date) {
 }
 
 
-for (ca_img_result_dir in caimg_result_dirs) {
-  print(paste('Processing dir: ', ca_img_result_dir))
-  cellmapping_file = file.path(ca_img_result_dir, 'cell_mapping.csv')
-  cellmapping.df = read.csv(cellmapping_file)
-  traces_file = file.path(ca_img_result_dir, 'traces_and_positions.csv')
-  data = fread(traces_file)
-  data = data[exp_title != 'homecage',]
-
-  data.traces = melt.traces(data)
-  data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
-  dir_parts = str_split(ca_img_result_dir, '/')
-  animal = dir_parts[[1]][length(dir_parts[[1]]) - 2]
-  data.traces$animal = rep(animal, nrow(data.traces))
+for (caimg_result_dir in caimg_result_dirs) {
+  data.traces = read.data.trace(caimg_result_dir)
   date = data.traces$date[1]
-  data.traces = data.table(data.traces)
-  data.traces.run = data.traces[velocity >= run.threshold,]
-
+  animal = data.traces$animal[1]
+  
+  data.traces = data.traces[exp_title != 'homecage',]
+  
+  setorder(data.traces, trial_id, cell_id, timestamp)
+  running.index = isRunning(data.traces, 2, 3, 500)
+  data.traces.run = data.traces[which(running.index), ]
+  
   print('Analysing spatial information')
   plot.dir.prefix = paste(gen_imgs_dir, animal, format(date), sep='/')
 

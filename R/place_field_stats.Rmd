@@ -12,7 +12,7 @@ summary(run.trials.si$mutual.info - run.trials.si$mutual.info.bias)
 
 ```{r}
 run.trials.si %>%
-  dplyr::summarise(pct.mi.signif=sum(signif.mi)/n()*100)
+  dplyr::summarise(pct.mi.signif=sum(signif.si)/n()*100)
 ```
 
 Distribution of mutual information
