@@ -1,4 +1,5 @@
 library(data.table)
+library(purrr)
 
 source('utils.R')
 
@@ -11,11 +12,11 @@ zscore = function(trace) {
 sem = function(x) sqrt( var(x, na.rm=TRUE) / length(x))
 
 
-read.data.trace = function(ca_img_result_dir, filter_exp_title = NA) {
-  print(paste('Processing dir: ', ca_img_result_dir))
-  cellmapping_file = file.path(ca_img_result_dir, 'cell_mapping.csv')
+read.data.trace = function(caimg_result_dir, filter_exp_title = NA) {
+  print(paste('Processing dir: ', caimg_result_dir))
+  cellmapping_file = file.path(caimg_result_dir, 'cell_mapping.csv')
   cellmapping.df = read.csv(cellmapping_file)
-  traces_file = file.path(ca_img_result_dir, 'traces_and_positions.csv')
+  traces_file = file.path(caimg_result_dir, 'traces_and_positions.csv')
   data = fread(traces_file)
   
   if (!is.na(filter_exp_title)) {
@@ -24,12 +25,23 @@ read.data.trace = function(ca_img_result_dir, filter_exp_title = NA) {
   
   data.traces = melt.traces(data)
   data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
-  dir_parts = str_split(ca_img_result_dir, '/')
+  dir_parts = str_split(caimg_result_dir, '/')
   animal = dir_parts[[1]][length(dir_parts[[1]]) - 2]
   data.traces$animal = animal
   data.traces = data.table(data.traces)
   data.traces = data.traces[smooth_trans_x >= 0 & smooth_trans_y >= 0, ]
   
+  return(data.traces)
+}
+
+calc.event.vec = function(deconv_trace, deconv.threshold=0.1) {
+  deconv.thr.val = deconv.threshold * max(deconv_trace)
+  res = map_lgl(deconv_trace, ~ .x >= deconv.thr.val)
+  res
+}
+
+detect.events = function(data.traces, deconv.threshold=0.1) {
+  data.traces[, is.event := calc.event.vec(.SD$deconv_trace, deconv.threshold) , by=c('animal', 'date', 'cell_id')]
   return(data.traces)
 }
 
@@ -42,7 +54,7 @@ timebin.traces = function(data.traces, timebin.dur.msec=100, xybins=20, trace.va
            time_bin = floor(abs_timestamp/timebin.dur.msec) %>% as.integer) %>%
     group_by(animal, date, trial_id, trial, cell_id, time_bin) %>%
     dplyr::summarise(mean.trace = mean(!! trace.var),
-                     mean.nevents = mean(nevents),
+                     nevents = sum(is.event),
                      mean.velocity = mean(velocity),
                      mean.x = mean(smooth_trans_x),
                      mean.y = mean(smooth_trans_y)) %>%
@@ -70,12 +82,17 @@ zscore.traces = function(data) {
 
 # Fast implementation of melting with data.tables
 melt.traces = function(data) {
+  data[, grep("^events_", colnames(data)):=NULL]
   trace.measure.vars = colnames(data)[stringr::str_starts(colnames(data), 'trace_')]
-  events.measure.vars = colnames(data)[stringr::str_starts(colnames(data), 'events_')]
+  #events.measure.vars = colnames(data)[stringr::str_starts(colnames(data), 'events_')]
   deconv.measure.vars = colnames(data)[stringr::str_starts(colnames(data), 'deconvTrace_')]
   melted.df = melt(data, 
-       measure = list(trace.measure.vars, events.measure.vars, deconv.measure.vars), 
-       value.name = c('trace', 'nevents', 'deconv_trace'))
+       measure = list(trace.measure.vars, 
+                      #events.measure.vars, 
+                      deconv.measure.vars), 
+       value.name = c('trace', 
+                      #'nevents', 
+                      'deconv_trace'))
   
   melted.df = melted.df[, ('cell') := variable %>% trimws %>% as.integer][order(date,trial_id,cell,timestamp), !'variable']
   return(melted.df)
@@ -94,14 +111,17 @@ gather.traces = function(data) {
     mutate(cell = str_replace(cell, 'deconvTrace_[.]?[.]?','')) %>%
     arrange(date, trial_id, cell, timestamp)
   
-  data.events = data %>%
-    select('date', 'trial_id', 'timestamp', starts_with('events_')) %>%
-    gather('cell', 'nevents', starts_with('events_')) %>%
-    mutate(cell = str_replace(cell, 'events_[.]?[.]?','')) %>%
-    arrange(date, trial_id, cell, timestamp)
+  #data.events = data %>%
+  #  select('date', 'trial_id', 'timestamp', starts_with('events_')) %>%
+  #  gather('cell', 'nevents', starts_with('events_')) %>%
+  #  mutate(cell = str_replace(cell, 'events_[.]?[.]?','')) %>%
+  #  arrange(date, trial_id, cell, timestamp)
   
-  data = cbind(data.traces, data.deconv_traces$deconv_trace, data.events$nevents)
-  colnames(data)[(ncol(data)-1):ncol(data)] = c('deconv_trace', 'nevents')
+  data = cbind(data.traces, 
+               data.deconv_traces$deconv_trace)
+               #data.events$nevents)
+  #colnames(data)[(ncol(data)-1):ncol(data)] = c('deconv_trace', 'nevents')
+  colnames(data)[(ncol(data))] = 'deconv_trace'
   data$cell = as.integer(data$cell)
   
   return(data)

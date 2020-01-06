@@ -73,6 +73,7 @@ test_that("bin.responses success for two cells", {
     mean.y=1
   )
   df$cell_id = as.factor(df$cell_id)
+  df = data.table(df)
   quantile.fractions=c(0.5, 1.0)
   actual.binned = bin.responses(df, quantile.fractions)
   actual.binned = actual.binned %>% arrange(cell_id, time_bin)

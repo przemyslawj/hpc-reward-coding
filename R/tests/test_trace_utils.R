@@ -24,3 +24,15 @@ test_that('filter.running succeeds for one trial', {
   expect_equal(nrow(df.filtered), 10)
   expect_equal(df.filtered$id, c(1:5, 11:15))
 }) 
+
+test_that('test detect.events succeeds', {
+  df = data.frame(deconv_trace=c(1:10, c(0, 12:20)), 
+                  animal='a', 
+                  cell_id=rep(1:2,each=10), 
+                  date='2019-01-01')
+  df = data.table(df)
+  detect.events(df, deconv.threshold=0.11)
+  expect_equal(df$is.event[1], FALSE)
+  expect_equal(df$is.event[11], FALSE)
+  expect_equal(sum(df$is.event), 18)
+})

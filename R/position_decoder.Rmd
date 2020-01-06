@@ -23,30 +23,30 @@ run.threshold = 2
 
 eval.parts = lapply(caimg_result_dirs, function(caimg_result_dir) {
   data.traces = read.data.trace(caimg_result_dir, filter_exp_title = 'trial')
-  tic("Filtered running epochs")
   setorder(data.traces, trial_id, cell_id, timestamp)
+  detect.events(data.traces, deconv.threshold=0.1)
+  
   running.index = isRunning(data.traces, 2, 3, 500)
   data.traces.run = data.traces[which(running.index), ]
-  toc()
   
   date_str = data.traces$date[1]
   animal_name = data.traces$animal[1]
   ## Keep only place cells
   pc.cells = subset(place.cell.db, animal==animal_name & date==date_str & is.pc)$cell_id
-  data.traces.filtered = data.traces.run[cell_id %in% pc.cells, ]
-  #data.traces.filtered = data.traces.run
+  #data.traces.filtered = data.traces.run[cell_id %in% pc.cells, ]
+  data.traces.filtered = data.traces.run
 
   if (nrow(data.traces.filtered) == 0) {
     return(data.frame())
   } else {
-    timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec=200, xybins=20)
+    timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec=200, xybins=20, trace.var=deconv_trace)
     quantile.fractions = c(0.95, 1.0)
     binned.traces = bin.responses(timebinned.traces, quantile.fractions)
     binned.traces = data.table(binned.traces)
     
     print('Started evaluating the model')
     tic("Built and evaluated the model")
-    eval.df = eval.decoder(binned.traces, length(quantile.fractions), cv=TRUE)
+    eval.df = eval.decoder(binned.traces, length(quantile.fractions), cv=FALSE)
     if (nrow(eval.df) > 0) {
       eval.df$animal = animal_name
       eval.df$date = date_str

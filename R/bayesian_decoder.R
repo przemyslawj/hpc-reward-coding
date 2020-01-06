@@ -18,26 +18,14 @@ from_1dim = function(z) {
   list(x=floor(z/xybins), y=z%%xybins)
 }
 
-get.response.bin = function(vals, animal_name, date_str, cell_name, cell.thresholds, quantile.fractions) {
-  trace.quantiles.row = cell.thresholds[animal==animal_name[1] & date==date_str[1] & cell_id==cell_name[1],]
-  trace.quantiles = trace.quantiles.row[1, 4: (3 + length(quantile.fractions))] %>% as.matrix
+get.response.bin = function(vals, quantile.fractions) {
+  trace.quantiles = quantile(vals, quantile.fractions) + 0.001
   map_int(vals, ~ dplyr::first(which(.x <= trace.quantiles)))
 }
 
 
 bin.responses = function(df, quantile.fractions) {
-  cell.thresholds = df %>% 
-    ddply(.(animal, date, cell_id), function(cell.df) {
-      quantile(cell.df$mean.trace, quantile.fractions) + 0.001
-    })
-  cell.thresholds = data.table(cell.thresholds)
-  setkey(cell.thresholds, animal, date, cell_id)
-  
-  binned.df = df %>%
-    dplyr::group_by(animal, date, cell_id) %>%
-    dplyr::mutate(response_bin = get.response.bin(mean.trace, animal, date, cell_id, cell.thresholds, quantile.fractions)) %>%
-    dplyr::ungroup()
-          
+  binned.df = df[, response_bin := get.response.bin(.SD$mean.trace, quantile.fractions), by=c('animal', 'date', 'cell_id')]
   binned.df
 }
 
