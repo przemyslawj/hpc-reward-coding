@@ -71,7 +71,7 @@ norm2 = function(x, y) {
 # Create df with smoothed values from matrix representation
 create.pf.df = function(M, occupancyM, max.xy, min.occupancy.sec=1, frame.rate=20) {
   sigma = 1.4
-  M1=gauss2dsmooth(M,lambda=sigma, nx=11, ny=11)
+  M1 = gauss2dsmooth(M,lambda=sigma, nx=11, ny=11)
   df1 = reshape2::melt(M1) 
   
   min.occupancy = min.occupancy.sec * frame.rate
@@ -79,8 +79,8 @@ create.pf.df = function(M, occupancyM, max.xy, min.occupancy.sec=1, frame.rate=2
   smoothedOccupancy = gauss2dsmooth(occupancyM,lambda=sigma, nx=11, ny=11)
   mid.pt = mean(1:max.xy)
   df_org = reshape2::melt(smoothedOccupancy) %>%
-    filter(value >= min.smoothed.occupancy) %>%
-    filter(norm2(Var1 - mid.pt, Var2 - mid.pt) <= mid.pt)
+    dplyr::filter(value >= min.smoothed.occupancy) %>%
+    dplyr::filter(norm2(Var1 - mid.pt, Var2 - mid.pt) <= mid.pt)
   df2 = left_join(df_org, df1, by=c('Var1'='Var1', 'Var2'='Var2'), suffix=c('.occupancy', '.conv'))
   
   return(df2)
@@ -128,12 +128,10 @@ field.cor = function(field1, field2, max.xy, make.cor.plot=FALSE) {
 
 
 cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
-                             trace.col='trace',
-                             timebin.size=1,
                              frame.hz=20) {
   nbins.xy = getNBinsXY()
-  cell.events = cell.df[nevents > 0,]
-  trace.vals = cell.df[[trace.col]]
+  cell.events = cell.df[mean.nevents > 0,]
+  trace.vals = cell.df$mean.trace
   trace.vals = trace.vals - min(trace.vals)
 
   if (length(trace.vals) == 0) {
@@ -147,13 +145,14 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
   #trace.quantiles = quantile(trace.vals, c(0.85, 0.95, 1.0), na.rm=TRUE) %>% unname + 0.01
   #trace.quantiles = c(0.5, 1000.0)
   trace.quantiles = quantile(trace.vals, c(0.2, 0.5, 0.8, 0.9, 0.95, 0.99, 1.0), na.rm=TRUE)  + 0.01
-  pf = with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, trace.vals,
-                                      c(trace.quantiles[["20%"]], trace.quantiles[["50%"]],
-                                        trace.quantiles[["80%"]], trace.quantiles[["90%"]], 
-                                        trace.quantiles[["95%"]], trace.quantiles[["100%"]]), 
-                                      trial_ends, nshuffles,
-                                      2 * frame.hz,
-                                      timebin.size))
+  pf = getCppPlaceField(cell.df$bin.x, cell.df$bin.y, 
+                        trace.vals,
+                        c(trace.quantiles[["20%"]], trace.quantiles[["50%"]],
+                          trace.quantiles[["80%"]], trace.quantiles[["90%"]], 
+                          trace.quantiles[["95%"]], trace.quantiles[["100%"]]), 
+                        trial_ends, 
+                        nshuffles,
+                        2 * frame.hz)
 
   si.signif.thresh = quantile(pf$shuffle.si, 0.95, na.rm=TRUE)[[1]]
   si.signif = pf$spatial.information >= si.signif.thresh

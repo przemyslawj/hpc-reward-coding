@@ -39,7 +39,7 @@ eval.parts = lapply(caimg_result_dirs, function(caimg_result_dir) {
   if (nrow(data.traces.filtered) == 0) {
     return(data.frame())
   } else {
-    timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec=200)
+    timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec=200, xybins=20)
     quantile.fractions = c(0.95, 1.0)
     binned.traces = bin.responses(timebinned.traces, quantile.fractions)
     binned.traces = data.table(binned.traces)

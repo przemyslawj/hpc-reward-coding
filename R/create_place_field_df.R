@@ -50,10 +50,14 @@ calc.spatial.info = function(data.traces, plot.dir='/tmp/pf_stability/',
   pci.df = data.frame()
   fields = list()
   occupancies = list()
+  binned.data.traces = timebin.traces(data.traces[smooth_trans_x >= 0 & smooth_trans_y >= 0, ],
+                                      timebin.dur.msec = 200,
+                                      xybins = getNBinsXY(),
+                                      trace.var = deconv_trace)
 
   for (cell_name in cells) {
-    cell.df = data.traces[cell_id == cell_name & smooth_trans_x >= 0 & smooth_trans_y >= 0,]
-    pf = cell.spatial.info(cell.df, generate.plots, nshuffles, trace.col='trace')
+    cell.df = binned.data.traces[cell_id == cell_name ,]
+    pf = cell.spatial.info(cell.df, generate.plots, nshuffles)
 
     fields[[format(cell_name)]] = pf$field
     occupancies[[format(cell_name)]] = pf$occupancy
@@ -195,5 +199,5 @@ for (caimg_result_dir in caimg_result_dirs) {
 
 
 print("Saving env variables")
-save.image(file="data/place_field_dfs_shuffled_percentile20_50_80_90_95.RData")
+save.image(file="data/deconv_place_field_dfs_shuffled_percentile20_50_80_90_95.RData")
 

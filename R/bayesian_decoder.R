@@ -18,26 +18,6 @@ from_1dim = function(z) {
   list(x=floor(z/xybins), y=z%%xybins)
 }
 
-timebin.traces = function(data.traces, timebin.dur.msec=100) {
-  bin.width = 100/xybins
-  max.timestamp = max(data.traces$timestamp)
-  timebinned.traces = data.traces %>%
-    mutate(abs_timestamp = (trial-1)*(max.timestamp+timebin.dur.msec) + timestamp,
-           time_bin = floor(abs_timestamp/timebin.dur.msec) %>% as.integer) %>%
-    group_by(animal, date, trial_id, cell_id, time_bin) %>%
-    dplyr::summarise(bin.trace = mean(trace),
-                     mean.velocity = mean(velocity),
-                     mean.x = mean(smooth_trans_x),
-                     mean.y = mean(smooth_trans_y)) %>%
-    mutate(bin.x = floor(mean.x / bin.width),
-           bin.y = floor(mean.y / bin.width))
-  
-  timebinned.traces = data.table(timebinned.traces) %>%
-    setorder(time_bin, cell_id)
-  timebinned.traces
-}
-
-
 get.response.bin = function(vals, animal_name, date_str, cell_name, cell.thresholds, quantile.fractions) {
   trace.quantiles.row = cell.thresholds[animal==animal_name[1] & date==date_str[1] & cell_id==cell_name[1],]
   trace.quantiles = trace.quantiles.row[1, 4: (3 + length(quantile.fractions))] %>% as.matrix
@@ -48,14 +28,14 @@ get.response.bin = function(vals, animal_name, date_str, cell_name, cell.thresho
 bin.responses = function(df, quantile.fractions) {
   cell.thresholds = df %>% 
     ddply(.(animal, date, cell_id), function(cell.df) {
-      quantile(cell.df$bin.trace, quantile.fractions) + 0.001
+      quantile(cell.df$mean.trace, quantile.fractions) + 0.001
     })
   cell.thresholds = data.table(cell.thresholds)
   setkey(cell.thresholds, animal, date, cell_id)
   
   binned.df = df %>%
     dplyr::group_by(animal, date, cell_id) %>%
-    dplyr::mutate(response_bin = get.response.bin(bin.trace, animal, date, cell_id, cell.thresholds, quantile.fractions)) %>%
+    dplyr::mutate(response_bin = get.response.bin(mean.trace, animal, date, cell_id, cell.thresholds, quantile.fractions)) %>%
     dplyr::ungroup()
           
   binned.df

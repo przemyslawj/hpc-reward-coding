@@ -33,6 +33,27 @@ read.data.trace = function(ca_img_result_dir, filter_exp_title = NA) {
   return(data.traces)
 }
 
+timebin.traces = function(data.traces, timebin.dur.msec=100, xybins=20, trace.var=trace) {
+  trace.var = enquo(trace.var)
+  bin.width = 100/xybins
+  max.timestamp = max(data.traces$timestamp)
+  timebinned.traces = data.traces %>%
+    mutate(abs_timestamp = (trial-1)*(max.timestamp+timebin.dur.msec) + timestamp,
+           time_bin = floor(abs_timestamp/timebin.dur.msec) %>% as.integer) %>%
+    group_by(animal, date, trial_id, trial, cell_id, time_bin) %>%
+    dplyr::summarise(mean.trace = mean(!! trace.var),
+                     mean.nevents = mean(nevents),
+                     mean.velocity = mean(velocity),
+                     mean.x = mean(smooth_trans_x),
+                     mean.y = mean(smooth_trans_y)) %>%
+    mutate(bin.x = floor(mean.x / bin.width),
+           bin.y = floor(mean.y / bin.width))
+  
+  timebinned.traces = data.table(timebinned.traces) %>%
+    setorder(time_bin, cell_id)
+  timebinned.traces
+}
+
 
 zscore.traces = function(data) {
   ddply(data, .(animal, date, trial_id, cell), plyr::mutate,
