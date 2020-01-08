@@ -20,36 +20,44 @@ source('utils.R')
 xybins = 20
 run.threshold = 2
 
-
-eval.parts = lapply(caimg_result_dirs, function(caimg_result_dir) {
-  data.traces = read.data.trace(caimg_result_dir, filter_exp_title = 'trial')
+prepare.traces = function(data.traces) {
   setorder(data.traces, trial_id, cell_id, timestamp)
   detect.events(data.traces, deconv.threshold=0.1)
   
-  running.index = isRunning(data.traces, 2, 3, 500)
+  running.index = isRunning(data.traces, 2, 3, 500) 
   data.traces.run = data.traces[which(running.index), ]
-  
+
   date_str = data.traces$date[1]
   animal_name = data.traces$animal[1]
-  ## Keep only place cells
-  pc.cells = subset(place.cell.db, animal==animal_name & date==date_str & is.pc)$cell_id
-  #data.traces.filtered = data.traces.run[cell_id %in% pc.cells, ]
+  ## Keep only place cells or daystable cells
+  #pc.cells = subset(place.cell.db, animal==animal_name & date==date_str & is.pc)$cell_id
+  #stable.cells = subset(stable.cell.db, animal==animal_name & date==date_str & is.stable)$cell_id
+  #data.traces.filtered = data.traces.run[cell_id %in% stable.cells, ]
   data.traces.filtered = data.traces.run
+  
+  timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec=200, xybins=20, trace.var=trace)
+  quantile.fractions = c(0.95, 1.0)
+  binned.traces = bin.responses(timebinned.traces, quantile.fractions)
+  binned.traces = data.table(binned.traces)
+  binned.traces[,bin.xy := to_1dim(bin.x, bin.y)]
+  setorder(binned.traces, time_bin, cell_id)
+  setkey(binned.traces, time_bin, cell_id)
+  
+  return(binned.traces)
+}
 
+eval.parts = lapply(caimg_result_dirs, function(caimg_result_dir) {
+  data.traces = read.data.trace(caimg_result_dir, filter_exp_title = 'trial')
+  binned.traces = prepare.traces(data.traces)
   if (nrow(data.traces.filtered) == 0) {
     return(data.frame())
   } else {
-    timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec=200, xybins=20, trace.var=deconv_trace)
-    quantile.fractions = c(0.95, 1.0)
-    binned.traces = bin.responses(timebinned.traces, quantile.fractions)
-    binned.traces = data.table(binned.traces)
-    
     print('Started evaluating the model')
     tic("Built and evaluated the model")
-    eval.df = eval.decoder(binned.traces, length(quantile.fractions), cv=FALSE)
+    eval.df = eval.decoder(binned.traces, length(quantile.fractions), cv=TRUE)
     if (nrow(eval.df) > 0) {
-      eval.df$animal = animal_name
-      eval.df$date = date_str
+      eval.df$animal = binned.traces$animal[1]
+      eval.df$date = binned.traces$date[1]
     }
     toc()
     
@@ -61,7 +69,6 @@ decoding.df = do.call('rbind', eval.parts)
 summary(decoding.df$error)
 summary(decoding.df$random_error)
 ```
-
 
 ```{r}
 eval.summary = decoding.df %>%
@@ -77,6 +84,40 @@ ggplot(eval.summary, aes(x=date,y=mean.error, group=animal, color=animal)) +
   geom_errorbar(aes(x=date, ymin=median.error-sem.error, ymax=median.error+sem.error), width=0.2) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
+
+Eval on the next day
+```{r}
+otherday.decoding.df = data.frame()
+
+models = list()
+dates = rep('', length(caimg_result_dirs))
+animal_names = rep('', length(caimg_result_dirs))
+for (i in 1:length(caimg_result_dirs)) {
+  caimg_result_dir = caimg_result_dirs[i]
+  data.traces = read.data.trace(caimg_result_dir, filter_exp_title = 'trial')
+  dates[i] = data.traces$date[i]
+  animal_names[i] = data.traces$animal[i]
+  binned.traces = prepare.traces(data.traces)
+  if (i > 1 && animal_names[i] == animal_names[i-1]) {
+    model.visited = which(models[[i-1]]$prior > 0)
+    binned.traces.filtered = binned.traces[bin.xy %in% model.visited,]
+    system.time(eval.res <- eval.testdata2(binned.traces.filtered, models[[i-1]], bayesmax))
+    eval.res$df$test_date = dates[i]
+    eval.res$df$model_date = dates[i-1]
+    eval.res$df$animal = animal_names[i]
+    otherday.decoding.df = bind_rows(otherday.decoding.df, eval.res$df)
+  }
+  filtered.dfs = filter.sampled(binned.traces, binned.traces[1,])
+  models[[i]] = create.model2(filtered.dfs$train, nresponse.bins=nresponse.bins)
+}
+```
+
+```{r}
+otherday.decoding.df = data.table(otherday.decoding.df)
+otherday.decoding.df[, median(error),by=c('model_date')]
+```
+
+
 
 Mean error per bin
 ```{r}

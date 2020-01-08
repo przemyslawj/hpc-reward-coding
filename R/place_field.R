@@ -128,28 +128,36 @@ field.cor = function(field1, field2, max.xy, make.cor.plot=FALSE) {
 
 
 cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
-                             frame.hz=20) {
+                             frame.hz=20,
+                             trace.var='mean.trace') {
   nbins.xy = getNBinsXY()
-  cell.events = cell.df[mean.nevents > 0,]
-  trace.vals = cell.df$mean.trace
+  cell.events = cell.df[nevents > 0,]
+  trace.vals = cell.df[[trace.var]]
   trace.vals = trace.vals - min(trace.vals)
 
   if (length(trace.vals) == 0) {
-    return(list(cell_info=data.frame(),
+    return(list(cell_info=list(),
                 field=matrix(),
                 occupancy=matrix(),
                 g=NULL))
   }
   cell_name = cell.df$cell_id[1]
-  trial_ends = get.trial.ends(cell.df$timestamp)
+  trial_ends = get.trial.ends(cell.df$time_bin)
   #trace.quantiles = quantile(trace.vals, c(0.85, 0.95, 1.0), na.rm=TRUE) %>% unname + 0.01
   #trace.quantiles = c(0.5, 1000.0)
   trace.quantiles = quantile(trace.vals, c(0.2, 0.5, 0.8, 0.9, 0.95, 0.99, 1.0), na.rm=TRUE)  + 0.01
+  max.traceval = max(trace.vals)
+  trace.bins = c(trace.quantiles[["20%"]], trace.quantiles[["50%"]],
+                 trace.quantiles[["80%"]], trace.quantiles[["90%"]], 
+                 trace.quantiles[["95%"]], trace.quantiles[["100%"]])
+  #trace.bins = c(max(0.1, trace.quantiles[["50%"]]),
+  #               trace.quantiles[["80%"]],
+  #               trace.quantiles[["95%"]],
+  #               trace.quantiles[["99%"]],
+  #               trace.quantiles[["100%"]])
   pf = getCppPlaceField(cell.df$bin.x, cell.df$bin.y, 
                         trace.vals,
-                        c(trace.quantiles[["20%"]], trace.quantiles[["50%"]],
-                          trace.quantiles[["80%"]], trace.quantiles[["90%"]], 
-                          trace.quantiles[["95%"]], trace.quantiles[["100%"]]), 
+                        trace.bins,
                         trial_ends, 
                         nshuffles,
                         2 * frame.hz)
@@ -165,11 +173,6 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
                    signif.si=si.signif,
                    mi.signif.thresh=mi.signif.thresh,
                    signif.mi=mi.signif,
-                   #field.centre.x=pf$field.centre[1],
-                   #field.centre.y=pf$field.centre[2],
-                   #field.max.x=pf$field.max.xy[1],
-                   #field.max.y=pf$field.max.xy[2],
-                   #field.max=pf$field.max,
                    field.size.50=pf$field.size.50,
                    field.size.25=pf$field.size.25,
                    spatial.information.perspike=pf$spatial.information.perspike,
@@ -184,7 +187,11 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
 
   # find field max value and pos in the smoothed values
   pf.df = create.pf.df(pf$field, pf$occupancy, max.xy=nbins.xy)
-  max.row = pf.df[which.max(pf.df$value.conv),]
+  if (nrow(pf.df) > 0) {
+    max.row = pf.df[which.max(pf.df$value.conv),]
+  } else { # no bin with high enough occupancy
+    max.row=list(value.conv=0, Var1=-1, Var2=-1)
+  }
   cell_info$field.max = max.row$value.conv
   cell_info$field.mean = mean(pf.df$value.conv)
   cell_info$field.max.x = max.row$Var1 / nbins.xy * 100
@@ -205,8 +212,6 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
            fill='Deconv trace') +
       theme(text = element_text(size=4),
             plot.title = element_text(size=4))
-
-
   }
 
   return(list(cell_info=cell_info,

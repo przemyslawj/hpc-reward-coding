@@ -53,22 +53,23 @@ calc.spatial.info = function(data.traces, plot.dir='/tmp/pf_stability/',
   binned.data.traces = timebin.traces(data.traces[smooth_trans_x >= 0 & smooth_trans_y >= 0, ],
                                       timebin.dur.msec = 200,
                                       xybins = getNBinsXY(),
-                                      trace.var = deconv_trace)
+                                      trace.var=trace)
 
   for (cell_name in cells) {
     cell.df = binned.data.traces[cell_id == cell_name ,]
-    pf = cell.spatial.info(cell.df, generate.plots, nshuffles)
-
-    fields[[format(cell_name)]] = pf$field
-    occupancies[[format(cell_name)]] = pf$occupancy
-    pci.df = bind_rows(pci.df, pf$cell_info)
-
-    if (!is.na(plot.dir) && generate.plots && !is.na(pf$g)) {
-      if (!file.exists(plot.dir)) {
-        dir.create(plot.dir, recursive=TRUE)
+    pf = cell.spatial.info(cell.df, generate.plots, nshuffles, trace.var='mean.trace')
+    if (length(pf$cell_info) > 0) {
+      fields[[format(cell_name)]] = pf$field
+      occupancies[[format(cell_name)]] = pf$occupancy
+      pci.df = bind_rows(pci.df, pf$cell_info)
+  
+      if (!is.na(plot.dir) && generate.plots && !is.na(pf$g)) {
+        if (!file.exists(plot.dir)) {
+          dir.create(plot.dir, recursive=TRUE)
+        }
+        ggsave(paste0(plot.dir, 'place_field_cell_', cell_name, '.jpg'), pf$g,
+               width=3.5, height=3.0, units='cm', dpi=300)
       }
-      ggsave(paste0(plot.dir, 'place_field_cell_', cell_name, '.jpg'), pf$g,
-             width=3.5, height=3.0, units='cm', dpi=300)
     }
   }
 
@@ -113,6 +114,7 @@ for (caimg_result_dir in caimg_result_dirs) {
   animal = data.traces$animal[1]
   
   data.traces = data.traces[exp_title != 'homecage',]
+  data.traces = detect.events(data.traces)
   
   setorder(data.traces, trial_id, cell_id, timestamp)
   running.index = isRunning(data.traces, 2, 3, 500)
@@ -199,5 +201,5 @@ for (caimg_result_dir in caimg_result_dirs) {
 
 
 print("Saving env variables")
-save.image(file="data/deconv_place_field_dfs_shuffled_percentile20_50_80_90_95.RData")
+save.image(file="data/trace_place_field_dfs_shuffled_percentile20_50_80_90_95.RData")
 

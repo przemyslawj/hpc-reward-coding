@@ -46,6 +46,9 @@ detect.events = function(data.traces, deconv.threshold=0.1) {
 }
 
 timebin.traces = function(data.traces, timebin.dur.msec=100, xybins=20, trace.var=trace) {
+  if (nrow(data.traces) == 0) {
+    return(data.frame())
+  }
   trace.var = enquo(trace.var)
   bin.width = 100/xybins
   max.timestamp = max(data.traces$timestamp)

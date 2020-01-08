@@ -39,7 +39,16 @@ bin.responses = function(df, quantile.fractions) {
 # prior: prior probability of each stimulus, length equal nstim.bins
 # likelihood: 3D array: nstim.bins x ncells x nresponse.bins with a probability
 # of a cell giving particular response for a given stimulus bin
-create.model2 = function(response, stimulus, nresponse.bins, nstim.bins=20) {
+create.model2 = function(training.df, nresponse.bins, nstim.bins=20*20, value.var='response_bin') {
+  # to matrix representation
+  response = reshape2::acast(training.df, cell_id ~ time_bin, value.var=value.var)
+  setorder(training.df, time_bin)
+  stimulus = training.df %>%
+    dplyr::select(time_bin, bin.xy) %>%
+    dplyr::arrange(time_bin) %>%
+    dplyr::distinct()
+  stimulus = stimulus$bin.xy
+  
   occupancy.hist = hist(stimulus, breaks=0:nstim.bins, plot=FALSE)
   Moccupancy = occupancy.hist$counts
   visited = which(Moccupancy > 0)
@@ -63,6 +72,24 @@ create.model2 = function(response, stimulus, nresponse.bins, nstim.bins=20) {
               likelihood=Mlikelihood))
   
 }
+
+create.mfr.model = function(training.df, nstim.bins=20*20) {
+  occupancy.hist = hist(training.df$bin.xy, breaks=0:nstim.bins, plot=FALSE)
+  cell.ids = unique(training.df$cell_id)
+  full.xy.df = data.frame(bin.xy = rep(1:nstim.bins, length(cell.ids)), 
+                          nevents=NA, 
+                          cell_id = rep(cell.ids, each=nstim.bins))
+  # Add one event to each visited bin to avoid 0 probability of the bin
+  one.event.df = select(training.df, cell_id, bin.xy) %>% 
+    distinct() %>%
+    mutate(nevents=1)
+  
+  model.df = bind_rows(select(training.df, cell_id, bin.xy, nevents), full.xy.df, one.event.df)
+  mfr.matrix = reshape2::acast(model.df, cell_id ~ bin.xy, value.var='nevents', fun.aggregate=function(x) {mean(x, na.rm=TRUE)})
+  return(list(prior=occupancy.hist$density,
+              likelihood=mfr.matrix))
+}
+
 
 smooth.likelihoods = function(model.bayes, sigma=0.8) {
   nstim = dim(model.bayes$likelihood)[1]
@@ -217,8 +244,8 @@ smooth.likelihoods = function(model.bayes, sigma=0.8) {
 #   return(results.df)
 # }
 
-eval.testdata2 = function(test.df, model.bayes, classifier.fun) {
-  test.response = reshape2::acast(test.df, cell_id ~ time_bin, value.var='response_bin')
+eval.testdata2 = function(test.df, model.bayes, classifier.fun, value.var='response_bin') {
+  test.response = reshape2::acast(test.df, cell_id ~ time_bin, value.var=value.var)
   expected.s = test.df %>%
     mutate(prior = model.bayes$prior[bin.xy]) %>%
     select(time_bin, bin.x, bin.y, bin.xy, prior) %>%
@@ -271,7 +298,7 @@ find.first.timestamp = function(timestamps, ind, inc=1) {
   return(ind)
 }
 
-filter.sampled = function(training.df, test.df, min.samples=6) {
+filter.sampled = function(training.df, test.df, min.samples=20) {
   bin.samples = training.df[, .(nsamples=length(unique(time_bin))), by=bin.xy]
   train.filtered = bin.samples[training.df, on='bin.xy'][nsamples >= min.samples,]
   test.filtered = bin.samples[test.df, on='bin.xy'][nsamples >= min.samples,]
@@ -287,11 +314,7 @@ eval.decoder = function(binned.traces, nresponse.bins, training.split.fraction=0
   nrows.testing = nrow(binned.traces) - nrows.training
   result.df = data.frame()
   
-  binned.traces = binned.traces %>%
-    mutate(bin.xy = to_1dim(bin.x, bin.y))
   binned.traces = data.table(binned.traces)
-  setorder(binned.traces, time_bin, cell_id)
-  setkey(binned.traces, time_bin, cell_id)
   
   test.index.start = nrow(binned.traces)
   for (i in 1:ncv) {
@@ -305,18 +328,14 @@ eval.decoder = function(binned.traces, nresponse.bins, training.split.fraction=0
     training.df = filtered.dfs$train
     test.df = filtered.dfs$test
 
-    # to matrix representation
-    training.response = reshape2::acast(training.df, cell_id ~ time_bin, value.var='response_bin')
-    stimulus = training.df %>%
-      select(time_bin, bin.xy) %>%
-      arrange(time_bin) %>%
-      distinct()
-    model.bayes = create.model2(training.response, stimulus$bin.xy, nresponse.bins, nstim.bins=xybins*xybins)
+    model.bayes = create.model2(training.df, nresponse.bins, nstim.bins=xybins*xybins, value.var='response_bin')
+    #mfr.model = create.mfr.model(training.df, nstim.bins=xybins*xybins)
     #smooth.model.bayes = smooth.likelihoods(model.bayes)
     if (nrow(test.df) == 0) {
       warning('0 rows for testing after filtering with min samples')
     } else {
       system.time(eval.res <- eval.testdata2(test.df, model.bayes, bayesmax))
+      #system.time(eval.res <- eval.testdata2(test.df, mfr.model, bayesmax_mfr, value.var='nevents'))
       partial.df = eval.res$df
       
       random.classifier.res <- eval.testdata2(test.df, model.bayes, random.prior.classifier)

@@ -67,7 +67,7 @@ run.trials.si %>%
   filter(date == '2019-09-02' | date=='2019-09-01') %>%
   ggplot() +
   #geom_point(aes(x=field.max, y=mutual.info-mutual.info.bias, color=signif.si), alpha=0.2)
-  geom_point(aes(x=sparsity, y=mutual.info-mutual.info.bias, color=signif.mi), alpha=0.2) +
+  geom_point(aes(x=sparsity, y=mutual.info-mutual.info.bias, color=signif.si), alpha=0.2) +
   facet_grid(date ~ animal) +
   xlim(c(1,8))
 ```
@@ -92,7 +92,7 @@ is.place.cell = function(is.signif, mutual.info.wo.bias, field.size.50, field.si
 
 # Classification of place cells based on MI on each subset of day sessions
 run.trials.pc = run.trials.si %>%
-  mutate(is.pc = is.place.cell(signif.mi, mutual.info - mutual.info.bias, field.size.50, field.size.25, field.max, field.mean))
+  mutate(is.pc = is.place.cell(signif.si, mutual.info - mutual.info.bias, field.size.50, field.size.25, field.max, field.mean))
 
 place.cell.db = run.trials.pc %>%
   select(date, animal, cell_id, is.pc) %>%

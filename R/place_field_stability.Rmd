@@ -161,7 +161,7 @@ compare.day.trials = function(day.trials.comparison, fields1, fields2, occupanci
 odd.trials.si$group = 'odd'
 even.trials.si$group = 'even'
 odd.even.trials = bind_rows(odd.trials.si, even.trials.si)
-odd.even.comparison = compare.day.trials(odd.even.trials, odd.fields, even.fields, odd.occupancies, even.occupancies) 
+#odd.even.comparison = compare.day.trials(odd.even.trials, odd.fields, even.fields, odd.occupancies, even.occupancies) 
 
 early.trials.si$group = 'early'
 late.trials.si$group = 'late'
@@ -172,9 +172,18 @@ odd.even.comparison$group = 'odd vs even'
 early.late.comparison$group = 'early vs late'
 ```
 
+Daystable cells
+```{r}
+field.cor.thr=0.4
+stable.cell.db = early.late.comparison %>%
+  mutate(is.stable=replace_na(field.cor >= field.cor.thr, FALSE)) %>%
+  select(date, animal, cell_id, is.stable)
+```
+
 Do place cells have stable field peaks from early to late trials
 ```{r}
-left_join(early.late.comparison, place.cell.db, by=c('date', 'animal', 'cell_id')) %>%
+#left_join(early.late.comparison, place.cell.db, by=c('date', 'animal', 'cell_id')) %>%
+early.late.comparison %>%
   filter(is.pc) %>%
     group_by(animal, date) %>%
     sample_n(50, replace = TRUE) %>%

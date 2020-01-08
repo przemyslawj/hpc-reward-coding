@@ -276,12 +276,6 @@ SEXP getCppPlaceField(NumericVector& bin_x,
                       int nshuffles,
                       int shuffleChunkLength) {
 
-
-  NumericMatrix field = NumericMatrix(N_BINS_X,N_BINS_Y);
-  std::fill(field.begin(), field.end(), NAN_FIELD);
-
-  //NumericVector fieldCentre = NumericVector(2);
-  //NumericVector fieldMaxXY = NumericVector(2);
   NumericVector shuffleSI = NumericVector(nshuffles);
   NumericVector shuffleMI = NumericVector(nshuffles);
   std::fill(shuffleSI.begin(), shuffleSI.end(), 0);
@@ -293,11 +287,8 @@ SEXP getCppPlaceField(NumericVector& bin_x,
   result["activity"] = NumericMatrix(N_BINS_X,N_BINS_Y);
   result["spatial.information"] = 0.0;
   result["spatial.information.perspike"] = 0.0;
-  //result["field.centre"] = fieldCentre;
   result["field.size.50"] = 0;
   result["field.size.25"] = 0;
-  //result["field.max"] = 0;
-  //result["field.max.xy"] = fieldMaxXY;
   result["shuffle.si"]= shuffleSI;
   result["shuffle.mi"]= shuffleMI;
   result["space.sampling.factor"] = 0.0;
@@ -316,14 +307,10 @@ SEXP getCppPlaceField(NumericVector& bin_x,
   for (int yy = 0; yy < N_BINS_Y; ++yy) {
     for (int xx = 0; xx < N_BINS_X; ++xx) {
       if (occupancyMap(xx,yy) > 0) {
-        field(xx,yy) = totalActivityMap(xx,yy) / occupancyMap(xx,yy);
-        if (field(xx,yy) >= maxField) {
-          maxField = field(xx,yy);
-          //fieldMaxXY[0] = xx * binSizeX;
-          //fieldMaxXY[1] = yy * binSizeY;
+        fr(xx,yy) = totalActivityMap(xx,yy) / occupancyMap(xx,yy);
+        if (fr(xx,yy) >= maxField) {
+          maxField = fr(xx,yy);
         }
-      } else {
-        field(xx,yy) = NAN_FIELD;
       }
     }
   }
@@ -338,49 +325,42 @@ SEXP getCppPlaceField(NumericVector& bin_x,
   int nFieldBins25 = 0;
   for (int yy = 0; yy < N_BINS_Y; ++yy) {
     for (int xx = 0; xx < N_BINS_X; ++xx) {
-      if (field(xx,yy) != NAN_FIELD) {
-        fieldTotal += field(xx, yy);
+      if (fr(xx,yy) != NAN_FIELD) {
+        fieldTotal += fr(xx, yy);
         ++nfield;
 
-        if (field(xx,yy) >= FIELD_BINARY_THRESH * maxField) {
-          double weight = field(xx,yy);
+        if (fr(xx,yy) >= FIELD_BINARY_THRESH * maxField) {
+          double weight = fr(xx,yy);
           weightedFieldX += xx * weight;
           weigthedFieldY += yy * weight;
           totalWeights += weight;
           ++nFieldBins50;
         }
-        if (field(xx,yy) >= 0.25 * maxField) {
+        if (fr(xx,yy) >= 0.25 * maxField) {
           ++nFieldBins25;
         }
       }
     }
   }
-  //fieldCentre[0] = weightedFieldX / std::max(0.01, totalWeights) * binSizeX;
-  //fieldCentre[1] = weigthedFieldY / std::max(0.01, totalWeights) * binSizeY;
 
   for (int i = 0; i < nshuffles; ++i) {
-
     NumericVector shuffledTrace = chunkShuffle(trace, trialEnds, shuffleChunkLength);
     //NumericVector shuffledTrace = randomShift(trace, trialEnds, shuffleChunkLength * 2);
     SpatialInfoData shuffleData = calculateSpatialInformation(bin_x, bin_y, shuffledTrace, traceQuantiles);
     shuffleSI[i] = shuffleData.SI;
     shuffleMI[i] = shuffleData.MI;
-
   }
 
 
   // Populate the result list
-  result["field"] = field;
+  result["field"] = fr;
   result["occupancy"] = occupancyMap;
   result["activity"] = totalActivityMap;
   result["spatial.information"] = (float) spatialInfoData.SI;
   result["spatial.information.perspike"] = spatialInfoData.SI / spatialInfoData.mfr;
   result["mfr"] = spatialInfoData.mfr;
-  //result["field.centre"] = fieldCentre;
   result["field.size.50"] = ((double) nFieldBins50) / (N_BINS_X * N_BINS_Y) * 100.0;
   result["field.size.25"] = ((double) nFieldBins25) / (N_BINS_X * N_BINS_Y) * 100.0;
-  //result["field.max"] = maxField;
-  //result["field.max.xy"] = fieldMaxXY;
   result["shuffle.si"] = shuffleSI;
   result["mutual.info"] = spatialInfoData.MI;
   result["mutual.info.bias"] = spatialInfoData.MI_bias;
