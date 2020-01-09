@@ -197,6 +197,7 @@ data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
 setorder(data.traces, trial_id, cell_id, timestamp)
 running.index = isRunning(data.traces, 2, 3, 500)
 data.traces.run = data.traces[which(running.index), ]
+detect.events(data.traces.run)
 cell.df = data.traces.run[cell_id == cell_name
                           & smooth_trans_x >= 0 & smooth_trans_y >= 0
                           #& (atReward0 == 1 | atReward1 == 1)
@@ -207,7 +208,7 @@ cell.df = data.traces.run[cell_id == cell_name
 Rcpp::sourceCpp('place_field.cpp')
 source('place_field.R')
 
-frame.rate = 20 / (1000 / 200)
+frame.rate = 1000 / 200
 
 plot.cell.trials = function(cell.df) {
   if (nrow(cell.df) == 0) {
@@ -222,7 +223,8 @@ plot.cell.trials = function(cell.df) {
   for (trial_no in trials) {
     pf = cell.spatial.info(cell.df[trial == trial_no, ],
                            generate.plots=FALSE,
-                           nshuffles=100)
+                           nshuffles=100,
+                           min.occupancy = 1)
     pf.df = create.pf.df(pf$field, pf$occupancy, 
                          max.xy=getNBinsXY(),
                          frame.rate=frame.rate,
@@ -235,7 +237,7 @@ plot.cell.trials = function(cell.df) {
                          generate.plots=FALSE,
                          nshuffles=100)
   pf.df = create.pf.df(pf$field, pf$occupancy, 
-                         max.xy=getNBinsXY(),
+                       max.xy=getNBinsXY(),
                        frame.rate=frame.rate)
   pf.df$trial = 'all'
   all.pf.df = bind_rows(all.pf.df, pf.df)
@@ -327,7 +329,7 @@ plot.all.day.fields = function(animal_name, cell_id) {
     geom_rewards(filter(rewards.df, date %in% selected.days), animal_name) 
 }
 
-plot.all.day.fields('F-TL', 5)
+plot.all.day.fields('F-TL', 0)
 ```
 Save place fields for all days
 ```{r}

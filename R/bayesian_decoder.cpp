@@ -1,3 +1,5 @@
+#define _USE_MATH_DEFINES
+
 #include <RcppArmadillo.h>
 // [[Rcpp::depends(RcppArmadillo)]]
 #include <Rcpp.h>
@@ -55,7 +57,7 @@ SEXP bayesmax(NumericVector& prior,
       probDensity[s] = s_prob;
       if (max_s_prob <= s_prob) {
         max_s_prob = s_prob;
-        max_s = s + 1;
+        max_s = s + 1; // Add 1 because indexing in R starts with 1
       }
     } else{
       probDensity[s] = 0.0;
@@ -69,8 +71,15 @@ SEXP bayesmax(NumericVector& prior,
 
 // [[Rcpp::export]]
 double poisson_prob(double lambda, double k) {
-  double prob = std::pow(lambda, k) * std::exp(-lambda) / std::tgamma(k + 1);
-  return prob;
+  return std::pow(lambda, k) * std::exp(-lambda) / std::tgamma(k + 1);
+}
+
+// [[Rcpp::export]]
+double gauss_prob(double m, double sig, double p) {
+  if (std::isnan(m)) {
+    return 0.0;
+  }
+  return std::exp(-std::pow(p-m, 2) / (2 * sig * sig)) / std::sqrt(2 * M_PI * sig * sig);
 }
 
 // [[Rcpp::export]]
@@ -86,7 +95,8 @@ SEXP bayesmax_mfr(NumericVector& prior,
   CharacterVector modelCells = dimnames[0];
   
   IntegerVector mfrDim = mfr.attr("dim");
-  arma::mat frM(mfr.begin(), mfrDim[0], mfrDim[1], false);
+  //arma::mat frM(mfr.begin(), mfrDim[0], mfrDim[1], false);
+  arma::cube frM(mfr.begin(), mfrDim[0], mfrDim[1], 2, false);
   
   std::unordered_map<int, int> pv2model_name(pvCellNames.size());
   for (int i = 0; i < pvCellNames.size(); ++i) {
@@ -107,12 +117,13 @@ SEXP bayesmax_mfr(NumericVector& prior,
   // P(r|s) = II_i P(r_i|s)
   for (int s = 0; s < nstim; ++s) {
     double s_prob = prior[s];;
-    if (s_prob != NA_REAL) {
+    if (!std::isnan(s_prob) && s_prob > 0.0) {
       for (int ci = 0; ci < pv2model_name.size(); ++ci) {
         int model_cell_i = pv2model_name[ci];
-        double prob = poisson_prob(frM(model_cell_i, s), pv[ci]);
-        //std::cout<<"Prob for s=" << s+1 << " cell=" << pvCellNames[ci] << " mfr=" << frM(model_cell_i, s) <<" response=" << pv[ci] << " is=" << prob << std::endl;
-        if (prob != NA_REAL) {
+        //double prob = poisson_prob(frM(model_cell_i, s), pv[ci]);
+        double prob = gauss_prob(frM(model_cell_i, s, 0), frM(model_cell_i, s, 1), pv[ci]);
+        //std::cout<<"Prob for s=" << s+1 << " cell=" << pvCellNames[ci] << " mfr=" << frM(model_cell_i, s, 0) <<" response=" << pv[ci] << " is=" << prob << std::endl;
+        if (!std::isnan(prob)) {
           s_prob = s_prob * prob;
         }
       }
@@ -225,10 +236,11 @@ mfr.matrix = matrix(0.01, nrow=2, ncol=4)
 rownames(mfr.matrix) = c('1', '2')
 mfr.matrix['1', 1] = 3
 mfr.matrix['2', 2] = 5
-
+sd.matrix = matrix(0.5, nrow=2, ncol=4)
+M = abind::abind(mfr.matrix, sd.matrix, along=3)
 prior=rep(0.25, 4)
-pv = c(`1`=1,`2`=5)
-res = bayesmax_mfr(prior, mfr.matrix, pv)
+pv = c(`1`=0,`2`=5)
+res = bayesmax_mfr(prior, M, pv)
 expect_equal(2, res$s)
 
 */

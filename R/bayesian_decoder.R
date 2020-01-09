@@ -6,7 +6,6 @@ library(Rcpp)
 Rcpp::sourceCpp('bayesian_decoder.cpp')
 
 xybins = 20
-run.threshold  = 2
 
 to_1dim = function(x, y) {
   # Vals from 1 to xybins * xybins
@@ -29,6 +28,10 @@ bin.responses = function(df, quantile.fractions) {
   binned.df
 }
 
+nevents.bin.responses = function(df, nevents.thr=0.5) {
+  binned.df = df[, response_bin := ifelse(nevents >= nevents.thr, 2, 1)]
+  binned.df
+}
 
 # Calculates prior and likelihood used by Bayesian decoder
 # response: matrix of trace values cell x time
@@ -86,8 +89,10 @@ create.mfr.model = function(training.df, nstim.bins=20*20) {
   
   model.df = bind_rows(select(training.df, cell_id, bin.xy, nevents), full.xy.df, one.event.df)
   mfr.matrix = reshape2::acast(model.df, cell_id ~ bin.xy, value.var='nevents', fun.aggregate=function(x) {mean(x, na.rm=TRUE)})
+  sd.matrix = reshape2::acast(model.df, cell_id ~ bin.xy, value.var='nevents', fun.aggregate=function(x) {sd(x, na.rm=TRUE)})
+  M = abind::abind(mfr.matrix, sd.matrix, along=3)
   return(list(prior=occupancy.hist$density,
-              likelihood=mfr.matrix))
+              likelihood=M))
 }
 
 
@@ -116,72 +121,6 @@ smooth.likelihoods = function(model.bayes, sigma=0.8) {
   return(model.bayes)
 }
 
-# # Returns DF with probability of a binned response for a given location
-# create.model = function(training.df, nresponse.bins) {
-#   training.df = data.table(training.df)
-#   occupancy.df = training.df %>%
-#     group_by(time_bin) %>%
-#     slice(1) # One row per cell, take one
-#   
-#   Moccupancy = reshape2::acast(occupancy.df, bin.x ~ bin.y, fun.aggregate=length, value.var='time_bin')
-#   occupancy.probs.df = melt(Moccupancy)
-#   total.occupancy = sum(occupancy.probs.df$value)
-#   occupancy.probs.df = mutate(occupancy.probs.df, 
-#                               prob=value/total.occupancy,
-#                               bin.xy=to_1dim(Var1, Var2)) %>%
-#     dplyr::rename(bin.x=Var1, bin.y=Var2) %>%
-#     select(-value) %>%
-#     data.table()
-#   setkey(occupancy.probs.df, bin.xy)
-#   
-#   visited = which(Moccupancy > 0)
-#   # Make unseen bins probability > 0 by adding 1 to each response_bin count
-#   Moccupancy[visited] = Moccupancy[visited] + nresponse.bins
-#   M.add = matrix(0, nrow=dim(Moccupancy)[1], ncol=dim(Moccupancy)[2])
-#   M.add[visited] = M.add[visited] + 1
-#   rownames(M.add) = rownames(Moccupancy)
-#   colnames(M.add) = colnames(Moccupancy)
-#   
-#   all.field.df = data.frame()
-#   for (cell_name in training.df$cell_id %>% unique) {
-#     cell.df = training.df[cell_id == cell_name, .(bin.x, bin.y, response_bin)]
-# 
-#     field.df = data.frame()
-#     for (i in 1:nresponse.bins) {
-#       bin_name = paste('bin', i, sep='_')
-#       cell.df[, bin_name] = i == cell.df$response_bin
-#       M = reshape2::acast(cell.df, bin.x ~ bin.y, fun.aggregate=sum, value.var=bin_name)
-#       Moccupancy.sub = Moccupancy[rownames(M),colnames(M)] %>% as.matrix
-#       M.add.sub = M.add[rownames(M),colnames(M)] %>% as.matrix
-#       
-#       M = M + M.add.sub
-#       M = M / Moccupancy.sub
-#       bin.field.df = melt(M) %>% 
-#         dplyr::filter(!is.na(value)) %>%
-#         dplyr::mutate(bin.xy = to_1dim(Var1, Var2)) %>%
-#         dplyr::rename(prob.r=value) %>% 
-#         dplyr::filter(is.finite(prob.r), !is.na(prob.r)) %>% # Skip if occupancy was 0 (x/0 = Inf)
-#         dplyr::rename(bin.x=Var1, bin.y=Var2) %>%
-#         dplyr::select(bin.xy, bin.x, bin.y, prob.r)
-#       bin.field.df$bin.response = i
-#       
-#       field.df = bind_rows(field.df, bin.field.df)
-#     }
-#     
-#     field.df$cell_id = cell_name
-#     field.df$animal = training.df$animal[1]
-#     
-#     all.field.df = bind_rows(all.field.df, field.df)
-#   }
-#   
-#   all.field.df = data.table(all.field.df)
-#   setkey(all.field.df, bin.xy, cell_id, bin.response)
-#   
-#   return(list(prior=occupancy.probs.df, 
-#               likelihood=all.field.df))
-# }
-# 
-# 
 # # Bayes rule (will assume P(s) uniform):
 # # max_s [P(s|r)] ~ max_s P(r|s) * P(s)
 # #
@@ -298,7 +237,7 @@ find.first.timestamp = function(timestamps, ind, inc=1) {
   return(ind)
 }
 
-filter.sampled = function(training.df, test.df, min.samples=20) {
+filter.sampled = function(training.df, test.df, min.samples=10) {
   bin.samples = training.df[, .(nsamples=length(unique(time_bin))), by=bin.xy]
   train.filtered = bin.samples[training.df, on='bin.xy'][nsamples >= min.samples,]
   test.filtered = bin.samples[test.df, on='bin.xy'][nsamples >= min.samples,]
@@ -322,8 +261,6 @@ eval.decoder = function(binned.traces, nresponse.bins, training.split.fraction=0
     test.index.start = find.first.timestamp(binned.traces$time_bin, max(1, test.index.start - nrows.testing), -1)
     test.indecies = test.index.start:test.index.end
     train.indecies = setdiff(1:nrow(binned.traces), test.indecies)
-    #training.df = binned.traces[train.indecies,]
-    #test.df = binned.traces[test.indecies,]
     filtered.dfs = filter.sampled(binned.traces[train.indecies,], binned.traces[test.indecies,])
     training.df = filtered.dfs$train
     test.df = filtered.dfs$test

@@ -78,7 +78,8 @@ SpatialInfoData calculateSpatialInformation(NumericVector& bin_x,
                                             NumericVector& bin_y,
                                             NumericVector& trace,
                                             // Quantiles for binning trace values
-                                            NumericVector& traceQuantiles) {
+                                            NumericVector& traceQuantiles,
+                                            double minOccupancy) {
 
   NumericMatrix totalActivityMap = NumericMatrix(N_BINS_X,N_BINS_Y);
   NumericMatrix occupancyMap = NumericMatrix(N_BINS_X,N_BINS_Y);
@@ -121,7 +122,7 @@ SpatialInfoData calculateSpatialInformation(NumericVector& bin_x,
   double sparsity = 0.0;
   for (int yy = 0; yy < N_BINS_Y; ++yy) {
     for (int xx = 0; xx < N_BINS_X; ++xx) {
-      if (occupancyMap(xx,yy) > 0) {
+      if (occupancyMap(xx,yy) >= minOccupancy) {
         fr(xx,yy) = totalActivityMap(xx,yy) / occupancyMap(xx,yy);
         fr_offset = std::min(fr_offset, fr(xx,yy));
         double p_s = (double) occupancyMap(xx, yy) / trace.size();
@@ -160,7 +161,7 @@ SpatialInfoData calculateSpatialInformation(NumericVector& bin_x,
   for (int yy = 0; yy < N_BINS_Y; ++yy) {
     for (int xx = 0; xx < N_BINS_X; ++xx) {
 
-      if (occupancyMap(xx,yy) > 0) {
+      if (occupancyMap(xx,yy) >= minOccupancy) {
         Debug(" xx=" << xx);
         Debug(" yy=" << yy << std::endl);
         ++occupiedBins;
@@ -274,7 +275,8 @@ SEXP getCppPlaceField(NumericVector& bin_x,
                       NumericVector& traceQuantiles,
                       NumericVector& trialEnds,
                       int nshuffles,
-                      int shuffleChunkLength) {
+                      int shuffleChunkLength,
+                      double minOccupancy) {
 
   NumericVector shuffleSI = NumericVector(nshuffles);
   NumericVector shuffleMI = NumericVector(nshuffles);
@@ -298,7 +300,7 @@ SEXP getCppPlaceField(NumericVector& bin_x,
     return(result);
   }
 
-  SpatialInfoData spatialInfoData = calculateSpatialInformation(bin_x, bin_y, trace, traceQuantiles);
+  SpatialInfoData spatialInfoData = calculateSpatialInformation(bin_x, bin_y, trace, traceQuantiles, minOccupancy);
   NumericMatrix occupancyMap = spatialInfoData.occupancyMap;
   NumericMatrix totalActivityMap = spatialInfoData.totalActivityMap;
   NumericMatrix fr = spatialInfoData.fr;
@@ -306,11 +308,9 @@ SEXP getCppPlaceField(NumericVector& bin_x,
   double maxField = 0.0;
   for (int yy = 0; yy < N_BINS_Y; ++yy) {
     for (int xx = 0; xx < N_BINS_X; ++xx) {
-      if (occupancyMap(xx,yy) > 0) {
-        fr(xx,yy) = totalActivityMap(xx,yy) / occupancyMap(xx,yy);
-        if (fr(xx,yy) >= maxField) {
-          maxField = fr(xx,yy);
-        }
+      if (occupancyMap(xx,yy) >= minOccupancy &&
+          fr(xx,yy) >= maxField) {
+        maxField = fr(xx,yy);
       }
     }
   }
@@ -344,9 +344,9 @@ SEXP getCppPlaceField(NumericVector& bin_x,
   }
 
   for (int i = 0; i < nshuffles; ++i) {
-    NumericVector shuffledTrace = chunkShuffle(trace, trialEnds, shuffleChunkLength);
-    //NumericVector shuffledTrace = randomShift(trace, trialEnds, shuffleChunkLength * 2);
-    SpatialInfoData shuffleData = calculateSpatialInformation(bin_x, bin_y, shuffledTrace, traceQuantiles);
+    //NumericVector shuffledTrace = chunkShuffle(trace, trialEnds, shuffleChunkLength);
+    NumericVector shuffledTrace = randomShift(trace, trialEnds, shuffleChunkLength * 2);
+    SpatialInfoData shuffleData = calculateSpatialInformation(bin_x, bin_y, shuffledTrace, traceQuantiles, minOccupancy);
     shuffleSI[i] = shuffleData.SI;
     shuffleMI[i] = shuffleData.MI;
   }
@@ -381,7 +381,7 @@ y=0:9
 trace=rep(0, 10)
 trace[6:10] = 1
 
-pf = getCppPlaceField(x,y,trace, c(0.5, 0.9), c(7, length(trace)), 0, 2)
+pf = getCppPlaceField(x,y,trace, c(0.5, 0.9), c(7, length(trace)), 0, 2, 1)
 #pf=with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, deconv_trace, traceQuantiles, 10,2), 4)
 pf$spatial.information
 pf$mutual.info

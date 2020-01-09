@@ -44,20 +44,20 @@ caimg_result_dirs = Filter(
 
 calc.spatial.info = function(data.traces, plot.dir='/tmp/pf_stability/',
                              generate.plots=FALSE, nshuffles=0) {
-  frame.hz = 20
+  timebin.dur.msec = 200
   data.traces = data.table(data.traces)
   cells = unique(data.traces$cell_id) %>% sort
   pci.df = data.frame()
   fields = list()
   occupancies = list()
   binned.data.traces = timebin.traces(data.traces[smooth_trans_x >= 0 & smooth_trans_y >= 0, ],
-                                      timebin.dur.msec = 200,
+                                      timebin.dur.msec = timebin.dur.msec,
                                       xybins = getNBinsXY(),
                                       trace.var=trace)
 
   for (cell_name in cells) {
     cell.df = binned.data.traces[cell_id == cell_name ,]
-    pf = cell.spatial.info(cell.df, generate.plots, nshuffles, trace.var='mean.trace')
+    pf = cell.spatial.info(cell.df, generate.plots, nshuffles, trace.var='mean.trace', bin.hz=1000/timebin.dur.msec)
     if (length(pf$cell_info) > 0) {
       fields[[format(cell_name)]] = pf$field
       occupancies[[format(cell_name)]] = pf$occupancy

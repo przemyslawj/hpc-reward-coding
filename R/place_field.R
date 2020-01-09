@@ -128,8 +128,9 @@ field.cor = function(field1, field2, max.xy, make.cor.plot=FALSE) {
 
 
 cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
-                             frame.hz=20,
-                             trace.var='mean.trace') {
+                             bin.hz=5,
+                             trace.var='mean.trace',
+                             min.occupancy.sec=1) {
   nbins.xy = getNBinsXY()
   cell.events = cell.df[nevents > 0,]
   trace.vals = cell.df[[trace.var]]
@@ -160,7 +161,8 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
                         trace.bins,
                         trial_ends, 
                         nshuffles,
-                        2 * frame.hz)
+                        2 * bin.hz,
+                        min.occupancy.sec * bin.hz) # min occupancy
 
   si.signif.thresh = quantile(pf$shuffle.si, 0.95, na.rm=TRUE)[[1]]
   si.signif = pf$spatial.information >= si.signif.thresh
@@ -186,7 +188,7 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
                    nevents=nrow(cell.events))
 
   # find field max value and pos in the smoothed values
-  pf.df = create.pf.df(pf$field, pf$occupancy, max.xy=nbins.xy)
+  pf.df = create.pf.df(pf$field, pf$occupancy, max.xy=nbins.xy, frame.rate=bin.hz)
   if (nrow(pf.df) > 0) {
     max.row = pf.df[which.max(pf.df$value.conv),]
   } else { # no bin with high enough occupancy
@@ -199,7 +201,7 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
   
   g.placefield=NA
   if (generate.plots) {
-    cell_event_rate = nrow(cell.events) / nrow(cell.df) * frame.hz
+    cell_event_rate = nrow(cell.events) / nrow(cell.df) * bin.hz
 
     g.placefield = plot.pf(pf.df, max.xy=getNBinsXY()) +
       labs(title=paste0('Cell ', cell_name, ' MER = ', format(cell_event_rate, digits=2), ' Hz',

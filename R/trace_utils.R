@@ -132,7 +132,7 @@ gather.traces = function(data) {
 
 
 # Filter based on velocity calculated for the time window. Filtering is done on epochs
-# Slow implementation, use isRunning to faster.
+# Slow code, use isRunning for better performance.
 filter.running = function(df, min.run.velocity=2, mean.run.velocity=3, window.dur.ms=500) {
   df = data.table(df)
   setorder(df, trial_id, exp_title, cell_id, timestamp)
@@ -159,3 +159,27 @@ filter.running = function(df, min.run.velocity=2, mean.run.velocity=3, window.du
   df[which(is.running),]
 }
 
+# Map traces to principal components
+pca.binned.traces = function(binned.traces) {
+  response.matrix = reshape2::acast(binned.traces, time_bin ~ cell_id, value.var='response_bin') 
+  pca.res = prcomp(response.matrix, center = TRUE, scale. = TRUE)
+  cumvar = cumsum(pca.res$sdev*pca.res$sdev)
+  cumvar.portion = cumvar / cumvar[length(cumvar)]
+  npc = which(cumvar.portion >= 0.9) %>% first
+  response.df = as.data.frame(pca.res$x[,1:npc])
+  response.df$time_bin = as.integer(rownames(response.matrix))
+  pc.measure.vars = colnames(response.df)[stringr::str_starts(colnames(response.df), 'PC')]
+  melt.pc.df = melt(response.df, measure=pc.measure.vars, value.name='mean.trace') %>%
+    data.table()
+  melt.pc.df[,cell_id:= as.integer(stringr::str_replace(variable, 'PC', ''))]
+  metadata.df = dplyr::select(binned.traces, animal, date, trial_id, trial, time_bin, bin.xy, bin.x, bin.y) %>%
+    distinct() %>% data.table()
+  melt.pc.df = melt.pc.df[metadata.df, on='time_bin']
+  
+  quantile.fractions = c(0.2, 0.4, 0.6, 0.8, 1.0)
+  binned.pc.df = bin.responses(melt.pc.df, quantile.fractions)
+  setkey(binned.pc.df, time_bin, cell_id)
+  setorder(binned.pc.df, time_bin, cell_id)
+  
+  return(binned.pc.df)
+}

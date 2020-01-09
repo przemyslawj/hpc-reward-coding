@@ -8,10 +8,6 @@ Rcpp::sourceCpp('trace_utils.cpp')
 
 source('bayesian_decoder.R')
 source('utils.R')
-
-#timebinned.traces = timebin.traces(data.traces)
-#binned.traces = bin.responses(timebinned.traces)
-#eval.df = eval.decoder(binned.traces, cv=TRUE)
 ```
 
 
@@ -20,7 +16,7 @@ source('utils.R')
 xybins = 20
 run.threshold = 2
 
-prepare.traces = function(data.traces) {
+prepare.traces = function(data.traces, quantile.fractions = c(0.95, 1.0)) {
   setorder(data.traces, trial_id, cell_id, timestamp)
   detect.events(data.traces, deconv.threshold=0.1)
   
@@ -31,29 +27,29 @@ prepare.traces = function(data.traces) {
   animal_name = data.traces$animal[1]
   ## Keep only place cells or daystable cells
   #pc.cells = subset(place.cell.db, animal==animal_name & date==date_str & is.pc)$cell_id
-  #stable.cells = subset(stable.cell.db, animal==animal_name & date==date_str & is.stable)$cell_id
+  #stable.cells = subset(stable.cell.db, animal==animal_name & dateq==date_str & is.stable)$cell_id
   #data.traces.filtered = data.traces.run[cell_id %in% stable.cells, ]
   data.traces.filtered = data.traces.run
   
-  timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec=200, xybins=20, trace.var=trace)
-  quantile.fractions = c(0.95, 1.0)
+  timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec=200, xybins=xybins, trace.var=trace)
   binned.traces = bin.responses(timebinned.traces, quantile.fractions)
+  #binned.traces = nevents.bin.responses(timebinned.traces)
   binned.traces = data.table(binned.traces)
   binned.traces[,bin.xy := to_1dim(bin.x, bin.y)]
   setorder(binned.traces, time_bin, cell_id)
   setkey(binned.traces, time_bin, cell_id)
-  
+
   return(binned.traces)
 }
 
 eval.parts = lapply(caimg_result_dirs, function(caimg_result_dir) {
   data.traces = read.data.trace(caimg_result_dir, filter_exp_title = 'trial')
-  binned.traces = prepare.traces(data.traces)
-  if (nrow(data.traces.filtered) == 0) {
+  quantile.fractions = c(0.95, 1.0)
+  binned.traces = prepare.traces(data.traces, quantile.fractions)
+  if (nrow(binned.traces) == 0) {
     return(data.frame())
   } else {
     print('Started evaluating the model')
-    tic("Built and evaluated the model")
     eval.df = eval.decoder(binned.traces, length(quantile.fractions), cv=TRUE)
     if (nrow(eval.df) > 0) {
       eval.df$animal = binned.traces$animal[1]
@@ -70,6 +66,11 @@ summary(decoding.df$error)
 summary(decoding.df$random_error)
 ```
 
+Errors vary between days and mice. Show median error per animal per day:
+```{r}
+ data.table(decoding.df)[,.(med.error=median(error), .N), by=c('animal','date')][,med.error] %>% summary
+```
+
 ```{r}
 eval.summary = decoding.df %>%
   group_by(date, animal) %>%
@@ -78,9 +79,8 @@ eval.summary = decoding.df %>%
                    sd.error=sd(error),
                    sem.error=sem(error))
 
-ggplot(eval.summary, aes(x=date,y=mean.error, group=animal, color=animal)) +
+ggplot(eval.summary, aes(x=date,y=median.error, group=animal, color=animal)) +
   #geom_point() +
-  #geom_errorbar(aes(x=date, ymin=mean.error-sem.error, ymax=mean.error+sem.error), width=0.2)
   geom_errorbar(aes(x=date, ymin=median.error-sem.error, ymax=median.error+sem.error), width=0.2) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
@@ -136,27 +136,4 @@ ggplot(mean.error.df)  + geom_point(aes(x=prior, y=mean.error), alpha=0.1) +
   xlim(c(0,0.07))
 ```
 
-
-# TEST
-Distribution of cell's calcium trace at a given location
-```{r}
-timebinned.traces %>%
-  filter(cell_id==0) %>%
-  mutate(bin.xy = to_1dim(bin.x, bin.y)) %>%
-  #filter(bin.xy == 97) %>%
-  group_by(bin.xy) %>%
-  ggplot() +
-  geom_histogram(aes(x=bin.trace)) +
-  facet_wrap(. ~ bin.xy, ncol=2, scales = 'free')
-```
-
-
-```{r}
-timebinned.traces %>%
-  filter(cell_id==0) %>%
-  mutate(bin.xy = to_1dim(bin.x, bin.y)) %>%
-  select(bin.trace, bin.xy, bin.x, bin.y, time_bin) %>%
-  filter(bin.xy==97) %>%
-  arrange(desc(bin.trace)) %>% DT::datatable()
-```
 
