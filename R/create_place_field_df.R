@@ -50,14 +50,14 @@ calc.spatial.info = function(data.traces, plot.dir='/tmp/pf_stability/',
   pci.df = data.frame()
   fields = list()
   occupancies = list()
-  binned.data.traces = timebin.traces(data.traces[smooth_trans_x >= 0 & smooth_trans_y >= 0, ],
-                                      timebin.dur.msec = timebin.dur.msec,
-                                      xybins = getNBinsXY(),
-                                      trace.var=trace)
 
+  binned.data.traces = bin.time.space(data.traces[x >= 0 & y >= 0, ],
+                                      binned.var='trace',
+                                      timebin.dur.msec=timebin.dur.msec, 
+                                      bin.width=100/getNBinsXY())
   for (cell_name in cells) {
     cell.df = binned.data.traces[cell_id == cell_name ,]
-    pf = cell.spatial.info(cell.df, generate.plots, nshuffles, trace.var='mean.trace', bin.hz=1000/timebin.dur.msec)
+    pf = cell.spatial.info(cell.df, generate.plots, nshuffles, trace.var='trace', bin.hz=1000/timebin.dur.msec)
     if (length(pf$cell_info) > 0) {
       fields[[format(cell_name)]] = pf$field
       occupancies[[format(cell_name)]] = pf$occupancy
@@ -114,7 +114,7 @@ for (caimg_result_dir in caimg_result_dirs) {
   animal = data.traces$animal[1]
   
   data.traces = data.traces[exp_title != 'homecage',]
-  data.traces = detect.events(data.traces)
+  detect.events(data.traces, deconv.threshold=0.1)
   
   setorder(data.traces, trial_id, cell_id, timestamp)
   running.index = isRunning(data.traces, 2, 3, 500)

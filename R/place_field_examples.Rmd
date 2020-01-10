@@ -198,8 +198,7 @@ setorder(data.traces, trial_id, cell_id, timestamp)
 running.index = isRunning(data.traces, 2, 3, 500)
 data.traces.run = data.traces[which(running.index), ]
 detect.events(data.traces.run)
-cell.df = data.traces.run[cell_id == cell_name
-                          & smooth_trans_x >= 0 & smooth_trans_y >= 0
+cell.df = data.traces.run[cell_id == cell_name& x >= 0 & y >= 0
                           #& (atReward0 == 1 | atReward1 == 1)
                           , ]
 ```
@@ -210,7 +209,7 @@ source('place_field.R')
 
 frame.rate = 1000 / 200
 
-plot.cell.trials = function(cell.df) {
+plot.cell.trials = function(cell.df, trace.var='trace') {
   if (nrow(cell.df) == 0) {
     return(ggplot(data.frame()))
   }
@@ -222,8 +221,9 @@ plot.cell.trials = function(cell.df) {
   all.pf.df = data.frame()
   for (trial_no in trials) {
     pf = cell.spatial.info(cell.df[trial == trial_no, ],
+                           trace.var = trace.var,
                            generate.plots=FALSE,
-                           nshuffles=100,
+                           nshuffles=0,
                            min.occupancy = 1)
     pf.df = create.pf.df(pf$field, pf$occupancy, 
                          max.xy=getNBinsXY(),
@@ -234,6 +234,7 @@ plot.cell.trials = function(cell.df) {
   }
   
   pf = cell.spatial.info(cell.df,
+                         trace.var = trace.var,
                          generate.plots=FALSE,
                          nshuffles=100)
   pf.df = create.pf.df(pf$field, pf$occupancy, 
@@ -261,12 +262,11 @@ plot.cell.trials = function(cell.df) {
   return(g)
 }
 
-
-binned.cell.df = timebin.traces(cell.df,
-                                timebin.dur.msec = 200,
-                                xybins = getNBinsXY(),
-                                trace.var = deconv_trace)
-plot.cell.trials(binned.cell.df)
+binned.cell.df = bin.time.space(cell.df, 
+                                binned.var='deconv_trace',
+                                timebin.dur.msec=200, 
+                                bin.width=100/getNBinsXY())
+plot.cell.trials(binned.cell.df, trace.var='nevents')
 ```
 
 # Changes in PF over days

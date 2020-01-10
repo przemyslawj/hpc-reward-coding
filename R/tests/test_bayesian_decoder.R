@@ -20,45 +20,64 @@ test_that('timebin.traces success for one trial many cells', {
   df = data.frame(
     animal='A',
     date='2019-01-01',
+    exp_title='trial',
     cell_id=c(1,1,1,2,2,2),
     trial_id='1',
     trial=1,
     timestamp=c(1,2,11,1,2,12),
     trace=c(0,2,2,1,3,4),
+    deconv_trace=0,
+    is.event=FALSE,
+    velocity=1,
+    dist_reward0=0,
+    dist_reward1=0,
+    atReward0=0,
+    atReward1=0,
+    arrivedAtReward=0,
+    dist=0,
     smooth_trans_x=1,
     smooth_trans_y=2
   )
-  actual.binned = timebin.traces(df, timebin.dur.msec=10)
+  actual.binned = timebin.traces(data.table(df), timebin.dur.msec=10)
   actual.binned = actual.binned %>% arrange(cell_id, time_bin)
   expect_equal(nrow(actual.binned), 4)
   expect_equal(actual.binned$cell_id, c(1,1,2,2))
   expect_equal(actual.binned$time_bin, c(0,1,0,1))
-  expect_equal(actual.binned$bin.trace, c(1,2,2,4))
-  expect_equal(actual.binned$mean.x, rep(1,4))
-  expect_equal(actual.binned$mean.y, rep(2,4))
-  
+  expect_equal(actual.binned$trace, c(1,2,2,4))
+  expect_equal(actual.binned$smooth_trans_x, rep(1,4))
+  expect_equal(actual.binned$smooth_trans_y, rep(2,4))
 })
 
 test_that('timebin.traces success for two trials', {
   df = data.frame(
     animal='A',
     date='2019-01-01',
+    exp_title='trial',
     cell_id=rep(1,6),
     trial_id=rep(c('trial1','trial2'), each=3),
     trial=rep(c(1,2), each=3),
     timestamp=c(1,2,21,1,2,12),
     trace=c(0,2,2,1,3,4),
+    deconv_trace=0,
+    is.event=FALSE,
+    velocity=1,
+    dist_reward0=0,
+    dist_reward1=0,
+    atReward0=0,
+    atReward1=0,
+    arrivedAtReward=0,
+    dist=0,
     smooth_trans_x=1,
     smooth_trans_y=2
   )
-  actual.binned = timebin.traces(df, timebin.dur.msec=10)
+  actual.binned = timebin.traces(data.table(df), timebin.dur.msec=10)
   actual.binned = actual.binned %>% arrange(cell_id, time_bin)
   expect_equal(nrow(actual.binned), 4)
   expect_equal(actual.binned$cell_id, rep(1,4))
   expect_equal(actual.binned$time_bin, c(0,2,3,4))
-  expect_equal(actual.binned$mean.trace, c(1,2,2,4))
-  expect_equal(actual.binned$mean.x, rep(1,4))
-  expect_equal(actual.binned$mean.y, rep(2,4))
+  expect_equal(actual.binned$trace, c(1,2,2,4))
+  expect_equal(actual.binned$smooth_trans_x, rep(1,4))
+  expect_equal(actual.binned$smooth_trans_y, rep(2,4))
 })
 
 test_that("bin.responses success for two cells", {
@@ -81,43 +100,30 @@ test_that("bin.responses success for two cells", {
   expect_equal(actual.binned$response_bin, c(1, 1, 2, 2, 2, 2, 1, 1))
 })
 
-test_that('create.model success for one cell', {
+test_that('create.discrete.bayes success for one cell', {
   df = data.frame(
     animal='A',
     date='2019-01-01',
     cell_id=1,
     time_bin=1:6,
     response_bin=c(2,2,1,1,1,2),
-    bin.x=      c(1,1,2,2,4,4),
-    bin.y=1
+    bin.xy=      c(1,1,2,2,4,4)
   )
   
-  model = create.model(df, nresponse.bins=2)
+  model = create.discrete.bayes(df, nstim.bins=4)
   
-  likelihood = model$likelihood %>% arrange(bin.x, bin.y, bin.response)
-  expect_equal(nrow(likelihood), 6)
-  expect_equal(likelihood$prob.r, c(0.25, 0.75, 0.75, 0.25, 0.5, 0.5))
+  likelihood = model$likelihood
+  expect_equal(dim(likelihood), c(4,1,2))
+  expect_equal(likelihood[,1,1], c(0.25, 0.75, NA, 0.5))
+  expect_equal(likelihood[,1,2], c(0.75, 0.25, NA, 0.5))
   
-  expect_equal(model$prior$prob, rep(1/3,3))
+  expected.prior = rep(1/3,4)
+  expected.prior[3] = 0.0
+  expect_equal(model$prior, expected.prior)
 })
 
-test_that('create.model2 success for one cell', {
-  stimulus = 1:4
-  response = matrix(c(2,2,1,1,1,1,2,2), nrow = 2, byrow=TRUE) 
-  rownames(response) = c('10', '12') # cell names
-  
-  model = create.model2(response, stimulus, 2, nstim.bins = 20)
-  
-  likelihood = model$likelihood 
-  expect_equal(nrow(likelihood), 20)
-  expect_equal(likelihood[1:4,1,1], c(1/3, 1/3, 2/3, 2/3))
-  expect_equal(likelihood[1:4,1,2], c(2/3, 2/3, 1/3, 1/3))
-  expect_equal(colnames(likelihood), rownames(response))
-  
-  expect_equal(model$prior, c(rep(0.25,4), rep(0, 16)))
-})
 
-test_that('bayes.max.s2 success with equal prior and same cells', {
+test_that('bayesmax success with equal prior and same cells', {
   likelihoodM = array(0.1, dim=c(4,2,2))
   colnames(likelihoodM) = c('1', '2')
   likelihoodM[3,'1',1] = 0.9
@@ -131,7 +137,7 @@ test_that('bayes.max.s2 success with equal prior and same cells', {
   expect_equal(3, res$s)
 })
 
-test_that('bayes.max.s2 success with equal prior and different cells', {
+test_that('bayesmax success with equal prior and different cells', {
   likelihoodM = array(0.1, dim=c(4,2,2))
   colnames(likelihoodM) = c('1', '2')
   likelihoodM[1,'1',1] = 0.9
@@ -146,7 +152,7 @@ test_that('bayes.max.s2 success with equal prior and different cells', {
   expect_equal(4, res$s)
 })
 
-test_that('bayes.max.s2 success with unequal prior', {
+test_that('bayesmax success with unequal prior', {
   likelihoodM = array(0.25, dim=c(4,2,2))
   colnames(likelihoodM) = c('1', '2')
   likelihoodM[3,'1',1] = 0.7

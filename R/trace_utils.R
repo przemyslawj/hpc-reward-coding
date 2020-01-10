@@ -31,6 +31,7 @@ read.data.trace = function(caimg_result_dir, filter_exp_title = NA) {
   data.traces = data.table(data.traces)
   data.traces = data.traces[smooth_trans_x >= 0 & smooth_trans_y >= 0, ]
   
+  setnames(data.traces, c('smooth_trans_x', 'smooth_trans_y', 'smooth_heading_angle'), c('x', 'y', 'angle'))
   return(data.traces)
 }
 
@@ -45,30 +46,78 @@ detect.events = function(data.traces, deconv.threshold=0.1) {
   return(data.traces)
 }
 
-timebin.traces = function(data.traces, timebin.dur.msec=100, xybins=20, trace.var=trace) {
+timebin.traces = function(data.traces, timebin.dur.msec=200) {
   if (nrow(data.traces) == 0) {
     return(data.frame())
   }
-  trace.var = enquo(trace.var)
-  bin.width = 100/xybins
-  max.timestamp = max(data.traces$timestamp)
-  timebinned.traces = data.traces %>%
-    mutate(abs_timestamp = (trial-1)*(max.timestamp+timebin.dur.msec) + timestamp,
-           time_bin = floor(abs_timestamp/timebin.dur.msec) %>% as.integer) %>%
-    group_by(animal, date, trial_id, trial, cell_id, time_bin) %>%
-    dplyr::summarise(mean.trace = mean(!! trace.var),
-                     nevents = sum(is.event),
-                     mean.velocity = mean(velocity),
-                     mean.x = mean(smooth_trans_x),
-                     mean.y = mean(smooth_trans_y)) %>%
-    mutate(bin.x = floor(mean.x / bin.width),
-           bin.y = floor(mean.y / bin.width))
   
-  timebinned.traces = data.table(timebinned.traces) %>%
-    setorder(time_bin, cell_id)
+  max.timestamp = max(data.traces$timestamp)
+  
+  data.traces[, abs_timestamp := (trial-1)*(max.timestamp+timebin.dur.msec) + timestamp]
+  data.traces[, time_bin := floor(abs_timestamp/timebin.dur.msec) %>% as.integer]
+  timebinned.traces = data.traces[, 
+                                  lapply(.SD, mean), 
+                                  by=.(animal, date, trial_id, trial, exp_title, cell_id, time_bin),
+                                  .SDcols = !c('is.event', 'dist')]
+  setorder(timebinned.traces, time_bin, cell_id)
+  nevents.traces = data.traces[, .(nevents=sum(is.event)), 
+                                 by=.(animal, date, trial_id, trial, exp_title, cell_id, time_bin)]
+  setorder(nevents.traces, time_bin, cell_id)
+  timebinned.traces$nevents = nevents.traces$nevents
   timebinned.traces
 }
 
+stimbin.traces = function(data.traces, stim.var, bin.width=100/xybins) {
+  stim.var = enquo(stim.var)
+  
+  bin.var.name = paste0('bin.', quo_name(stim.var))
+  data.traces %>%
+    dplyr::mutate(!!bin.var.name := as.integer(floor(!!stim.var / bin.width)))
+}
+
+
+to_1dim = function(x, y) {
+  # Vals from 1 to xybins * xybins
+  xybins * x + y + 1
+}
+
+from_1dim = function(z) {
+  z = z - 1
+  list(x=floor(z/xybins), y=z%%xybins)
+}
+
+get.response.bin = function(vals, quantile.fractions) {
+  trace.quantiles = quantile(vals, quantile.fractions) + 0.001
+  map_int(vals, ~ dplyr::first(which(.x <= trace.quantiles)))
+}
+
+
+bin.responses = function(df, quantile.fractions, binned.var='trace') {
+  df = data.table(df)
+  binned.df = df[, response_bin := get.response.bin(.SD[[binned.var]], quantile.fractions), 
+                 by=c('animal', 'date', 'cell_id')]
+  binned.df
+}
+
+nevents.bin.responses = function(df, nevents.thr=0.5) {
+  df = data.table(df)
+  binned.df = df[, response_bin := ifelse(nevents >= nevents.thr, 2, 1)]
+  binned.df
+}
+
+bin.time.space = function(data.traces, bin.quantile.fractions=NULL, binned.var='trace', timebin.dur.msec=200, bin.width=100/xybins) {
+  timebinned.traces = timebin.traces(data.traces[x >= 0 & y >= 0, ],
+                                     timebin.dur.msec = timebin.dur.msec) %>%
+    stimbin.traces(x, bin.width) %>%
+    stimbin.traces(y, bin.width) %>%
+    data.table()
+  if (!is.null(bin.quantile.fractions)) {
+    binned.traces = bin.responses(timebinned.traces, bin.quantile.fractions, binned.var=binned.var)
+  }
+  binned.traces[, bin.xy := to_1dim(bin.x, bin.y)]
+  
+  binned.traces
+}
 
 zscore.traces = function(data) {
   ddply(data, .(animal, date, trial_id, cell), plyr::mutate,

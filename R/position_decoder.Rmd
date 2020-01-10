@@ -30,12 +30,12 @@ prepare.traces = function(data.traces, quantile.fractions = c(0.95, 1.0)) {
   #stable.cells = subset(stable.cell.db, animal==animal_name & dateq==date_str & is.stable)$cell_id
   #data.traces.filtered = data.traces.run[cell_id %in% stable.cells, ]
   data.traces.filtered = data.traces.run
+  binned.traces = bin.time.space(data.traces.filtered, 
+                                 quantile.fractions,
+                                 binned.var='trace',
+                                 timebin.dur.msec=200, 
+                                 bin.width=100/xybins)
   
-  timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec=200, xybins=xybins, trace.var=trace)
-  binned.traces = bin.responses(timebinned.traces, quantile.fractions)
-  #binned.traces = nevents.bin.responses(timebinned.traces)
-  binned.traces = data.table(binned.traces)
-  binned.traces[,bin.xy := to_1dim(bin.x, bin.y)]
   setorder(binned.traces, time_bin, cell_id)
   setkey(binned.traces, time_bin, cell_id)
 
@@ -50,7 +50,25 @@ eval.parts = lapply(caimg_result_dirs, function(caimg_result_dir) {
     return(data.frame())
   } else {
     print('Started evaluating the model')
-    eval.df = eval.decoder(binned.traces, length(quantile.fractions), cv=TRUE)
+    binned.traces2 = binned.traces[!is.na(angle),]
+    binned.traces2 = stimbin.traces(binned.traces2, angle, 45) %>%
+      mutate(bin.angle = pmin(8,bin.angle + 5))
+
+    eval.df = eval.decoder(binned.traces,
+                           train.fun=create.discrete.bayes,
+                           predict.fun=bayesmax,
+                           value.var=response_bin,
+                           stim.var=bin.xy,
+                           nstim.bins=xybins*xybins,
+                           cv=TRUE)
+
+    #eval.df = eval.decoder(binned.traces, 
+    #                       train.fun=create.mfr.bayes,
+    #                       predict.fun=bayesmax_mfr,
+    #                       value.var=mean.trace,
+    #                       stim.var=bin.xy,
+    #                       nstim.bins=xybins*xybins,
+    #                       cv=FALSE)
     if (nrow(eval.df) > 0) {
       eval.df$animal = binned.traces$animal[1]
       eval.df$date = binned.traces$date[1]
@@ -101,14 +119,14 @@ for (i in 1:length(caimg_result_dirs)) {
   if (i > 1 && animal_names[i] == animal_names[i-1]) {
     model.visited = which(models[[i-1]]$prior > 0)
     binned.traces.filtered = binned.traces[bin.xy %in% model.visited,]
-    system.time(eval.res <- eval.testdata2(binned.traces.filtered, models[[i-1]], bayesmax))
+    system.time(eval.res <- eval.testdata2(binned.traces.filtered, models[[i-1]], classifier.fun=bayesmax))
     eval.res$df$test_date = dates[i]
     eval.res$df$model_date = dates[i-1]
     eval.res$df$animal = animal_names[i]
     otherday.decoding.df = bind_rows(otherday.decoding.df, eval.res$df)
   }
   filtered.dfs = filter.sampled(binned.traces, binned.traces[1,])
-  models[[i]] = create.model2(filtered.dfs$train, nresponse.bins=nresponse.bins)
+  models[[i]] = create.discrete.bayes(filtered.dfs$train, nstim.bins=xybins^2)
 }
 ```
 

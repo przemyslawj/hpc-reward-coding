@@ -14,8 +14,8 @@ LogicalVector isRunning(DataFrame& df,
   LogicalVector result(df.nrows());
   
   NumericVector velocity = df["velocity"];
-  NumericVector pos_x = df["smooth_trans_x"];
-  NumericVector pos_y = df["smooth_trans_y"];
+  NumericVector pos_x = df["x"];
+  NumericVector pos_y = df["y"];
   IntegerVector timestamp = df["timestamp"];
   CharacterVector trial_id = df["trial_id"];
   

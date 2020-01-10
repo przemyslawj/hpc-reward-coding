@@ -129,7 +129,7 @@ field.cor = function(field1, field2, max.xy, make.cor.plot=FALSE) {
 
 cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
                              bin.hz=5,
-                             trace.var='mean.trace',
+                             trace.var='trace',
                              min.occupancy.sec=1) {
   nbins.xy = getNBinsXY()
   cell.events = cell.df[nevents > 0,]
