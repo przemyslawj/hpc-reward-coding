@@ -1,0 +1,356 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r setup} 
+library(dplyr)
+library(plyr)
+library(pracma)
+library(readr)
+library(tidyr)
+library(tibble)
+library(stringr)
+library(DT)
+library(data.table)
+
+
+library(ggplot2)
+library(cowplot)
+gtheme = theme_minimal() + theme_cowplot() +
+  theme(text = element_text(size=18), axis.text = element_text(size=15))
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+source('place_field.R')
+```
+
+Setup example variables
+```{r}
+animal_name = 'F-TL'
+exp_title='learning'
+day = '2019-09-06'
+cell_name = 256
+```
+
+
+
+```{r}
+geom_rewards = function(rewards.df, subject, day=NULL) {
+  dayreward.df = filter(rewards.df,
+                        animal==subject)
+  if (!is.null(day)) {
+    dayreward.df = filter(dayreward.df, date==day)
+  }
+  rew.col = 'black'
+  #rew.shape = 0
+  rew.shape = 2
+  rew.size = 2
+  bin.size = ceil(100 / getNBinsXY())
+  geom_point(data=dayreward.df, aes(x=trans_x / bin.size, y=(100 - trans_y) / bin.size), 
+             shape=rew.shape,
+             color=rew.col, 
+             size=rew.size,
+             stroke=2,
+             alpha=0.8)
+}
+```
+
+```{r}
+
+f1 = odd.fields[[animal_name]][[day]][[paste(cell_name)]]
+oc1 = odd.occupancies[[animal_name]][[day]][[paste(cell_name)]]
+
+f2 = even.fields[[animal_name]][[day]][[paste(cell_name)]]
+oc2 = even.occupancies[[animal_name]][[day]][[paste(cell_name)]]
+odd.field = create.pf.df(f1, oc1, max.xy=getNBinsXY())
+even.field = create.pf.df(f2, oc2, max.xy=getNBinsXY())
+
+oddeven.cor = field.cor(odd.field, even.field, make.cor.plot=TRUE, max.xy=getNBinsXY())
+cor.title = paste0('Odd vs Even cor=', format(oddeven.cor$cor, digits=2))
+oddeven.cor$g + labs(title=cor.title, fill='Correlation')
+
+```
+
+
+```{r}
+create.partial.df = function(fieldList, occupancyList, animal_name, day, cell_name,
+                             group_name, max.zscore=0.0) {
+  field = fieldList[[animal_name]][[day]][[paste(cell_name)]]
+  if (is.null(field)) {
+    #print(paste('Field not found for', animal_name, day, cell_name))
+    return(data.frame())
+  }
+  df = create.pf.df(field,
+                    occupancyList[[animal_name]][[day]][[paste(cell_name)]],
+                    max.xy=getNBinsXY())
+  df$group = group_name
+  return(df)
+}
+
+
+plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
+  
+  max.zscore = max(filter(odd.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max,
+                   filter(even.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max,
+                   filter(early.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max,
+                   filter(late.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max)
+  
+  odd.pf = create.partial.df(odd.fields, odd.occupancies, animal_name, day, cell_name, 'Odd', max.zscore)
+  even.pf = create.partial.df(even.fields, even.occupancies, animal_name, day, cell_name, 'Even', max.zscore)
+  early.pf = create.partial.df(early.fields, early.occupancies, animal_name, day, cell_name, 'Early', max.zscore)
+  late.pf = create.partial.df(late.fields, late.occupancies,  animal_name, day, cell_name, 'Late', max.zscore)
+  
+  cell.row = run.trials.pc %>% filter(animal==animal_name, date==day, cell_id==cell_name)
+  
+  text.theme = theme(text = element_text(size=10),
+                     plot.title = element_text(size=10))
+  
+  g.placefield = bind_rows(odd.pf, even.pf, early.pf, late.pf) %>%
+    plot.pf(max.xy=getNBinsXY()) +
+    facet_wrap(. ~ group, ncol = 2) +
+    geom_rewards(rewards.df, animal_name, day) +
+    labs(title=paste0(animal_name,
+                      ', ', day,
+                      ', cell ', cell_name, 
+                      '\nSI = ', format(cell.row$spatial.information, digits=2), ' bits/s',
+                      ifelse(cell.row$signif.si, ' *', ''),
+                      ', ', format(cell.row$spatial.information.perspike, digits=2), ' bits/spike',
+                      '\nMI - bias = ', format(cell.row$mutual.info - cell.row$mutual.info.bias, digits=3),
+                      ifelse(cell.row$signif.mi, '*', ''),
+                      '\nsparsity = ', format(cell.row$sparsity, digits=2)),
+         fill='Deconv\ntrace') +
+    text.theme
+
+  
+  oddeven.cor = field.cor(odd.pf, even.pf, make.cor.plot=TRUE, max.xy=getNBinsXY())
+  cor.title = paste0('cor=', format(oddeven.cor$cor, digits=2))
+  g.oddeven.cor = oddeven.cor$g + labs(title=cor.title, fill='') + 
+    geom_rewards(rewards.df, animal_name, day) + text.theme
+  
+  earlylate.cor = field.cor(early.pf, late.pf, make.cor.plot=TRUE, max.xy=getNBinsXY())
+  cor.title = paste0('cor=', format(earlylate.cor$cor, digits=2))
+  g.earlylate.cor = earlylate.cor$g + labs(title=cor.title, fill='') + 
+    geom_rewards(rewards.df, animal_name, day) + text.theme +
+    theme(legend.position='none')
+  
+  g.cors = plot_grid(g.earlylate.cor, g.oddeven.cor, ncol=2, rel_widths=c(1, 1.7))
+  
+  g = plot_grid(g.placefield, g.cors, ncol=1, rel_heights=c(2,1))
+  if (!is.na(plot.dir)) {
+    if (cell.row$is.pc) {
+      plot.subdir = file.path(plot.dir, 'place_cell')
+    } else if (cell.row$is.pc) {
+      plot.subdir = file.path(plot.dir, 'signif')
+    } else {
+      plot.subdir = file.path(plot.dir, 'other')
+    }
+    dir.create(plot.subdir, recursive=TRUE)
+    fname = paste0('place_field_cell_', cell_name, '.jpg')
+    ggsave(file.path(plot.subdir, fname), 
+           g,
+           width=5.5, height=8, units='cm', dpi=300)
+  }
+  return(g)
+}
+```
+
+
+```{r}
+plot.dir = file.path('/tmp/pf_stability/', animal_name, day)
+plot.field.comparison(animal_name, day, cell_name, plot.dir=plot.dir)
+```
+
+```{r}
+save.field.comparison = function(animal_name, day, cell_name) {
+  plot.dir = file.path('/mnt/DATA/Prez/pf-daystability', animal_name, day)
+  plot.field.comparison(animal_name, day, cell_name, plot.dir)
+  return(1)
+}
+
+run.trials.si %>%
+  select(animal, date, cell_id) %>%
+  distinct() -> tmp.df
+
+for (i in 1:nrow(tmp.df)) {
+   tryCatch({save.field.comparison(tmp.df$animal[i],
+                                   tmp.df$date[i],
+                                   tmp.df$cell_id[i])},
+  error=function(e){cat("ERROR for row i=", num2str(i), ":",conditionMessage(e), "\n")})
+}
+```
+
+# Place field for each trial separately
+
+Load the traces
+```{r}
+animal_name = 'F-TL'
+exp_title='learning'
+day = '2019-09-06'
+cell_name = 215
+#cell_name = 47
+
+
+caimg_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered/')
+data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
+setorder(data.traces, trial_id, cell_id, timestamp)
+running.index = isRunning(data.traces, 2, 3, 500)
+data.traces.run = data.traces[which(running.index), ]
+detect.events(data.traces.run)
+cell.df = data.traces.run[cell_id == cell_name& x >= 0 & y >= 0
+                          #& (atReward0 == 1 | atReward1 == 1)
+                          , ]
+```
+
+```{r}
+Rcpp::sourceCpp('place_field.cpp')
+source('place_field.R')
+
+frame.rate = 1000 / 200
+
+plot.cell.trials = function(cell.df, trace.var='trace') {
+  if (nrow(cell.df) == 0) {
+    return(ggplot(data.frame()))
+  }
+  animal_name = cell.df$animal[1]
+  day = cell.df$date[1]
+  trials = unique(cell.df$trial)
+  
+  trials.spatial = c()
+  all.pf.df = data.frame()
+  for (trial_no in trials) {
+    pf = cell.spatial.info(cell.df[trial == trial_no, ],
+                           trace.var = trace.var,
+                           generate.plots=FALSE,
+                           nshuffles=0,
+                           min.occupancy = 1)
+    pf.df = create.pf.df(pf$field, pf$occupancy, 
+                         max.xy=getNBinsXY(),
+                         frame.rate=frame.rate,
+                         min.occupancy.sec = 0.1)
+    pf.df$trial = num2str(trial_no, fmt=0)
+    all.pf.df = bind_rows(all.pf.df, pf.df)
+  }
+  
+  pf = cell.spatial.info(cell.df,
+                         trace.var = trace.var,
+                         generate.plots=FALSE,
+                         nshuffles=100)
+  pf.df = create.pf.df(pf$field, pf$occupancy, 
+                       max.xy=getNBinsXY(),
+                       frame.rate=frame.rate)
+  pf.df$trial = 'all'
+  all.pf.df = bind_rows(all.pf.df, pf.df)
+  
+  cell_info = pf$cell_info
+  g = plot.pf(all.pf.df, 
+          max.xy=getNBinsXY()) +
+    geom_rewards(rewards.df, animal_name, day) +
+    facet_wrap(. ~  trial, ncol=3) +
+    labs(fill='Deconv trace',
+         title=paste0(format(day), ' ', animal_name, ' Cell ', cell_name, 
+                      '\nSI = ', format(cell_info$spatial.information, digits=2),
+                      ifelse(cell_info$signif.si, '*', ''),
+                      ' SI per spike = ', format(cell_info$spatial.information.perspike, digits=2),
+                      '\nMI - bias = ', format(cell_info$mutual.info - cell_info$mutual.info.bias, digits=3),
+                      ifelse(cell_info$signif.mi, '*', '')))
+  
+  
+  print(pf$cell_info$spatial.information)
+  print(pf$cell_info$mutual.info)
+  return(g)
+}
+
+binned.cell.df = bin.time.space(cell.df, 
+                                binned.var='deconv_trace',
+                                timebin.dur.msec=200, 
+                                bin.width=100/getNBinsXY())
+plot.cell.trials(binned.cell.df, trace.var='nevents')
+```
+
+# Changes in PF over days
+```{r}
+#selected.days = c('2019-08-29', '2019-08-30', '2019-09-03', '2019-09-04', '2019-09-06','2019-09-07', '2019-09-08')
+selected.days = format(all.days)
+
+create.selected.pf.df = function(animal_name, cell_name) {
+  ndays = length(selected.days)
+  data.frame(animal=rep(animal_name, ndays), cell_id=rep(format(cell_name), ndays), day=selected.days)  
+}
+
+rowwise.partial.df = function(row) {
+  animal_name = as.character(row$animal)
+  cell_name = format(row$cell_id)
+  day = format(row$day)
+  
+  field = run.fields[[animal_name]][[day]][[cell_name]]
+  if (is.null(field)) {
+    #print(paste('Field not found for', animal_name, day, cell_name))
+    return(data.frame())
+  }
+  df = create.pf.df(field,
+                    run.occupancies[[animal_name]][[day]][[cell_name]],
+                    max.xy=getNBinsXY())
+
+  df$animal = animal_name
+  df$cell_id = cell_name
+  return(df)
+}
+
+goal.cell.db = data.table(goal.cell.db)
+
+
+rowwise.cell.desc = function(row) {
+  animal_name = as.character(row$animal)
+  cell_name = format(row$cell_id)
+  day = format(row$day)
+  goal.db.row = goal.cell.db[animal==animal_name & cell_id==cell_name & date==day,]
+  row$desc = 'NI'
+  if (nrow(goal.db.row) > 0) {
+    row$desc = paste0(ifelse(goal.db.row$is.pc, 'PC ', 'NPC'), ifelse(goal.db.row$is.goal.cell, ' & GC', ''))
+  }
+  row
+}
+
+plot.all.day.fields = function(animal_name, cell_id) {
+  selected.cells.df = create.selected.pf.df(animal_name, cell_id)
+  pf = selected.cells.df %>%
+    adply(.margins=1, .fun=rowwise.partial.df) %>%
+    dplyr::rename(date=day)
+  
+  cell.desc.df = selected.cells.df %>%
+    adply(.margins=1, .fun=rowwise.cell.desc) %>%
+    dplyr::rename(date=day)
+  
+  plot.pf(pf, max.xy=getNBinsXY()) +
+    facet_wrap(. ~ date, ncol=3) +
+    geom_text(data=cell.desc.df, mapping=aes(x=1, y=getNBinsXY() - 2, label=desc), size=3, hjust=0)+
+    geom_rewards(filter(rewards.df, date %in% selected.days), animal_name) 
+}
+
+plot.all.day.fields('F-TL', 0)
+```
+Save place fields for all days
+```{r}
+animal.cells.df = goal.cell.db %>%
+  select(animal, cell_id) %>% 
+  dplyr::distinct()
+
+plot.rootdir = "/mnt/DATA/Prez/pf-shuffled/"
+for (i in 1:nrow(animal.cells.df)) {
+  row = animal.cells.df[i, ]
+  animal_name = as.character(row$animal)
+  cell_name = format(row$cell_id)
+  g = plot.all.day.fields(animal_name, cell_name) +
+    labs(title = paste(animal_name, cell_name))
+  plot.dir = file.path(plot.rootdir, animal_name)
+  if (!file.exists(plot.dir)) {
+    dir.create(plot.dir, recursive=TRUE)
+  }
+  ggsave(file.path(plot.dir, paste0(row$cell_id, '.jpg')),
+         g, width=10, height=10, units='cm')
+}
+```
+
+

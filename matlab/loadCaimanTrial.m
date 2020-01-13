@@ -60,15 +60,19 @@ for session_i = 1:numel(session_info.session_fpaths)
     sessionTimestamps = timestampsBySession{session_i}';
     sessionNo = str2num(replace(session_fpath_parts{end}, 'Session', ''));
 
-    if strcmp(exp_title, 'homecage')
+	trackingDir = fullfile(datedRootDir, exp_title, 'movie', 'tracking');
+	trackingFile = [ dateStr '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
+    if strcmp(exp_title, 'test')
+        trackingFile = [ dateStr '-test_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
+    end
+	trackingFilepath = [trackingDir filesep trackingFile]
+    if strcmp(exp_title, 'homecage') || ...
+           ~exist(trackingFilepath, 'file')
         sessionData = table();
         sessionData.timestamp = sessionTimestamps';
         sessionData.trace = traceBySession{session_i};
         sessionData.deconvTrace = deconvTraceBySession{session_i};
     else
-        trackingDir = fullfile(datedRootDir, 'trial', 'movie', 'tracking');
-        trackingFile = [ dateStr '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
-        trackingFilepath = [trackingDir filesep trackingFile]
         opts = detectImportOptions(trackingFilepath);
         index = find(cellfun(@(x) strcmp(x, 'inside_roi'), opts.VariableNames, 'UniformOutput', 1));
         opts.VariableTypes(index) = { 'logical' };

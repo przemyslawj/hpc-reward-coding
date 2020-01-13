@@ -1,8 +1,7 @@
 expMonth = '2019-08';
 expDir = ['~/neurodata/cheeseboard-down/down_2/' expMonth];
 expDir = ['/mnt/DATA/Prez/cheeseboard-down/down_2/' expMonth];
-animal = 'E-BL';
-animal = 'E-TR';
+animal = 'F-TL';
 
 expTitles = {'habituation', 'learning'};
 for expTitle = expTitles

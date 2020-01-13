@@ -2,37 +2,17 @@ library(dplyr)
 
 is.date <- function(x) !is.na(as.Date(x, '%Y-%m-%d'))
 
-read_locations = function(root.data.dir) {
-  merged.df = data.frame()
-  cheeseboard.map = read.csv(paste0(root.data.dir, '/cheeseboard_map.csv')) %>%
-    select(Row_X, Row_Y, trans_x, trans_y)
-  
-  all_subfiles = list.files(root.data.dir, full.names=TRUE)
-  dated_subdirs = all_subfiles[file.info(all_subfiles)$isdir]
-  for (dated_dir in dated_subdirs) {
-    date_str = basename(dated_dir)
-    
-    is_test = FALSE
-    if (endsWith(date_str, '_test')) {
-      date_str = substring(date_str, 1, nchar(date_str) - nchar('_test'))
-      is_test = TRUE
-    }
-    if (is.date(date_str)) {
-      print(dated_dir)
-      fpath = paste0(dated_dir, '/locations.csv')
-      if (file.exists(fpath)) {
-        locations.df = read.csv(fpath, stringsAsFactors=TRUE)
-        locations.df$date = rep(date_str, nrow(locations.df))
-        locations.df$is_test = rep(is_test, nrow(locations.df))
-        locations.df.pos = left_join(locations.df, cheeseboard.map, by=c("Well_row"="Row_X", "Well_col"="Row_Y"))
-        merged.df = bind_rows(merged.df, locations.df.pos)
-      }
-    }
-  }
- 
-  
-  merged.df$Animal = as.factor(merged.df$Animal)
+get.subdirs = function(path) {
+  subdirs = list.files(path, full.names=TRUE)
+  return(subdirs[file.info(subdirs)$isdir])
+}
+
+add_location_set = function(merged.df) {
   result.df = data.frame()
+  
+  if (nrow(merged.df) == 0) {
+    return(merged.df)
+  }
   
   # Add location_set column 
   merged.df$location_set = rep(0, nrow(merged.df))
@@ -40,6 +20,7 @@ read_locations = function(root.data.dir) {
     animal.locations = filter(merged.df, Animal == animal) %>% 
       arrange(date, desc(is_test))
     location_set = 0
+    animal_locs = c()
     prev_locs = c()
     prev_date = '0000-00-00'
     for (i in 1:nrow(animal.locations)) {
@@ -49,17 +30,27 @@ read_locations = function(root.data.dir) {
           prev_locs = append(prev_locs, loc)
         } else {
           location_set = location_set + 1
-          prev_locs = c(loc)
+          prev_locs = c(prev_locs, loc)
           prev_date = animal.locations$date[i]
         }
       }
+      if (!loc %in% animal_locs) {
+        animal_locs = append(animal_locs, loc)
+      }
+      
       animal.locations$location_set[i] = location_set
+      animal.locations$location_ordinal[i] = which(loc == animal_locs)
       
     }
     
     result.df = bind_rows(result.df, animal.locations)
   }
   
+  # Make location set consistent in one day: if one reward changed then update
+  # the location set for all rewards
+  result.df = ddply(result.df, .(Animal, date, is_test), mutate,
+                    location_set = max(location_set)) %>%
+    arrange(Animal, date, desc(is_test))
   return(result.df)
 }
 
@@ -108,4 +99,48 @@ add_future_neg_locations = function(locations.df) {
     slice(1) %>%
     select(-Valence.x)
   return (joined.locations.df)
+}
+
+
+read_locations = function(root.data.dir) {
+  cheeseboard.map = read.csv(file.path(root.data.dir, 'cheeseboard_map.csv')) %>%
+    select(Row_X, Row_Y, trans_x, trans_y)
+  
+  expdirs = get.subdirs(root.data.dir)
+  merged.df = data.frame()
+  for (expdir in expdirs) {
+    dated_subdirs = get.subdirs(expdir)
+    
+    for (dated_dir in dated_subdirs) {
+      date_str = basename(dated_dir)
+      
+      exp_titles = get.subdirs(dated_dir)
+      for (exp_titledir in exp_titles) {
+        is_test = FALSE
+        if (endsWith(exp_titledir, 'test')) {
+          #date_str = substring(date_str, 1, nchar(date_str) - nchar('_test'))
+          is_test = TRUE
+        }
+        if (is.date(date_str)) {
+          print(paste('Reading locations from: ', dated_dir))
+          fpath = file.path(exp_titledir, 'locations.csv')
+          if (file.exists(fpath)) {
+            locations.df = read.csv(fpath, stringsAsFactors=TRUE)
+            locations.df$date = rep(date_str, nrow(locations.df))
+            locations.df$is_test = rep(is_test, nrow(locations.df))
+            locations.df.pos = left_join(locations.df, cheeseboard.map, by=c("Well_row"="Row_X", "Well_col"="Row_Y"))
+            merged.df = bind_rows(merged.df, locations.df.pos)
+          }
+        }
+      }
+    }
+  }
+  
+  if (nrow(merged.df) == 0) {
+    return(merged.df)
+  }
+  
+  merged.df$Animal = as.factor(merged.df$Animal)
+  
+  return(add_location_set(merged.df))
 }

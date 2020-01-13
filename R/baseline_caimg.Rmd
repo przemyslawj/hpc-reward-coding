@@ -45,7 +45,7 @@ data = filter(data, cell == trace_cell) %>%
   select(-trace_cell)
 data$trace = as.double(data$trace)
 
-data$cell = as.integer(data$cell)
+eata$cell = as.integer(data$cell)
 data$inside_roi = data$inside_roi > 0
 ```
 
