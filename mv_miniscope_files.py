@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import re
 
 def make_dir(path):
     if not os.path.exists(path):
@@ -9,14 +10,20 @@ def make_dir(path):
             raise OSError('mkdir failed for path: ' + path)
 
 
-date_str = '2018-11-05'
+date_str = '2019-01-01'
 rootdir = 'D:\\Prez\\cheeseboard\\2018-10-habituation'
 rootdir = '/mnt/DATA/Prez/cheeseboard/2018-10-learning'
 dated_dir = os.path.join(rootdir, date_str, 'caimg')
 dest_dir = os.path.join(rootdir, date_str, 'mv_caimg')
 make_dir(dest_dir)
 
-for subdir in os.listdir(dated_dir):
+miniscope_subdirs = os.listdir(dated_dir)
+def scopedir2tuple(subdir):
+    digits = re.sub("[HMS]", ' ', subdir)
+    return [int(x) for x in digits.strip().split(' ')]
+
+sorted(miniscope_subdirs, key=scopedir2tuple)
+for subdir in miniscope_subdirs:
     trial_dir = os.path.join(dated_dir, subdir)
     rec_info = pd.read_csv(os.path.join(trial_dir, 'settings_and_notes.dat'), sep='\\t')
     animal = rec_info['animal'][0]
