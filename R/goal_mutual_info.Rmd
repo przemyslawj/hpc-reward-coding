@@ -56,25 +56,27 @@ Rcpp::sourceCpp('mutual_info.cpp')
 fr.hz = 20
 
 calc.reward.info = function(data.traces) {
-  data.traces = mutate(data.traces,
-                       atAnyReward = pmin(1, atReward0 + atReward1))
   data.traces = data.table(data.traces)
-  data.traces = data.traces[smooth_trans_x >= 0 & smooth_trans_y >= 0, ]
-  cells = unique(data.traces$cell_id) %>% sort
+  data.traces = data.traces[x >= 0 & y >= 0, ]
+  
+  timebinned.traces = timebin.traces(data.traces, timebin.dur.msec = 200)
+  bin.quantile.fractions = c(0.2, 0.5, 0.8, 0.9, 0.95, 1.0)
+  binned.traces = bin.responses(timebinned.traces, bin.quantile.fractions, binned.var='trace')
+  binned.traces[,  atAnyReward := pmin(1, atReward0 + atReward1)]
+  cells = unique(binned.traces$cell_id) %>% sort
   
   res = data.frame()
   for (cell_name in cells) {
-    cell.df = data.traces[cell_id == cell_name,]
-    trace.vals = cell.df[['trace']]
-    trace.quantiles = quantile(trace.vals, c(0.2, 0.5, 0.8, 0.9, 0.95, 1.0), na.rm=TRUE) %>% unname + 0.01
+    cell.df = binned.traces[cell_id == cell_name,]
+    trace.vals = cell.df[['trace']] %>% as.integer()
     trial.ends = get.trial.ends(cell.df$timestamp)
     
     mi_anyreward = mutual_info_with_shuffles(
       trace.vals,
+      nresponseBins=2,
       cell.df$atAnyReward, 
-      trace.quantiles,
-      trial.ends,
       nstim=2,
+      trial.ends,
       nshuffles=100,
       shuffleChunkLength=2*fr.hz)
     mi_anyreward.signif.thresh = quantile(mi_anyreward$shuffle.mi, 0.95, na.rm=TRUE)[[1]]
@@ -82,8 +84,8 @@ calc.reward.info = function(data.traces) {
     mi_onereward = mutual_info_with_shuffles(
       trace.vals,
       cell.df$atReward0 + cell.df$atReward1 * 2,
-      trace.quantiles,
       trial.ends,
+      nresponseBins=2,
       nstim=3,
       nshuffles=100,
       shuffleChunkLength=2*fr.hz)

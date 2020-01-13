@@ -1,6 +1,10 @@
+#include <RcppArmadillo.h>
+// [[Rcpp::depends(RcppArmadillo)]]
 #include <Rcpp.h>
 #include <algorithm>
 #include <vector>
+#include <iterator>
+#include <cmath>
 using namespace Rcpp;
 
 //#define USEDEBUG
@@ -18,19 +22,11 @@ struct MI_Data {
 };
 
 
-class ResponseModel {
+class BinnedResponseModel {
 public:
-  NumericVector field;
-  IntegerMatrix r_given_s;
-  IntegerVector r_counts;
-  IntegerVector s_counts;
-  
-  ResponseModel(int nstim, int nresponseBins) {
-    this->field = NumericVector(nstim, 0.0);
-    this->r_given_s = IntegerMatrix(nstim, nresponseBins);
-    this->r_counts = IntegerVector(nresponseBins, 0);
-    this->s_counts = IntegerVector(nstim, 0);
-  }
+  NumericMatrix prob_r_given_s;
+  NumericVector prob_response;
+  NumericVector prob_stim;
 };
 
 
@@ -42,23 +38,20 @@ public:
  * \param r_count vector with the counts each response was observed across stimuli: P(r) * N
  * \param r_given_s_count vector with the counts each response was observed for the stimuli: P(r|s)
  */
-MI_Data stimulus_mutual_info(int stimCount, int N, 
-                             const IntegerVector& r_count,
-                             const IntegerMatrix::Row& r_given_s_count) {
+MI_Data stimulus_mutual_info(double p_stim, 
+                             NumericVector& p_response,
+                             const NumericMatrix::Row& p_r_given_s) {
   int totalResponseBins = 0;
   double MI = 0.0;
-  double p_stim = (double) stimCount / N;
-  for (int r = 0; r < r_given_s_count.size(); ++r) {
-    double p_response = ((double) r_count[r]) / N;
-    double p_r_given_s = ((double) r_given_s_count[r]) / stimCount;
+  for (int r = 0; r < p_response.size(); ++r) {
     
     Debug("response=" << r);
     Debug(", p_stim=" << p_stim);
-    Debug(", p_r_given_s=" << p_r_given_s);
-    Debug(", p_response=" << p_response);
-    if (p_r_given_s > 0) {
+    Debug(", p_r_given_s=" << p_r_given_s[r]);
+    Debug(", p_response=" << p_response[r]);
+    if (p_r_given_s[r] > 0) {
       ++totalResponseBins;
-      double r_MI = p_stim * p_r_given_s * std::log2(p_r_given_s / p_response);
+      double r_MI = p_stim * p_r_given_s[r] * std::log2(p_r_given_s[r] / p_response[r]);
       Debug(", MI=" << r_MI);
       MI += r_MI;
     }
@@ -79,6 +72,7 @@ MI_Data stimulus_mutual_info(int stimCount, int N,
  * \param s_counts vector with the counts each stimulus was observed: P(s) * N
  * \param r_given_s_count matrix indexed by [s,r] with the counts each response was observed for a stimulus: P(r|s)
  */
+/*
 int max_s_given_r(int r, int N,
                   const IntegerVector& r_counts,
                   const IntegerVector& s_counts,
@@ -87,9 +81,7 @@ int max_s_given_r(int r, int N,
   int max_s_i = -1;
   double max_s = -1.0;
   
-  double p_response = ((double) r_counts[r]) / N;
   for (int s = 0; s < s_counts.size(); ++s) {
-    double p_stim = (double) s_counts[s] / N;
     double p_r_given_s = ((double) r_given_s_count(s,r)) / s_counts[s];
     
     Debug("response=" << r);
@@ -106,52 +98,58 @@ int max_s_given_r(int r, int N,
   }
   return max_s_i;
 }
+*/
 
-ResponseModel createResponseModel(int nstim,
-                                  NumericVector& response, 
-                                  NumericVector& stimulus, 
-                                  NumericVector& responseQuantiles) {
-  int nresponseBins = responseQuantiles.size();
-  ResponseModel m = ResponseModel(nstim, nresponseBins);
+
+BinnedResponseModel createResponseModel(IntegerVector& response, 
+                                        int nresponseBins,
+                                        IntegerVector& stimulus, 
+                                        int nstim) {
+
+  arma::mat r_given_s(nstim, nresponseBins, arma::fill::zeros);
+  std::vector<int> r_counts(nresponseBins, 0);
+  std::vector<int> s_counts(nstim, 0);
 
   for (int i = 0; i < response.size(); ++i) {
-    auto responseBinIt = std::lower_bound(responseQuantiles.begin(), responseQuantiles.end(), response[i]);
-    int responseBin = nresponseBins - 1;
-    if (responseBinIt != responseQuantiles.end()) {
-      responseBin = responseBinIt - responseQuantiles.begin();
-    }
-    
-    int stimBin = stimulus[i];
+    int responseBin = response[i] - 1;
+    int stimBin = stimulus[i] - 1;
     if (stimBin > nstim) {
       std::cout << "Error: Stimulus id greater than the passed count of stimuli (nstim)"  << std::endl;
-      return m;
+      continue;
     }
     
-    m.field(stimBin) += response[i];
-    ++m.s_counts[stimBin];
-    ++m.r_given_s(stimBin, responseBin);
-    ++m.r_counts[responseBin];
+    ++s_counts[stimBin];
+    ++r_given_s(stimBin, responseBin);
+    ++r_counts[responseBin];
   }  
+
+  int N = response.size(); 
   
-  for (int s = 0; s < nstim; ++s) {
-    m.field(s) = m.field(s) / m.s_counts[s];
+  // Set probabilities
+  BinnedResponseModel m = BinnedResponseModel();
+  NumericVector p_stim(nstim, 0.0);
+  NumericVector p_response(nresponseBins, 0.0);
+  NumericMatrix p_r_given_s(nstim, nresponseBins);
+  std::fill(p_r_given_s.begin(), p_r_given_s.end(), 0.0);
+  
+  for (int r = 0; r < nresponseBins; ++r) {
+    p_response[r] = ((double) r_counts[r]) / N;
+    for (int s = 0; s < nstim; ++s) {
+      p_stim[s] = ((double) s_counts[s]) / N;
+      // +1 every bin to have >0 probabilities of unssen bins
+      p_r_given_s(s,r) = ((double) r_given_s(s,r) + 1) / (s_counts[s] + nresponseBins);
+    }
   }
   
+  m.prob_stim = p_stim;
+  m.prob_response = p_response;
+  m.prob_r_given_s = p_r_given_s;
   return m;
 }
 
-// [[Rcpp::export]]
-SEXP createBayesModel2(int nstim, 
-                      int nresponse,
-                      IntegerMatrix& cellResponse,
-                      IntegerVector& stimulus) {
-  
-  return List();
-}
 
-
-NumericVector chunkShuffle(NumericVector& trace,
-                           NumericVector& trialEnds, 
+IntegerVector chunkShuffle(IntegerVector& trace,
+                           IntegerVector& trialEnds, 
                            int shuffleChunkLength) {
   
   // Shuffle the trace keeping the order within small chunks
@@ -161,7 +159,7 @@ NumericVector chunkShuffle(NumericVector& trace,
     chunkShuffle[j] = j;
   }
   
-  NumericVector shuffledTrace(trace.size(), 0);
+  IntegerVector shuffledTrace(trace.size(), 0);
   
   // Shuffle chunks only within the same trial
   int trialStart = 0;
@@ -186,36 +184,34 @@ NumericVector chunkShuffle(NumericVector& trace,
   return shuffledTrace;
 }
 
+
 // [[Rcpp::export]]
-SEXP mutual_info(NumericVector& response, 
-                 NumericVector& stimulus, 
-                 NumericVector& responseQuantiles,
+SEXP mutual_info(IntegerVector& response,
+                 int nresponseBins,
+                 IntegerVector& stimulus,
                  int nstim) {
   List result;
   result["mutual.info"] = 0.0;
   result["mutual.info.bias"] = 0.0;
-  
-  int nresponseBins = responseQuantiles.size();
   
   if (response.size() != stimulus.size()) {
     std::cout << "Error: response size need to equal stimulus size vector"  << std::endl;
     return result;
   }
   
-  ResponseModel m = createResponseModel(nstim, response, stimulus, responseQuantiles);
+  BinnedResponseModel m = createResponseModel(response, nresponseBins, stimulus, nstim);
   
   int totalResponseBins = 0;
   int totalStimuliBins = 0;
   double MI = 0.0;
   for (int s = 0; s < nstim; ++s) {
-    int stimCount = m.s_counts[s];
-    if (stimCount > 0) {
+    double p_stim = m.prob_stim[s];
+    if (p_stim > 0) {
       ++totalStimuliBins;
       
-      MI_Data mi_Data = stimulus_mutual_info(stimCount, 
-                                             response.size(), 
-                                             m.r_counts, 
-                                             m.r_given_s.row(s));
+      MI_Data mi_Data = stimulus_mutual_info(p_stim, 
+                                             m.prob_response, 
+                                             m.prob_r_given_s.row(s));
       MI += mi_Data.MI;
       totalResponseBins += mi_Data.totalResponseBins;
     }
@@ -226,29 +222,28 @@ SEXP mutual_info(NumericVector& response,
   
   result["mutual.info"] = MI;
   result["mutual.info.bias"] = MI_bias;
-  result["field"] = m.field;
   return result;
 }
 
 
 // [[Rcpp::export]]
-SEXP mutual_info_with_shuffles(NumericVector& response, 
-                               NumericVector& stimulus, 
-                               NumericVector& responseQuantiles,
-                               NumericVector& trialEnds,
+SEXP mutual_info_with_shuffles(IntegerVector& response, 
+                               int nresponseBins,
+                               IntegerVector& stimulus,
                                int nstim,
+                               IntegerVector& trialEnds,
                                int nshuffles,
                                int shuffleChunkLength ) {
 
-  List result = mutual_info(response, stimulus, responseQuantiles, nstim);
+  List result = mutual_info(response, nresponseBins, stimulus, nstim);
   
   NumericVector mis(nshuffles, 0.0);
   NumericVector mis_bias(nshuffles, 0.0);
   
   for (int i = 0; i < nshuffles; ++i) {
-    NumericVector shuffledResponse = chunkShuffle(response, trialEnds, shuffleChunkLength);
+    IntegerVector shuffledResponse = chunkShuffle(response, trialEnds, shuffleChunkLength);
     Debug("Shuffled response: " << shuffledResponse << std::endl);
-    List shuffledResult = mutual_info(shuffledResponse, stimulus, responseQuantiles, nstim);
+    List shuffledResult = mutual_info(shuffledResponse, nresponseBins, stimulus, nstim);
     mis[i] = shuffledResult["mutual.info"];
     mis_bias[i] = shuffledResult["mutual.info.bias"];
   }
@@ -259,13 +254,11 @@ SEXP mutual_info_with_shuffles(NumericVector& response,
   return result;
 }
 
-
-
 /*** R
 # Perfect mutual info
-response = c(c(0, 10, 0, 10, 10), rep(0, 10))
-stimulus = c(c(0, 1, 0, 1, 1), rep(0, 10))
-res = mutual_info_with_shuffles(response, stimulus, c(1, 10), c(length(response)), 2, 1, 2)
+response = c(c(1, 2, 1, 2, 2), rep(1, 10))
+stimulus = c(c(1, 2, 1, 2, 2), rep(1, 10))
+res = mutual_info_with_shuffles(response, 2, stimulus, 2, c(1, 10), 1, 2)
 res$mutual.info
 res$mutual.info.bias
 */

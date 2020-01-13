@@ -51,16 +51,24 @@ eval.parts = lapply(caimg_result_dirs, function(caimg_result_dir) {
   } else {
     print('Started evaluating the model')
     binned.traces2 = binned.traces[!is.na(angle),]
-    binned.traces2 = stimbin.traces(binned.traces2, angle, 45) %>%
-      mutate(bin.angle = pmin(8,bin.angle + 5))
-
-    eval.df = eval.decoder(binned.traces,
-                           train.fun=create.discrete.bayes,
-                           predict.fun=bayesmax,
-                           value.var=response_bin,
-                           stim.var=bin.xy,
-                           nstim.bins=xybins*xybins,
+    nangles = 360/30
+    binned.traces2 = stimbin.traces(binned.traces2, angle, 30) %>%
+      mutate(bin.angle = pmin(nangles, bin.angle + 7))
+    eval.df = eval.decoder(binned.traces2, 
+                           train.fun=create.mfr.bayes,
+                           predict.fun=bayesmax_mfr,
+                           value.var=nevents,
+                           stim.var=bin.angle,
+                           nstim.bins=nangles,
+                           error.fun = function(x,y) {min((x-y) %% nangles, (y-x) %% nangles)},
                            cv=TRUE)
+    # eval.df = eval.decoder(binned.traces, 
+    #                    train.fun=create.discrete.bayes,
+    #                    predict.fun=bayesmax,
+    #                    value.var=response_bin,
+    #                    stim.var=bin.xy,
+    #                    nstim.bins=xybins*xybins,
+    #                    cv=TRUE)
 
     #eval.df = eval.decoder(binned.traces, 
     #                       train.fun=create.mfr.bayes,
