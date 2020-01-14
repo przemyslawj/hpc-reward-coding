@@ -198,7 +198,7 @@ setorder(data.traces, trial_id, cell_id, timestamp)
 running.index = isRunning(data.traces, 2, 3, 500)
 data.traces.run = data.traces[which(running.index), ]
 detect.events(data.traces.run)
-cell.df = data.traces.run[cell_id == cell_name& x >= 0 & y >= 0
+cell.df = data.traces.run[cell_id == cell_name & x >= 0 & y >= 0
                           #& (atReward0 == 1 | atReward1 == 1)
                           , ]
 ```
@@ -246,7 +246,7 @@ plot.cell.trials = function(cell.df, trace.var='trace') {
   cell_info = pf$cell_info
   g = plot.pf(all.pf.df, 
           max.xy=getNBinsXY()) +
-    geom_rewards(rewards.df, animal_name, day) +
+    #geom_rewards(rewards.df, animal_name, day) +
     facet_wrap(. ~  trial, ncol=3) +
     labs(fill='Deconv trace',
          title=paste0(format(day), ' ', animal_name, ' Cell ', cell_name, 
@@ -263,10 +263,10 @@ plot.cell.trials = function(cell.df, trace.var='trace') {
 }
 
 binned.cell.df = bin.time.space(cell.df, 
-                                binned.var='deconv_trace',
+                                binned.var='trace',
                                 timebin.dur.msec=200, 
                                 bin.width=100/getNBinsXY())
-plot.cell.trials(binned.cell.df, trace.var='nevents')
+plot.cell.trials(cell.df, trace.var='trace')
 ```
 
 # Changes in PF over days

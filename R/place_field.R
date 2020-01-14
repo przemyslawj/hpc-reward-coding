@@ -6,77 +6,30 @@ Rcpp::sourceCpp('place_field.cpp')
 
 source('utils.R')
 
-get.entropy = function(freqs) {
-  -sum(freqs * log2(freqs))
-}
-
-to.probs = function(x) { 
-  x / sum(x)
-}
-
-# For performance use C++ implementation instead: getCppPlaceField
-getPlaceField = function(trial.df, trace.col) {
-  binSizeX = 3
-  binSizeY = 3
-  minX = 0
-  minY = 0
-  maxX = max(trial.df$smooth_trans_x, na.rm=TRUE) - minX 
-  maxY = max(trial.df$smooth_trans_y, na.rm=TRUE) - minY
-  trial.df = data.table(trial.df)
-    
-  trace = trial.df[, ..trace.col][[1]]
-  
-  totalActivityMap = matrix(0, nrow=ceiling(maxX / binSizeX), ncol=ceiling(maxY / binSizeY))
-  occupancyMap = matrix(0, nrow=ceiling(maxX / binSizeX), ncol=ceiling(maxY / binSizeY))
-  
-  for (i in 1:length(trace)) {
-    x = max(1, round(trial.df$smooth_trans_x[i] / binSizeX))
-    y = max(1, round(trial.df$smooth_trans_y[i] / binSizeY))
-    occupancyMap[x, y] = occupancyMap[x, y] + 1
-    totalActivityMap[x, y] = totalActivityMap[x, y] + trace[i]
-  }
-  
-  SI = 0
-  frame_rate = 20
-  fr = totalActivityMap / occupancyMap 
-  fr_offset = min(fr, na.rm=TRUE) - 10e-10
-  fr = fr - fr_offset
-  
-  mfr = mean(trace) - fr_offset;
-  field = matrix(NA, nrow=nrow(totalActivityMap), ncol=ncol(totalActivityMap))
-  for (y in 1:dim(totalActivityMap)[2]) {
-    for (x in 1:dim(totalActivityMap)[1]) {
-      occupancyProb = max(0, occupancyMap[x, y], na.rm=TRUE) / nrow(trial.df)
-      if (occupancyProb > 0) {
-        SI = SI + occupancyProb * fr[x,y] / mfr * log2(fr[x,y] / mfr)
-        field[x,y] = totalActivityMap[x,y] / occupancyMap[x,y]
-      }
-    }
-  }
-  Ent = to.probs(as.vector(totalActivityMap) + 0.001) %>% get.entropy
-  
-  field[is.na(field)] = mean(field, na.rm=TRUE)
-  return(list(occupancy=occupancyMap, 
-              activity=totalActivityMap, 
-              field=field, 
-              spatial.information=SI, 
-              spatial.information.perspike=SI/mfr,
-              entropy=Ent))
-}
 
 norm2 = function(x, y) {
   sqrt(x**2 + y**2)
 }
 
+
+to.matrix = function(M, max.xy) {
+  if (!is.matrix(M)) {
+    M = matrix(M, nrow=max.xy, ncol=max.xy, byrow=TRUE) 
+  }
+  return(M)
+}
+
 # Create df with smoothed values from matrix representation
-create.pf.df = function(M, occupancyM, max.xy, min.occupancy.sec=1, frame.rate=20) {
-  sigma = 1.4
-  M1 = gauss2dsmooth(M,lambda=sigma, nx=11, ny=11)
+create.pf.df = function(M, occupancyM, max.xy, min.occupancy.sec=1, frame.rate=20, sigma = 1.4) {
+
+  M = to.matrix(M, max.xy)
+  occupancyM = to.matrix(occupancyM, max.xy)
+  M1 = gauss2dsmooth(M, lambda=sigma, nx=11, ny=11)
   df1 = reshape2::melt(M1) 
   
   min.occupancy = min.occupancy.sec * frame.rate
   min.smoothed.occupancy = min.occupancy * 1/(2*pi*sigma^2)
-  smoothedOccupancy = gauss2dsmooth(occupancyM,lambda=sigma, nx=11, ny=11)
+  smoothedOccupancy = gauss2dsmooth(occupancyM, lambda=sigma, nx=11, ny=11)
   mid.pt = mean(1:max.xy)
   df_org = reshape2::melt(smoothedOccupancy) %>%
     dplyr::filter(value >= min.smoothed.occupancy) %>%
@@ -132,7 +85,7 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
                              trace.var='trace',
                              min.occupancy.sec=1) {
   nbins.xy = getNBinsXY()
-  cell.events = cell.df[nevents > 0,]
+  nevents = nrow(cell.df[nevents > 0,])
   trace.vals = cell.df[[trace.var]]
   trace.vals = trace.vals - min(trace.vals)
 
@@ -156,7 +109,7 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
   #               trace.quantiles[["95%"]],
   #               trace.quantiles[["99%"]],
   #               trace.quantiles[["100%"]])
-  pf = getCppPlaceField(cell.df$bin.x, cell.df$bin.y, 
+  pf = getCppPlaceField(to_1dim(cell.df$bin.x, cell.df$bin.y), 
                         trace.vals,
                         trace.bins,
                         trial_ends, 
@@ -185,7 +138,7 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
                    sparsity = pf$sparsity,
                    quantile20=trace.quantiles[["20%"]],
                    quantile99=trace.quantiles[["99%"]],
-                   nevents=nrow(cell.events))
+                   nevents=nevents)
 
   # find field max value and pos in the smoothed values
   pf.df = create.pf.df(pf$field, pf$occupancy, max.xy=nbins.xy, frame.rate=bin.hz)
@@ -201,7 +154,7 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
   
   g.placefield=NA
   if (generate.plots) {
-    cell_event_rate = nrow(cell.events) / nrow(cell.df) * bin.hz
+    cell_event_rate = nevents / nrow(cell.df) * bin.hz
 
     g.placefield = plot.pf(pf.df, max.xy=getNBinsXY()) +
       labs(title=paste0('Cell ', cell_name, ' MER = ', format(cell_event_rate, digits=2), ' Hz',
@@ -217,7 +170,7 @@ cell.spatial.info = function(cell.df, generate.plots=FALSE, nshuffles=0,
   }
 
   return(list(cell_info=cell_info,
-             field=pf$field,
-             occupancy=pf$occupancy,
+             field=to.matrix(pf$field, nbins.xy),
+             occupancy=to.matrix(pf$occupancy, nbins.xy),
              g=g.placefield))
 }

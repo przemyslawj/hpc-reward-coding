@@ -4,7 +4,8 @@
 // The calculated mutual information is biased due to a finite and limited sampling of responses in the space.
 // This bias is calculated using method from Panzeri and Treves, 1996.
 //
-
+#include <RcppArmadillo.h>
+// [[Rcpp::depends(RcppArmadillo)]]
 #include <Rcpp.h>
 #include <cmath>
 #include <float.h>
@@ -34,12 +35,13 @@ static const double MAX_Y = 100;
 
 static const int N_BINS_X = (int) std::floor(MAX_X / binSizeX);
 static const int N_BINS_Y = (int) std::floor(MAX_Y / binSizeY);
+static const int N_BINS = N_BINS_X * N_BINS_Y;
 
 class SpatialInfoData {
 public:
-  NumericMatrix totalActivityMap;
-  NumericMatrix occupancyMap;
-  NumericMatrix fr;
+  NumericVector totalActivityMap;
+  NumericVector occupancyMap;
+  NumericVector fr;
   double mfr = 0.0;
   double SI = 0.0;
   double MI = 0.0;
@@ -48,14 +50,14 @@ public:
   double sparsity = 0.0;
 
   SpatialInfoData() {
-    totalActivityMap = NumericMatrix(1,1);
-    occupancyMap = NumericMatrix(1,1);
-    fr = NumericMatrix(1,1);
+    totalActivityMap = NumericVector(1, 0.0);
+    occupancyMap = NumericVector(1, 0.0);
+    fr = NumericVector(1, 0.0);
   }
 
-  SpatialInfoData(NumericMatrix& totalActivityMap,
-                  NumericMatrix& occupancyMap,
-                  NumericMatrix& fr,
+  SpatialInfoData(NumericVector& totalActivityMap,
+                  NumericVector& occupancyMap,
+                  NumericVector& fr,
                   double mfr,
                   double SI,
                   double MI,
@@ -74,22 +76,18 @@ public:
   }
 };
 
-SpatialInfoData calculateSpatialInformation(NumericVector& bin_x,
-                                            NumericVector& bin_y,
+SpatialInfoData calculateSpatialInformation(NumericVector& bin_xy,
                                             NumericVector& trace,
                                             // Quantiles for binning trace values
                                             NumericVector& traceQuantiles,
                                             double minOccupancy) {
 
-  NumericMatrix totalActivityMap = NumericMatrix(N_BINS_X,N_BINS_Y);
-  NumericMatrix occupancyMap = NumericMatrix(N_BINS_X,N_BINS_Y);
-  NumericMatrix fr = NumericMatrix(N_BINS_X,N_BINS_Y);
-  std::fill(totalActivityMap.begin(), totalActivityMap.end(), 0);
-  std::fill(occupancyMap.begin(), occupancyMap.end(), 0);
-  std::fill(fr.begin(), fr.end(), 0);
+  NumericVector totalActivityMap = NumericVector(N_BINS, 0.0);
+  NumericVector occupancyMap = NumericVector(N_BINS, 0.0);
+  NumericVector fr = NumericVector(N_BINS, 0.0);
 
   int nresponse = traceQuantiles.size();
-  std::vector<std::vector<std::vector<int> > > binnedResponse(nresponse, std::vector<std::vector<int> > (N_BINS_X, std::vector<int>(N_BINS_Y,0)));
+  arma::mat r_given_s(N_BINS, nresponse, arma::fill::zeros);
 
   std::vector<int> responseCount(traceQuantiles.size(), 0);
 
@@ -98,11 +96,10 @@ SpatialInfoData calculateSpatialInformation(NumericVector& bin_x,
   double mfr = 0;
   for (int i = 0; i < trace.size(); ++i) {
     
-    int xx = bin_x[i];
-    int yy = bin_y[i];
+    int xy = bin_xy[i];
 
-    occupancyMap(xx,yy) += 1;
-    totalActivityMap(xx,yy) += trace[i];
+    occupancyMap[xy] += 1;
+    totalActivityMap[xy] += trace[i];
 
     auto responseBinIt = std::lower_bound(traceQuantiles.begin(), traceQuantiles.end(), trace[i]);
     int responseBin = traceQuantiles.size() - 1;
@@ -110,7 +107,7 @@ SpatialInfoData calculateSpatialInformation(NumericVector& bin_x,
       responseBin = responseBinIt - traceQuantiles.begin();
     }
 
-    ++binnedResponse[responseBin][xx][yy];
+    ++r_given_s(xy,responseBin);
     ++responseCount[responseBin];
 
     mfr += trace[i] / trace.size();
@@ -120,16 +117,14 @@ SpatialInfoData calculateSpatialInformation(NumericVector& bin_x,
   // Calculate firing rates
   double fr_offset = 100.0;
   double sparsity = 0.0;
-  for (int yy = 0; yy < N_BINS_Y; ++yy) {
-    for (int xx = 0; xx < N_BINS_X; ++xx) {
-      if (occupancyMap(xx,yy) >= minOccupancy) {
-        fr(xx,yy) = totalActivityMap(xx,yy) / occupancyMap(xx,yy);
-        fr_offset = std::min(fr_offset, fr(xx,yy));
-        double p_s = (double) occupancyMap(xx, yy) / trace.size();
-        sparsity += p_s * std::pow(fr(xx,yy), 2) / std::pow(mfr, 2);
-      } else {
-        fr(xx,yy) = NAN;
-      }
+  for (int xy = 0; xy < N_BINS; ++xy) {
+    if (occupancyMap[xy] >= minOccupancy) {
+      fr[xy] = totalActivityMap[xy] / occupancyMap[xy];
+      fr_offset = std::min(fr_offset, fr[xy]);
+      double p_s = ((double) occupancyMap[xy]) / trace.size();
+      sparsity += p_s * std::pow(fr[xy], 2) / std::pow(mfr, 2);
+    } else {
+      fr[xy] = NAN;
     }
   }
 
@@ -138,11 +133,9 @@ SpatialInfoData calculateSpatialInformation(NumericVector& bin_x,
   // Avoid FR==0, so the log's can be calculated everywhere
   fr_offset = -10e-10;
   // Update firing rates by the offset
-  for (int yy = 0; yy < N_BINS_Y; ++yy) {
-    for (int xx = 0; xx < N_BINS_X; ++xx) {
-      if (!std::isnan(fr(xx,yy))) {
-        fr(xx,yy) -= fr_offset;
-      }
+  for (int xy = 0; xy < N_BINS; ++xy) {
+    if (!std::isnan(fr[xy])) {
+      fr[xy] -= fr_offset;
     }
   }
 
@@ -154,43 +147,38 @@ SpatialInfoData calculateSpatialInformation(NumericVector& bin_x,
   }
   double MI = 0.0;
   double SI = 0.0;
-  const int S = N_BINS_X * N_BINS_Y;
+  const int S = N_BINS;
   const int N = trace.size();
   int totalResponseBins = 0;
   int occupiedBins = 0;
-  for (int yy = 0; yy < N_BINS_Y; ++yy) {
-    for (int xx = 0; xx < N_BINS_X; ++xx) {
+  for (int xy = 0; xy < N_BINS; ++xy) {
 
-      if (occupancyMap(xx,yy) >= minOccupancy) {
-        Debug(" xx=" << xx);
-        Debug(" yy=" << yy << std::endl);
-        ++occupiedBins;
-        double p_occupancy = (double) occupancyMap(xx,yy) / N;
-        if (fr(xx,yy) > 0.0) {
-          double r_SI = p_occupancy * fr(xx,yy) / mfr * log2(fr(xx,yy) / mfr);
-          Debug("partial SI=" << r_SI << std::endl);
-          SI += r_SI;
+    if (occupancyMap[xy] >= minOccupancy) {
+      Debug(" xy=" << xy << std::endl);
+      ++occupiedBins;
+      double p_occupancy = (double) occupancyMap[xy] / N;
+      if (fr[xy] > 0.0) {
+        double r_SI = p_occupancy * fr[xy] / mfr * log2(fr[xy] / mfr);
+        Debug("partial SI=" << r_SI << std::endl);
+        SI += r_SI;
+      }
+
+      for (int r = 0; r < nresponse; ++r) {
+        double p_response = ((double) responseCount[r]) / N;
+        double p_r_given_s = ((double) r_given_s(xy, r)) / occupancyMap[xy];
+        if (p_r_given_s > 0) {
+          ++totalResponseBins;
+          double r_MI = p_occupancy * p_r_given_s * std::log2(p_r_given_s / p_response);
+          Debug("response=" << r);
+          Debug(", p_r_given_s=" << p_r_given_s);
+          Debug(", p_response=" << p_response);
+          Debug(", p_occupancy=" << p_occupancy);
+          Debug(", MI=" << r_MI <<std::endl);
+          MI += r_MI;
+          // This is bias just for xx,yy
+          //C += (1 - p_r_given_s) / p_occupancy +
+          //     (-p_r_given_s - 2 * p_r_given_s * p_r_given_s) / p_response - p_r_given_s;
         }
-
-        for (int r = 0; r < nresponse; ++r) {
-          double p_response = ((double) responseCount[r]) / N;
-          double p_r_given_s = ((double) binnedResponse[r][xx][yy]) / occupancyMap(xx,yy);
-          if (p_r_given_s > 0) {
-            ++totalResponseBins;
-            double r_MI = p_occupancy * p_r_given_s * std::log2(p_r_given_s / p_response);
-            Debug("response=" << r);
-            Debug(", p_r_given_s=" << p_r_given_s);
-            Debug(", p_response=" << p_response);
-            Debug(", p_occupancy=" << p_occupancy);
-            Debug(", MI=" << r_MI <<std::endl);
-            MI += r_MI;
-            // This is bias just for xx,yy
-            //C += (1 - p_r_given_s) / p_occupancy +
-            //     (-p_r_given_s - 2 * p_r_given_s * p_r_given_s) / p_response - p_r_given_s;
-          }
-        }
-
-
       }
     }
   }
@@ -269,8 +257,7 @@ NumericVector randomShift(NumericVector& trace,
 }
 
 // [[Rcpp::export]]
-SEXP getCppPlaceField(NumericVector& bin_x,
-                      NumericVector& bin_y,
+SEXP getCppPlaceField(NumericVector& bin_xy,
                       NumericVector& trace,
                       NumericVector& traceQuantiles,
                       NumericVector& trialEnds,
@@ -278,15 +265,13 @@ SEXP getCppPlaceField(NumericVector& bin_x,
                       int shuffleChunkLength,
                       double minOccupancy) {
 
-  NumericVector shuffleSI = NumericVector(nshuffles);
-  NumericVector shuffleMI = NumericVector(nshuffles);
-  std::fill(shuffleSI.begin(), shuffleSI.end(), 0);
-  std::fill(shuffleMI.begin(), shuffleMI.end(), 0);
+  NumericVector shuffleSI = NumericVector(nshuffles, 0.0);
+  NumericVector shuffleMI = NumericVector(nshuffles, 0.0);
 
   List result;
-  result["field"] = NumericMatrix(N_BINS_X,N_BINS_Y);
-  result["occupancy"] = NumericMatrix(N_BINS_X,N_BINS_Y);
-  result["activity"] = NumericMatrix(N_BINS_X,N_BINS_Y);
+  result["field"] = NumericVector(N_BINS, 0.0);
+  result["occupancy"] = NumericVector(N_BINS, 0.0);
+  result["activity"] = NumericVector(N_BINS, 0.0);
   result["spatial.information"] = 0.0;
   result["spatial.information.perspike"] = 0.0;
   result["field.size.50"] = 0;
@@ -300,45 +285,39 @@ SEXP getCppPlaceField(NumericVector& bin_x,
     return(result);
   }
 
-  SpatialInfoData spatialInfoData = calculateSpatialInformation(bin_x, bin_y, trace, traceQuantiles, minOccupancy);
-  NumericMatrix occupancyMap = spatialInfoData.occupancyMap;
-  NumericMatrix totalActivityMap = spatialInfoData.totalActivityMap;
-  NumericMatrix fr = spatialInfoData.fr;
+  SpatialInfoData spatialInfoData = calculateSpatialInformation(bin_xy, trace, traceQuantiles, minOccupancy);
+  NumericVector occupancyMap = spatialInfoData.occupancyMap;
+  NumericVector totalActivityMap = spatialInfoData.totalActivityMap;
+  NumericVector fr = spatialInfoData.fr;
 
   double maxField = 0.0;
-  for (int yy = 0; yy < N_BINS_Y; ++yy) {
-    for (int xx = 0; xx < N_BINS_X; ++xx) {
-      if (occupancyMap(xx,yy) >= minOccupancy &&
-          fr(xx,yy) >= maxField) {
-        maxField = fr(xx,yy);
-      }
+  for (int xy = 0; xy < N_BINS; ++xy) {
+    if (occupancyMap[xy] >= minOccupancy &&
+        fr[xy] >= maxField) {
+      maxField = fr[xy];
     }
   }
   // Populate NAs in the field with mean value and find field centre
   int nfield = 1; // avoid division by zero
   double fieldTotal = 0.0;
   const double FIELD_BINARY_THRESH = 0.5;
-  double weightedFieldX = 0.0;
-  double weigthedFieldY = 0.0;
+  double weightedFieldXy = 0.0;
   double totalWeights = 0.0;
   int nFieldBins50 = 0;
   int nFieldBins25 = 0;
-  for (int yy = 0; yy < N_BINS_Y; ++yy) {
-    for (int xx = 0; xx < N_BINS_X; ++xx) {
-      if (fr(xx,yy) != NAN_FIELD) {
-        fieldTotal += fr(xx, yy);
-        ++nfield;
+  for (int xy = 0; xy < N_BINS; ++xy) {
+    if (fr[xy] != NAN_FIELD) {
+      fieldTotal += fr[xy];
+      ++nfield;
 
-        if (fr(xx,yy) >= FIELD_BINARY_THRESH * maxField) {
-          double weight = fr(xx,yy);
-          weightedFieldX += xx * weight;
-          weigthedFieldY += yy * weight;
-          totalWeights += weight;
-          ++nFieldBins50;
-        }
-        if (fr(xx,yy) >= 0.25 * maxField) {
-          ++nFieldBins25;
-        }
+      if (fr[xy] >= FIELD_BINARY_THRESH * maxField) {
+        double weight = fr[xy];
+        weightedFieldXy += xy * weight;
+        totalWeights += weight;
+        ++nFieldBins50;
+      }
+      if (fr[xy] >= 0.25 * maxField) {
+        ++nFieldBins25;
       }
     }
   }
@@ -346,7 +325,7 @@ SEXP getCppPlaceField(NumericVector& bin_x,
   for (int i = 0; i < nshuffles; ++i) {
     //NumericVector shuffledTrace = chunkShuffle(trace, trialEnds, shuffleChunkLength);
     NumericVector shuffledTrace = randomShift(trace, trialEnds, shuffleChunkLength * 2);
-    SpatialInfoData shuffleData = calculateSpatialInformation(bin_x, bin_y, shuffledTrace, traceQuantiles, minOccupancy);
+    SpatialInfoData shuffleData = calculateSpatialInformation(bin_xy, shuffledTrace, traceQuantiles, minOccupancy);
     shuffleSI[i] = shuffleData.SI;
     shuffleMI[i] = shuffleData.MI;
   }
@@ -359,8 +338,8 @@ SEXP getCppPlaceField(NumericVector& bin_x,
   result["spatial.information"] = (float) spatialInfoData.SI;
   result["spatial.information.perspike"] = spatialInfoData.SI / spatialInfoData.mfr;
   result["mfr"] = spatialInfoData.mfr;
-  result["field.size.50"] = ((double) nFieldBins50) / (N_BINS_X * N_BINS_Y) * 100.0;
-  result["field.size.25"] = ((double) nFieldBins25) / (N_BINS_X * N_BINS_Y) * 100.0;
+  result["field.size.50"] = ((double) nFieldBins50) / N_BINS * 100.0;
+  result["field.size.25"] = ((double) nFieldBins25) / N_BINS * 100.0;
   result["shuffle.si"] = shuffleSI;
   result["mutual.info"] = spatialInfoData.MI;
   result["mutual.info.bias"] = spatialInfoData.MI_bias;
@@ -376,12 +355,11 @@ SEXP getCppPlaceField(NumericVector& bin_x,
 // run after the compilation.
 //
 /*** R
-x=0:9
-y=0:9
+xy=0:9
 trace=rep(0, 10)
 trace[6:10] = 1
 
-pf = getCppPlaceField(x,y,trace, c(0.5, 0.9), c(7, length(trace)), 0, 2, 1)
+pf = getCppPlaceField(xy, trace, c(0.5, 0.9), c(7, length(trace)), 0, 2, 1)
 #pf=with(cell.df, getCppPlaceField(smooth_trans_x, smooth_trans_y, deconv_trace, traceQuantiles, 10,2), 4)
 pf$spatial.information
 pf$mutual.info
