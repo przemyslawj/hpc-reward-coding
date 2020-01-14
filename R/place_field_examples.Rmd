@@ -14,7 +14,7 @@ library(tibble)
 library(stringr)
 library(DT)
 library(data.table)
-
+library(datatrace)
 
 library(ggplot2)
 library(cowplot)
@@ -23,11 +23,11 @@ gtheme = theme_minimal() + theme_cowplot() +
 
 summarise = dplyr::summarise
 summarize = dplyr::summarize
-source('place_field.R')
 ```
 
 Setup example variables
 ```{r}
+nbins = 20
 animal_name = 'F-TL'
 exp_title='learning'
 day = '2019-09-06'
@@ -47,7 +47,7 @@ geom_rewards = function(rewards.df, subject, day=NULL) {
   #rew.shape = 0
   rew.shape = 2
   rew.size = 2
-  bin.size = ceil(100 / getNBinsXY())
+  bin.size = ceil(100 / nbins)
   geom_point(data=dayreward.df, aes(x=trans_x / bin.size, y=(100 - trans_y) / bin.size), 
              shape=rew.shape,
              color=rew.col, 
@@ -64,10 +64,10 @@ oc1 = odd.occupancies[[animal_name]][[day]][[paste(cell_name)]]
 
 f2 = even.fields[[animal_name]][[day]][[paste(cell_name)]]
 oc2 = even.occupancies[[animal_name]][[day]][[paste(cell_name)]]
-odd.field = create.pf.df(f1, oc1, max.xy=getNBinsXY())
-even.field = create.pf.df(f2, oc2, max.xy=getNBinsXY())
+odd.field = create.pf.df(f1, oc1, max.xy=nbins)
+even.field = create.pf.df(f2, oc2, max.xy=nbins)
 
-oddeven.cor = field.cor(odd.field, even.field, make.cor.plot=TRUE, max.xy=getNBinsXY())
+oddeven.cor = field.cor(odd.field, even.field, make.cor.plot=TRUE, max.xy=nbins)
 cor.title = paste0('Odd vs Even cor=', format(oddeven.cor$cor, digits=2))
 oddeven.cor$g + labs(title=cor.title, fill='Correlation')
 
@@ -83,8 +83,7 @@ create.partial.df = function(fieldList, occupancyList, animal_name, day, cell_na
     return(data.frame())
   }
   df = create.pf.df(field,
-                    occupancyList[[animal_name]][[day]][[paste(cell_name)]],
-                    max.xy=getNBinsXY())
+                    occupancyList[[animal_name]][[day]][[paste(cell_name)]])
   df$group = group_name
   return(df)
 }
@@ -108,7 +107,7 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
                      plot.title = element_text(size=10))
   
   g.placefield = bind_rows(odd.pf, even.pf, early.pf, late.pf) %>%
-    plot.pf(max.xy=getNBinsXY()) +
+    plot.pf(max.x=nbins, max.y=nbins) +
     facet_wrap(. ~ group, ncol = 2) +
     geom_rewards(rewards.df, animal_name, day) +
     labs(title=paste0(animal_name,
@@ -124,12 +123,12 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
     text.theme
 
   
-  oddeven.cor = field.cor(odd.pf, even.pf, make.cor.plot=TRUE, max.xy=getNBinsXY())
+  oddeven.cor = field.cor(odd.pf, even.pf, make.cor.plot=TRUE, max.xy=nbins)
   cor.title = paste0('cor=', format(oddeven.cor$cor, digits=2))
   g.oddeven.cor = oddeven.cor$g + labs(title=cor.title, fill='') + 
     geom_rewards(rewards.df, animal_name, day) + text.theme
   
-  earlylate.cor = field.cor(early.pf, late.pf, make.cor.plot=TRUE, max.xy=getNBinsXY())
+  earlylate.cor = field.cor(early.pf, late.pf, make.cor.plot=TRUE, max.xy=nbins)
   cor.title = paste0('cor=', format(earlylate.cor$cor, digits=2))
   g.earlylate.cor = earlylate.cor$g + labs(title=cor.title, fill='') + 
     geom_rewards(rewards.df, animal_name, day) + text.theme +
@@ -185,10 +184,11 @@ for (i in 1:nrow(tmp.df)) {
 
 Load the traces
 ```{r}
-animal_name = 'F-TL'
+animal_name = 'E-BL'
 exp_title='learning'
-day = '2019-09-06'
-cell_name = 215
+day = '2019-08-31'
+cell_name = 9
+root_dir = '/home/przemek/neurodata/cheeseboard-down/down_2/2019-08'
 #cell_name = 47
 
 
@@ -204,9 +204,6 @@ cell.df = data.traces.run[cell_id == cell_name & x >= 0 & y >= 0
 ```
 
 ```{r}
-Rcpp::sourceCpp('place_field.cpp')
-source('place_field.R')
-
 frame.rate = 1000 / 200
 
 plot.cell.trials = function(cell.df, trace.var='trace') {
@@ -221,12 +218,12 @@ plot.cell.trials = function(cell.df, trace.var='trace') {
   all.pf.df = data.frame()
   for (trial_no in trials) {
     pf = cell.spatial.info(cell.df[trial == trial_no, ],
+                           nbins, nbins,
                            trace.var = trace.var,
                            generate.plots=FALSE,
                            nshuffles=0,
                            min.occupancy = 1)
     pf.df = create.pf.df(pf$field, pf$occupancy, 
-                         max.xy=getNBinsXY(),
                          frame.rate=frame.rate,
                          min.occupancy.sec = 0.1)
     pf.df$trial = num2str(trial_no, fmt=0)
@@ -234,21 +231,20 @@ plot.cell.trials = function(cell.df, trace.var='trace') {
   }
   
   pf = cell.spatial.info(cell.df,
+                         nbins, nbins,
                          trace.var = trace.var,
                          generate.plots=FALSE,
                          nshuffles=100)
   pf.df = create.pf.df(pf$field, pf$occupancy, 
-                       max.xy=getNBinsXY(),
                        frame.rate=frame.rate)
   pf.df$trial = 'all'
   all.pf.df = bind_rows(all.pf.df, pf.df)
   
   cell_info = pf$cell_info
-  g = plot.pf(all.pf.df, 
-          max.xy=getNBinsXY()) +
+  g = plot.pf(all.pf.df, max.x=nbins, max.y=nbins) +
     #geom_rewards(rewards.df, animal_name, day) +
     facet_wrap(. ~  trial, ncol=3) +
-    labs(fill='Deconv trace',
+    labs(fill=paste(trace.var, 'values'),
          title=paste0(format(day), ' ', animal_name, ' Cell ', cell_name, 
                       '\nSI = ', format(cell_info$spatial.information, digits=2),
                       ifelse(cell_info$signif.si, '*', ''),
@@ -263,10 +259,12 @@ plot.cell.trials = function(cell.df, trace.var='trace') {
 }
 
 binned.cell.df = bin.time.space(cell.df, 
-                                binned.var='trace',
-                                timebin.dur.msec=200, 
-                                bin.width=100/getNBinsXY())
-plot.cell.trials(cell.df, trace.var='trace')
+                                nbins.x = nbins,
+                                nbins.y = nbins,
+                                bin.quantile.fractions=c(0.9, 1.0),
+                                binned.var='deconv_trace',
+                                timebin.dur.msec=200)
+plot.cell.trials(binned.cell.df, trace.var='deconv_trace')
 ```
 
 # Changes in PF over days
@@ -290,8 +288,7 @@ rowwise.partial.df = function(row) {
     return(data.frame())
   }
   df = create.pf.df(field,
-                    run.occupancies[[animal_name]][[day]][[cell_name]],
-                    max.xy=getNBinsXY())
+                    run.occupancies[[animal_name]][[day]][[cell_name]])
 
   df$animal = animal_name
   df$cell_id = cell_name
@@ -323,14 +320,15 @@ plot.all.day.fields = function(animal_name, cell_id) {
     adply(.margins=1, .fun=rowwise.cell.desc) %>%
     dplyr::rename(date=day)
   
-  plot.pf(pf, max.xy=getNBinsXY()) +
+  plot.pf(pf, max.x=nbins, max.y=nbins) +
     facet_wrap(. ~ date, ncol=3) +
-    geom_text(data=cell.desc.df, mapping=aes(x=1, y=getNBinsXY() - 2, label=desc), size=3, hjust=0)+
+    geom_text(data=cell.desc.df, mapping=aes(x=1, y=nbins - 2, label=desc), size=3, hjust=0)+
     geom_rewards(filter(rewards.df, date %in% selected.days), animal_name) 
 }
 
 plot.all.day.fields('F-TL', 0)
 ```
+
 Save place fields for all days
 ```{r}
 animal.cells.df = goal.cell.db %>%

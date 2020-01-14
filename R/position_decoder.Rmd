@@ -4,9 +4,6 @@ output: html_notebook
 ---
 
 ```{r}
-Rcpp::sourceCpp('trace_utils.cpp')
-
-source('bayesian_decoder.R')
 source('utils.R')
 ```
 
@@ -31,10 +28,10 @@ prepare.traces = function(data.traces, quantile.fractions = c(0.95, 1.0)) {
   #data.traces.filtered = data.traces.run[cell_id %in% stable.cells, ]
   data.traces.filtered = data.traces.run
   binned.traces = bin.time.space(data.traces.filtered, 
+                                 xybins, xybins,
                                  quantile.fractions,
                                  binned.var='trace',
-                                 timebin.dur.msec=200, 
-                                 bin.width=100/xybins)
+                                 timebin.dur.msec=200)
   
   setorder(binned.traces, time_bin, cell_id)
   setkey(binned.traces, time_bin, cell_id)

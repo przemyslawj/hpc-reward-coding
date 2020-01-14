@@ -20,10 +20,9 @@ summarise = dplyr::summarise
 summarize = dplyr::summarize
 
 source('locations.R')
-source('place_field.R')
-source('trace_utils.R')
 source('utils.R')
-Rcpp::sourceCpp('trace_utils.cpp')
+
+nbins = 20
 
 root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
 gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
@@ -51,13 +50,15 @@ calc.spatial.info = function(data.traces, plot.dir='/tmp/pf_stability/',
   fields = list()
   occupancies = list()
 
+  response.bin.quantiles = c(0.2, 0.5, 0.8, 0.9, 0.95, 1.0)
   binned.data.traces = bin.time.space(data.traces[x >= 0 & y >= 0, ],
+                                      nbins.x = nbins,
+                                      nbins.y = nbins,
                                       binned.var='trace',
-                                      timebin.dur.msec=timebin.dur.msec, 
-                                      bin.width=100/getNBinsXY())
+                                      timebin.dur.msec=timebin.dur.msec)
   for (cell_name in cells) {
     cell.df = binned.data.traces[cell_id == cell_name ,]
-    pf = cell.spatial.info(cell.df, generate.plots, nshuffles, trace.var='trace', bin.hz=1000/timebin.dur.msec)
+    pf = cell.spatial.info(cell.df, nbins, nbins, generate.plots, nshuffles, trace.var='trace', bin.hz=1000/timebin.dur.msec)
     if (length(pf$cell_info) > 0) {
       fields[[format(cell_name)]] = pf$field
       occupancies[[format(cell_name)]] = pf$occupancy

@@ -15,15 +15,13 @@ sim.eval.parts = lapply(caimg_result_dirs, function(caimg_result_dir) {
   
   date_str = data.traces$date[1]
   animal_name = data.traces$animal[1]
-  timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec=200, xybins=xybins) %>%
-    stimbin.traces(stim.var=x, bin.width=100/xybins) %>%
-    stimbin.traces(stim.var=y, bin.width=100/xybins) %>%
-    data.table()
   quantile.fractions = c(0.95, 1.0)
   nresponse.bins = length(quantile.fractions)
-  binned.traces = bin.responses(timebinned.traces, quantile.fractions)
-  binned.traces = binned.traces %>%
-    mutate(bin.xy = to_1dim(bin.x, bin.y))
+  binned.traces = bin.time.space(data.traces.filtered, 
+                                 xybins, xybins,
+                                 quantile.fractions,
+                                 binned.var='trace',
+                                 timebin.dur.msec=200)
   
   model.bayes = create.discrete.bayes(binned.traces, nstim.bins=xybins*xybins)
   
