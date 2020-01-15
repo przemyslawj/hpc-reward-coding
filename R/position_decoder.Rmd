@@ -41,39 +41,45 @@ prepare.traces = function(data.traces, quantile.fractions = c(0.95, 1.0)) {
 
 eval.parts = lapply(caimg_result_dirs, function(caimg_result_dir) {
   data.traces = read.data.trace(caimg_result_dir, filter_exp_title = 'trial')
-  quantile.fractions = c(0.95, 1.0)
+  quantile.fractions = c(0.5, 0.95, 1.0)
   binned.traces = prepare.traces(data.traces, quantile.fractions)
   if (nrow(binned.traces) == 0) {
     return(data.frame())
   } else {
     print('Started evaluating the model')
-    binned.traces2 = binned.traces[!is.na(angle),]
-    nangles = 360/30
-    binned.traces2 = stimbin.traces(binned.traces2, angle, 30) %>%
-      mutate(bin.angle = pmin(nangles, bin.angle + 7))
-    eval.df = eval.decoder(binned.traces2, 
+    # binned.traces2 = binned.traces[!is.na(angle),]
+    # nangles = 360/30
+    # binned.traces2 = stimbin.traces(binned.traces2, angle, 30) %>%
+    #  mutate(bin.angle = pmin(nangles, bin.angle + 7))
+    # eval.df = eval.decoder(binned.traces2, 
+    #                        train.fun=create.mfr.bayes,
+    #                        predict.fun=bayesmax_mfr,
+    #                        value.var=nevents,
+    #                        stim.var=bin.angle,
+    #                        nstim.bins=nangles,
+    #                        error.fun = function(x,y) {min((x-y) %% nangles, (y-x) %% nangles)},
+    #                        cv=TRUE,
+    #                        min.samples=10)
+    # eval.df = eval.decoder(binned.traces,
+    #                        nstim.bins=xybins*xybins,
+    #                        error.fun=bin.distance.error(xybins, xybins), 
+    #                        train.fun=create.discrete.bayes,
+    #                        predict.fun=bayesmax,
+    #                        value.var=response_bin,
+    #                        stim.var=bin.xy,
+    #                        cv=TRUE,
+    #                        min.samples=20)
+
+    eval.df = eval.decoder(binned.traces,
+                           nstim.bins=xybins*xybins,
+                           error.fun=bin.distance.error(xybins, xybins),
                            train.fun=create.mfr.bayes,
                            predict.fun=bayesmax_mfr,
                            value.var=nevents,
-                           stim.var=bin.angle,
-                           nstim.bins=nangles,
-                           error.fun = function(x,y) {min((x-y) %% nangles, (y-x) %% nangles)},
-                           cv=TRUE)
-    # eval.df = eval.decoder(binned.traces, 
-    #                    train.fun=create.discrete.bayes,
-    #                    predict.fun=bayesmax,
-    #                    value.var=response_bin,
-    #                    stim.var=bin.xy,
-    #                    nstim.bins=xybins*xybins,
-    #                    cv=TRUE)
-
-    #eval.df = eval.decoder(binned.traces, 
-    #                       train.fun=create.mfr.bayes,
-    #                       predict.fun=bayesmax_mfr,
-    #                       value.var=mean.trace,
-    #                       stim.var=bin.xy,
-    #                       nstim.bins=xybins*xybins,
-    #                       cv=FALSE)
+                           stim.var=bin.xy,
+                           nstim.bins=xybins*xybins,
+                           cv=FALSE,
+                           min.samples=20)
     if (nrow(eval.df) > 0) {
       eval.df$animal = binned.traces$animal[1]
       eval.df$date = binned.traces$date[1]

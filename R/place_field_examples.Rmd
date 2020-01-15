@@ -187,8 +187,8 @@ Load the traces
 animal_name = 'E-BL'
 exp_title='learning'
 day = '2019-08-31'
-cell_name = 9
-root_dir = '/home/przemek/neurodata/cheeseboard-down/down_2/2019-08'
+cell_name = 15
+root_dir = '/home/prez/neurodata/cheeseboard-down/down_2/2019-08'
 #cell_name = 47
 
 
