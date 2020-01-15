@@ -9,6 +9,7 @@ library(DT)
 library(data.table)
 library(tictoc)
 library(pryr) # for memory checks
+library(datatrace)
 
 # Plotting
 library(ggplot2)
@@ -24,7 +25,8 @@ source('utils.R')
 
 nbins = 20
 
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+#root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+root_dir = '/home/prez/neurodata/cheeseboard-down/down_2/2019-08/'
 gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
 
 caimg_result_dirs = c(
@@ -54,6 +56,7 @@ calc.spatial.info = function(data.traces, plot.dir='/tmp/pf_stability/',
   binned.data.traces = bin.time.space(data.traces[x >= 0 & y >= 0, ],
                                       nbins.x = nbins,
                                       nbins.y = nbins,
+                                      response.bin.quantiles,
                                       binned.var='trace',
                                       timebin.dur.msec=timebin.dur.msec)
   for (cell_name in cells) {
@@ -137,7 +140,7 @@ for (caimg_result_dir in caimg_result_dirs) {
   tic("spatial info on all trials running")
   run.spatial = calc.spatial.info(data.traces.run[exp_title == 'trial'],
                                   plot.dir=paste0(plot.dir.prefix, '/run/'),
-                                  generate.plots=TRUE,
+                                  generate.plots=FALSE,
                                   nshuffles=100)
   run.trials.si = bind_rows(run.trials.si, add.meta.cols(run.spatial$df, animal, date))
   run.fields[[animal]][[format(date)]] = run.spatial$field
@@ -149,7 +152,7 @@ for (caimg_result_dir in caimg_result_dirs) {
     tic("spatial info on test run")
     test.spatial = calc.spatial.info(test.traces,
                                      plot.dir=paste0(plot.dir.prefix, '/testrun/'),
-                                     generate.plots=TRUE,
+                                     generate.plots=FALSE,
                                      nshuffles=100)
     test.trials.si = bind_rows(test.trials.si, add.meta.cols(test.spatial$df, animal, date))
     test.fields[[animal]][[format(date)]] = test.spatial$field

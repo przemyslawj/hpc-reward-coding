@@ -3,6 +3,10 @@ list.subdir = function(subdir) {
   sapply(learning_datestr, FUN=function(x) {paste(subdir, x, sep='/')}) %>% unname
 }
 
+norm2 = function(x, y) {
+  sqrt(x**2 + y**2)
+}
+
 
 get.subject.result.dirs = function(root_dir, subject) {
   dated_dirs = c(list.subdir(paste(root_dir, 'habituation', sep='/')),

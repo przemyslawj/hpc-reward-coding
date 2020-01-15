@@ -1,6 +1,6 @@
 expMonth = '2019-08';
 expDir = ['~/neurodata/cheeseboard-down/down_2/' expMonth];
-expDir = ['/mnt/DATA/Prez/cheeseboard-down/down_2/' expMonth];
+%expDir = ['/mnt/DATA/Prez/cheeseboard-down/down_2/' expMonth];
 animal = 'F-TL';
 
 expTitles = {'habituation', 'learning'};

@@ -12,7 +12,7 @@ summary(run.trials.si$mutual.info - run.trials.si$mutual.info.bias)
 
 ```{r}
 run.trials.si %>%
-  dplyr::summarise(pct.mi.signif=sum(signif.mi)/n()*100)
+  dplyr::summarise(pct.mi.signif=sum(signif.mi, na.rm = TRUE)/n()*100)
 ```
 
 Distribution of mutual information
@@ -27,8 +27,8 @@ Pct of significant place cells
 ```{r}
 run.trials.si %>%
   group_by(date, animal) %>%
-  dplyr::summarise(pct.mi.signif=sum(signif.mi)/n()*100,
-                   pct.si.signif=sum(signif.si)/n()*100) %>%
+  dplyr::summarise(pct.mi.signif=sum(signif.mi, na.rm=TRUE)/n()*100,
+                   pct.si.signif=sum(signif.si, na.rm=TRUE)/n()*100) %>%
   ggplot() +
   geom_point(aes(x=date, y=pct.mi.signif, colour='MI')) +
   geom_point(aes(x=date, y=pct.si.signif, colour='SI')) +
@@ -67,7 +67,7 @@ run.trials.si %>%
   filter(date == '2019-09-02' | date=='2019-09-01') %>%
   ggplot() +
   #geom_point(aes(x=field.max, y=mutual.info-mutual.info.bias, color=signif.si), alpha=0.2)
-  geom_point(aes(x=sparsity, y=mutual.info-mutual.info.bias, color=signif.si), alpha=0.2) +
+  geom_point(aes(x=sparsity, y=mutual.info-mutual.info.bias, color=signif.mi), alpha=0.2) +
   facet_grid(date ~ animal) +
   xlim(c(1,8))
 ```
@@ -83,11 +83,12 @@ field.size.thresh.25 = 100
 field.peak.thresh = 0
 
 is.place.cell = function(is.signif, mutual.info.wo.bias, field.size.50, field.size.25, field.max, field.mean) {
-  is.signif & 
+  is.pc = is.signif & 
     mutual.info.wo.bias >= mi.thresh &
     field.size.50 <= field.size.thresh.50 &
     field.size.25 <= field.size.thresh.25 &
     field.max - field.mean >= field.peak.thresh
+  ifelse(is.na(is.pc), FALSE, is.pc)
 }
 
 # Classification of place cells based on MI on each subset of day sessions
@@ -106,6 +107,7 @@ Sparsity of the selected cells
 run.trials.pc %>%
   filter(date == '2019-09-02' | date=='2019-08-29') %>%
   ggplot(aes(x=sparsity, y=mutual.info-mutual.info.bias, color=is.pc)) +
+  #ggplot(aes(x=sparsity, y=spatial.information, color=is.pc)) +
   geom_point(alpha=0.2) +
   geom_rug(alpha=0.03) +
   facet_grid(date ~ animal) +
@@ -375,9 +377,6 @@ Compare with the place cell pct during the trials
 # Change of place fields and statistics across days
 Calculate stats for changes between day combinations.
 ```{r}
-Rcpp::sourceCpp('place_field.cpp')
-max.xy = getNBinsXY()
-
 daypair.diff = function(animal.daypair.df, days, include.cors=TRUE) {
   pc.change = animal.daypair.df %>%
     arrange(animal, cell_id, desc(date)) %>%
@@ -419,9 +418,9 @@ daypair.diff = function(animal.daypair.df, days, include.cors=TRUE) {
       o1 = run.occupancies[[animal_name]][[format(days[1])]][[paste(cell_name)]]
       o2 = run.occupancies[[animal_name]][[format(days[2])]][[paste(cell_name)]]
 
-      cor.res = field.cor(create.pf.df(m1, o1, max.xy=max.xy), 
-                          create.pf.df(m2, o2, max.xy=max.xy),
-                          max.xy=max.xy)
+      cor.res = field.cor(create.pf.df(m1, o1), 
+                          create.pf.df(m2, o2),
+                          max.xy=nbins)
       pc.change[date.fst==days[1] & date.snd==days[2] & animal==animal_name & cell_id==cell_name,]$field.cor = cor.res$cor
     }
   }
