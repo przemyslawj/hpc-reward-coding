@@ -2,7 +2,6 @@
 % Requres following variables in the env:
 % rootDir, dateStr, animal
 
-EVENT_THRESH_NUM_STD = 5;
 addpath(genpath('matlab'))
 
 datedRootDir = fullfile(rootDir, dateStr);
@@ -46,7 +45,7 @@ session_info = jsondecode(session_info_txt);
 %% Load behavioural data for each session
 
 allData = [];
-trackingVars = {'dist', 'inside_roi', 'smooth_trans_x', 'smooth_trans_y',...
+trackingVars = {'inside_roi', 'smooth_trans_x', 'smooth_trans_y',...
                 'velocity', 'dist_reward0', 'dist_reward1', ...
                 'atReward0', 'atReward1', 'arrivedAtReward', ...
 				'smooth_heading_angle'};
@@ -118,8 +117,6 @@ for session_i = 1:numel(session_info.session_fpaths)
     sessionData.animal = repmat({animal}, n, 1);
 
     freq = (sessionTimestamps(end) - sessionTimestamps(2)) / numel(sessionTimestamps);
-    fe = findEvents(sessionData.trace, EVENT_THRESH_NUM_STD, freq);
-    sessionData.events = fe;
 
     if isempty(allData)
         allData = sessionData;
