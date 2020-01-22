@@ -37,7 +37,7 @@ cell_name = 256
 
 
 ```{r}
-geom_rewards = function(rewards.df, subject, day=NULL) {
+geom_rewards = function(rewards.df, subject, day=NULL, nbins=20) {
   dayreward.df = filter(rewards.df,
                         animal==subject)
   if (!is.null(day)) {
@@ -64,8 +64,8 @@ oc1 = odd.occupancies[[animal_name]][[day]][[paste(cell_name)]]
 
 f2 = even.fields[[animal_name]][[day]][[paste(cell_name)]]
 oc2 = even.occupancies[[animal_name]][[day]][[paste(cell_name)]]
-odd.field = create.pf.df(f1, oc1, max.xy=nbins)
-even.field = create.pf.df(f2, oc2, max.xy=nbins)
+odd.field = create.pf.df(f1, oc1)
+even.field = create.pf.df(f2, oc2)
 
 oddeven.cor = field.cor(odd.field, even.field, make.cor.plot=TRUE, max.xy=nbins)
 cor.title = paste0('Odd vs Even cor=', format(oddeven.cor$cor, digits=2))
@@ -75,31 +75,12 @@ oddeven.cor$g + labs(title=cor.title, fill='Correlation')
 
 
 ```{r}
-create.partial.df = function(fieldList, occupancyList, animal_name, day, cell_name,
-                             group_name, max.zscore=0.0) {
-  field = fieldList[[animal_name]][[day]][[paste(cell_name)]]
-  if (is.null(field)) {
-    #print(paste('Field not found for', animal_name, day, cell_name))
-    return(data.frame())
-  }
-  df = create.pf.df(field,
-                    occupancyList[[animal_name]][[day]][[paste(cell_name)]])
-  df$group = group_name
-  return(df)
-}
-
 
 plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
-  
-  max.zscore = max(filter(odd.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max,
-                   filter(even.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max,
-                   filter(early.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max,
-                   filter(late.trials.si, animal==animal_name, date==day, cell_id==cell_name)$field.max)
-  
-  odd.pf = create.partial.df(odd.fields, odd.occupancies, animal_name, day, cell_name, 'Odd', max.zscore)
-  even.pf = create.partial.df(even.fields, even.occupancies, animal_name, day, cell_name, 'Even', max.zscore)
-  early.pf = create.partial.df(early.fields, early.occupancies, animal_name, day, cell_name, 'Early', max.zscore)
-  late.pf = create.partial.df(late.fields, late.occupancies,  animal_name, day, cell_name, 'Late', max.zscore)
+  odd.pf = create.partial.df(odd.fields, odd.occupancies, animal_name, day, cell_name, 'Odd')
+  even.pf = create.partial.df(even.fields, even.occupancies, animal_name, day, cell_name, 'Even')
+  early.pf = create.partial.df(early.fields, early.occupancies, animal_name, day, cell_name, 'Early')
+  late.pf = create.partial.df(late.fields, late.occupancies,  animal_name, day, cell_name, 'Late')
   
   cell.row = run.trials.pc %>% filter(animal==animal_name, date==day, cell_id==cell_name)
   
@@ -184,23 +165,20 @@ for (i in 1:nrow(tmp.df)) {
 
 Load the traces
 ```{r}
-animal_name = 'E-BL'
+animal_name = 'D-BR'
 exp_title='learning'
-day = '2019-08-31'
-cell_name = 15
-root_dir = '/home/prez/neurodata/cheeseboard-down/down_2/2019-08'
+day = '2019-07-30'
+root_dir = '/home/prez/neurodata/cheeseboard-down/down_2/2019-07'
 #cell_name = 47
 
 
 caimg_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered/')
 data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
 setorder(data.traces, trial_id, cell_id, timestamp)
-running.index = isRunning(data.traces, 2, 3, 500)
+running.index = isRunning(data.traces, 2, 4, 500)
 data.traces.run = data.traces[which(running.index), ]
-detect.events(data.traces.run)
-cell.df = data.traces.run[cell_id == cell_name & x >= 0 & y >= 0
-                          #& (atReward0 == 1 | atReward1 == 1)
-                          , ]
+detect.events(data.traces.run, deconv.threshold=0.2)
+
 ```
 
 ```{r}
@@ -242,7 +220,7 @@ plot.cell.trials = function(cell.df, trace.var='trace') {
   
   cell_info = pf$cell_info
   g = plot.pf(all.pf.df, max.x=nbins, max.y=nbins) +
-    #geom_rewards(rewards.df, animal_name, day) +
+    geom_rewards(rewards.df, animal_name, day, nbins) +
     facet_wrap(. ~  trial, ncol=3) +
     labs(fill=paste(trace.var, 'values'),
          title=paste0(format(day), ' ', animal_name, ' Cell ', cell_name, 
@@ -255,21 +233,35 @@ plot.cell.trials = function(cell.df, trace.var='trace') {
   
   print(pf$cell_info$spatial.information)
   print(pf$cell_info$mutual.info)
+  print(pf$cell_info$mfr)
   return(g)
 }
 
+cell_name = 71
+cell.df = data.traces.run[cell_id == cell_name & x >= 0 & y >= 0
+                          #& (atReward0 == 1 | atReward1 == 1)
+                          , ]
 binned.cell.df = bin.time.space(cell.df, 
                                 nbins.x = nbins,
                                 nbins.y = nbins,
-                                bin.quantile.fractions=c(0.9, 1.0),
+                                bin.quantile.fractions=c(0.2, 0.95, 1.0),
                                 binned.var='deconv_trace',
                                 timebin.dur.msec=200)
+plot.trace.events(binned.cell.df)
 plot.cell.trials(binned.cell.df, trace.var='deconv_trace')
+
+plot.trace.events(binned.cell.df) +
+  geom_rewards(rewards.df, animal_name, day, 100) +
+  facet_wrap(. ~ trial, nrow = 3)
+
+plot.trace.events(binned.cell.df) +
+  geom_rewards(rewards.df, animal_name, day, 100)
 ```
 
 # Changes in PF over days
 ```{r}
 #selected.days = c('2019-08-29', '2019-08-30', '2019-09-03', '2019-09-04', '2019-09-06','2019-09-07', '2019-09-08')
+all.days = place.cell.db$date %>% unique
 selected.days = format(all.days)
 
 create.selected.pf.df = function(animal_name, cell_name) {
@@ -326,7 +318,7 @@ plot.all.day.fields = function(animal_name, cell_id) {
     geom_rewards(filter(rewards.df, date %in% selected.days), animal_name) 
 }
 
-plot.all.day.fields('F-TL', 0)
+plot.all.day.fields('D-BR', 3)
 ```
 
 Save place fields for all days

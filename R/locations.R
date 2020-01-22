@@ -1,4 +1,5 @@
 library(dplyr)
+library(purrr)
 
 is.date <- function(x) !is.na(as.Date(x, '%Y-%m-%d'))
 
@@ -143,4 +144,62 @@ read_locations = function(root.data.dir) {
   merged.df$Animal = as.factor(merged.df$Animal)
   
   return(add_location_set(merged.df))
+}
+
+
+read.trials.meta = function(rootdirs) {
+  df = data.frame()
+  for (rootdir in rootdirs) {
+    habit.days = list.files(file.path(rootdir, 'habituation'))
+    habit.dates = as.Date(habit.days) %>% sort()
+    habit.df.parts = lapply(habit.days, function(.x) {
+      caiman.dir = file.path(rootdir, 'habituation', .x, 'caiman')
+      if (!file.exists(caiman.dir)) {
+        return(data.frame())
+      }
+      animal_names = list.files(caiman.dir)
+      df = data.frame(animal = animal_names)
+      df$date = .x
+      df$day_ordinal = which(habit.dates == .x)
+      df
+    })
+    habit.df = do.call('rbind', habit.df.parts)
+    habit.df$exp = 'habituation'
+    habit.df$location_set = 0
+    df = bind_rows(df, habit.df)
+    
+    rewards.df = read_locations(rootdir) 
+    
+    if (nrow(rewards.df) > 0) {
+      rewards.df = rewards.df %>% 
+        group_by(date, Animal) %>%
+        dplyr::arrange(is_test) %>%
+        top_n(1) %>%
+        ungroup()
+      #dplyr::filter(!is_test)
+      
+      rewards.df = rewards.df %>%
+        dplyr::rename('animal' = 'Animal') %>%
+        dplyr::select('animal', 'date', 'location_set') %>%
+        distinct()
+      
+      .dayorder = function(days) {
+        days = as.Date(unique(days)) %>% sort
+        map_int(days, ~ which(days == .x))
+      }
+      
+      learning.df = rewards.df %>% 
+        dplyr::group_by(animal, location_set) %>%
+        dplyr::mutate(day_ordinal = .dayorder(date),
+                      exp = 'learning')
+    }
+    
+    df = bind_rows(df, learning.df)
+  }
+  
+  df = mutate(df, day_desc = paste0(
+    ifelse(exp == 'habituation', exp, paste0(exp, location_set)), 
+    ' day#', 
+    day_ordinal))
+  df
 }

@@ -32,3 +32,6 @@ between days
 - `goal_mutual_info.Rmd`: Calculates mutual information between variables marking the presence at the goal and the cell activity.
 - `position_decoder.Rmd`: Bayes decoding of position given the cell activity.
 
+The notebooks use metadata files about the trials which can be downloaded with
+GDrive:
+`./download.sh filter_trials_meta.txt $EXP_MONTH`

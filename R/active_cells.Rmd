@@ -28,17 +28,6 @@ summarize = dplyr::summarize
 ```{r}
 root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
 
-list.subdir = function(subdir) {
-  learning_datestr = list.files(subdir)
-  sapply(learning_datestr, FUN=function(x) {paste(subdir, x, sep='/')}) %>% unname
-}
-
-get.subject.result.dirs = function(root_dir, subject) {
-  dated_dirs = c(list.subdir(paste(root_dir, 'habituation', sep='/')),
-                 list.subdir(paste(root_dir, 'learning', sep='/')))
-  sapply(dated_dirs, FUN=function(x) {paste0(x, '/caiman/', subject, '/filtered/')})
-}
-
 caimg_result_dirs = c(
   get.subject.result.dirs(root_dir, 'E-BL'),
   get.subject.result.dirs(root_dir, 'E-TR'),
@@ -55,20 +44,16 @@ gen_imgs_dir = '/tmp/'
 ```
 
 ```{r}
-source('trace_utils.R')
+library(datatrace)
 
 fr=20
 cell.trial.activity.df = data.frame()
 cell.day.activity.df = data.frame()
-for (ca_img_result_dir in caimg_result_dirs) {
-  print(paste('Processing dir: ', ca_img_result_dir))
-  cellmapping_file = paste0(ca_img_result_dir, 'cell_mapping.csv')
-  cellmapping.df = read.csv(cellmapping_file)
-  traces_file = paste0(ca_img_result_dir, 'traces_and_positions.csv')
-  data = fread(traces_file)
-  data.traces = melt.traces(data)
-  data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
-  dir_parts = str_split(ca_img_result_dir, '/')
+for (caimg_result_dir in caimg_result_dirs) {
+  data.traces = read.data.trace(caimg_result_dir)
+  data.traces = detect.events(data.traces)
+  
+  dir_parts = str_split(caimg_result_dir, '/')
   animal = dir_parts[[1]][length(dir_parts[[1]]) - 2]
   data.traces$animal = rep(animal, nrow(data.traces))
   data.traces = mutate(data.traces,
@@ -76,11 +61,11 @@ for (ca_img_result_dir in caimg_result_dirs) {
   #data.traces = zscore.traces(data.traces)
   trial.activity.df = data.traces %>%
     group_by(animal, date, exp_title, trial_id, trial_name, cell, cell_id) %>%
-    summarise(event.rate = sum(nevents) / n() * fr,
+    summarise(event.rate = sum(is.event) / n() * fr,
               deconv.mean = mean(deconv_trace))
   day.activity.df = data.traces %>%
     group_by(animal, date, exp_title, cell, cell_id) %>%
-    summarise(event.rate = sum(nevents) / n() * fr,
+    summarise(event.rate = sum(is.event) / n() * fr,
               deconv.mean = mean(deconv_trace))
   
   cell.trial.activity.df = bind_rows(cell.trial.activity.df, trial.activity.df)
@@ -273,7 +258,7 @@ active.day.df %>%
 Proportion of the same cells active between days
 ```{r}
 days = unique(active.day.df$date) %>% as.Date
-fst.learning.day = as.Date('2019-08-30')
+fst.learning.day = as.Date('2019-07-23')
 habituation.days = days[which(days < fst.learning.day)]
 learning.days = days[which(days >= fst.learning.day)]
 ndays = length(learning.days)
@@ -289,13 +274,15 @@ for (i in 1:ncol(day.comb)) {
                             date == learning.days[days[1]])$cell_id
       sndday.cells = filter(active.day.df, cell.active, animal_name == animal, 
                             date == learning.days[days[2]])$cell_id
-      new.row = data.frame(
+      new.row = list(
         animal=animal_name,
         day1=learning.days[days[1]],
         day2=learning.days[days[1]],
         days.diff = days[2] - days[1],
         overlap = length(intersect(fstday.cells, sndday.cells)) /
-                  length(union(fstday.cells, sndday.cells)) * 100)
+                  length(union(fstday.cells, sndday.cells)) * 100,
+        recall = length(intersect(fstday.cells, sndday.cells)) /
+                  length(fstday.cells) * 100)
       cell.overlap.df = bind_rows(cell.overlap.df, new.row)
   }
 }
@@ -305,24 +292,26 @@ for (i in 1:ncol(day.comb)) {
 summary.cell.overlap = cell.overlap.df %>%
   group_by(animal, days.diff) %>%
   dplyr::summarise(overlap.mean = mean(overlap),
-                   overlap.sem = sem(overlap))
+                   overlap.sem = sem(overlap),
+                   recall.mean = mean(recall),
+                   recall.sem = sem(recall))
 
 ggplot(data=summary.cell.overlap) +
-  geom_line(aes(x=days.diff, y=overlap.mean, group=animal, color=animal)) +
-  geom_ribbon(aes(x=days.diff, ymin=overlap.mean - overlap.sem, 
-                  ymax=overlap.mean + overlap.sem, group=animal, fill=animal), alpha=0.2) +
+  geom_line(aes(x=days.diff, y=recall.mean, group=animal, color=animal)) +
+  geom_ribbon(aes(x=days.diff, ymin=recall.mean - recall.sem, 
+                  ymax=recall.mean + recall.sem, group=animal, fill=animal), alpha=0.2) +
   #geom_point(data=cell.overlap.df, aes(x=days.diff, y=overlap, color=animal)) +
   gtheme +
-  ylab('Cell overlap (%)') +
+  ylab('Cell recall (%)') +
   xlab('Days apart') +
   scale_x_continuous(breaks=1:ndays, limits=c(1,ndays-1)) +
   ylim(c(0, 70))
 ```
 
-Total days a cell active during trial
+Total days a cell active
 ```{r}
 active.day.df %>%
-  filter(cell.active, exp_title=='trial', date >= fst.learning.day) %>%
+  filter(cell.active, date >= fst.learning.day) %>%
   group_by(animal, cell_id) %>%
   dplyr::summarise(ndays = n()) %>%
   arrange(desc(ndays)) %>%
@@ -334,13 +323,13 @@ active.day.df %>%
   xlab('Days active')
 ```
 
-Number of consecutive days a cell active during trial
+Number of consecutive days a cell active
 ```{r}
 source('utils.R')
 
 active.day.df$date = as.Date(active.day.df$date)
 ncons.days.df = active.day.df %>%
-  filter(exp_title=='trial', cell.active, date >= fst.learning.day) %>%
+  filter(cell.active, date >= fst.learning.day) %>%
   ddply(.(animal, cell_id), summarise, ncons=max.consecutive.days(date))
 
 ggplot(ncons.days.df) +
