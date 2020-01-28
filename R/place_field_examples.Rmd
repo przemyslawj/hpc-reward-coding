@@ -37,9 +37,11 @@ cell_name = 256
 
 
 ```{r}
-geom_rewards = function(rewards.df, subject, day=NULL, nbins=20) {
-  dayreward.df = filter(rewards.df,
-                        animal==subject)
+geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20) {
+  dayreward.df = rewards.df
+  if (!is.null(subject)) {
+    dayreward.df = filter(rewards.df, animal==subject)
+  }
   if (!is.null(day)) {
     dayreward.df = filter(dayreward.df, date==day)
   }
@@ -244,17 +246,17 @@ cell.df = data.traces.run[cell_id == cell_name & x >= 0 & y >= 0
 binned.cell.df = bin.time.space(cell.df, 
                                 nbins.x = nbins,
                                 nbins.y = nbins,
-                                bin.quantile.fractions=c(0.2, 0.95, 1.0),
+                                get.bin.thresholds.fun=get.quantiles.fun(c(0.2, 0.95, 1.0)),
                                 binned.var='deconv_trace',
                                 timebin.dur.msec=200)
-plot.trace.events(binned.cell.df)
+
 plot.cell.trials(binned.cell.df, trace.var='deconv_trace')
 
-plot.trace.events(binned.cell.df) +
+plot.trace.events(binned.cell.df, event.var=nevents, event.thr=1) +
   geom_rewards(rewards.df, animal_name, day, 100) +
   facet_wrap(. ~ trial, nrow = 3)
 
-plot.trace.events(binned.cell.df) +
+plot.trace.events(binned.cell.df, event.var=nevents, event.thr=1) +
   geom_rewards(rewards.df, animal_name, day, 100)
 ```
 
@@ -343,4 +345,88 @@ for (i in 1:nrow(animal.cells.df)) {
 }
 ```
 
+
+# Population activity across space
+```{r}
+animal_name = 'D-BR'
+exp_title='learning'
+day = '2019-07-30'
+root_dir = '/home/prez/neurodata/cheeseboard-down/down_2/2019-07'
+#cell_name = 47
+
+caimg_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered/')
+data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
+setorder(data.traces, trial_id, cell_id, timestamp)
+detect.events(data.traces, deconv.threshold=0.2)
+
+```
+
+```{r}
+binned.traces = bin.time.space(data.traces, 
+                               nbins.x = nbins,
+                               nbins.y = nbins,
+                               get.bin.thresholds.fun=get.quantiles.fun(c(0.2, 0.95, 1.0)),
+                               binned.var='deconv_trace',
+                               timebin.dur.msec=200)
+
+all.pf.df = data.frame()
+
+for (trial_no in unique(binned.traces$trial)) {
+  pf = cell.spatial.info(binned.traces[trial == trial_no, ],
+                         nbins, nbins,
+                         trace.var = 'deconv_trace',
+                         generate.plots=FALSE,
+                         nshuffles=0,
+                         min.occupancy = 1)
+  pf.df = create.pf.df(pf$field, pf$occupancy, 
+                       frame.rate=frame.rate,
+                       min.occupancy.sec = 0.1)
+  pf.df$trial = trial_no
+  all.pf.df = bind_rows(all.pf.df, pf.df)
+}
+plot.pf(all.pf.df, max.x=nbins, max.y=nbins) +
+  geom_rewards(rewards.df, animal_name, day, nbins) +
+  facet_wrap(. ~ trial)
+```
+
+# Population activity across days for all mice
+```{r}
+all.pf.df = data.frame()
+for (caimg_result_dir in caimg_result_dirs) {
+  data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
+  setorder(data.traces, trial_id, cell_id, timestamp)
+  
+  data.traces.immobile = data.traces[velocity <= 2.5, ]
+  #detect.events(data.traces, deconv.threshold=0.2)
+  data.traces.immobile$is.event = 0
+  binned.traces = bin.time.space(data.traces.immobile, 
+                                 nbins.x = nbins,
+                                 nbins.y = nbins,
+                                 get.bin.thresholds.fun=get.quantiles.fun(c(0.95, 1.0)),
+                                 timebin.dur.msec=200)
+  
+  pf = cell.spatial.info(binned.traces,
+                         nbins, nbins,
+                         trace.var = 'deconv_trace',
+                         generate.plots=FALSE,
+                         nshuffles=0,
+                         min.occupancy = 1)
+  pf.df = create.pf.df(pf$field, pf$occupancy, 
+                       frame.rate=5,
+                       min.occupancy.sec = 1)
+  pf.df$animal = data.traces$animal[1]
+  pf.df$date = data.traces$date[1]
+  all.pf.df = bind_rows(all.pf.df, pf.df)
+}
+```
+
+```{r}
+g = plot.pf(all.pf.df, max.x=nbins, max.y=nbins) +
+  geom_rewards(rewards.df, nbins=nbins) +
+  facet_wrap(date ~ animal) +
+  scale_fill_gradientn(limits=c(0, 0.6), colours=jet.colours(7))
+
+ggsave('/tmp/all_fields_immobile.png', g, width=20, height=20, units='cm')
+g
+```
 

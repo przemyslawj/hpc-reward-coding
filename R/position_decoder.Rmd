@@ -31,7 +31,7 @@ prepare.traces = function(data.traces,
   data.traces.filtered = data.traces.run
   binned.traces = bin.time.space(data.traces.filtered, 
                                  xybins, xybins,
-                                 quantile.fractions,
+                                 binning.fun=get.quantiles.fun(quantile.fractions),
                                  binned.var=binned.var,
                                  timebin.dur.msec=200)
   

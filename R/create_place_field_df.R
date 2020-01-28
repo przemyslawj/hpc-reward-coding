@@ -61,7 +61,7 @@ calc.spatial.info = function(data.traces, plot.dir='/tmp/pf_stability/',
   binned.data.traces = bin.time.space(data.traces[x >= 0 & y >= 0, ],
                                       nbins.x = nbins,
                                       nbins.y = nbins,
-                                      response.bin.quantiles,
+                                      get.bin.thresholds.fun = get.quantiles.fun(response.bin.quantiles),
                                       binned.var='trace',
                                       timebin.dur.msec=timebin.dur.msec)
   for (cell_name in cells) {

@@ -27,20 +27,25 @@ summarise = dplyr::summarise
 summarize = dplyr::summarize
 
 source('locations.R')
-source('place_field.R')
-source('trace_utils.R')
-
 ```
 
 ```{r data dirs setup}
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+nbins = 20
+
+root_dir07 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
+root_dir08 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+rootdirs = c(root_dir07, root_dir08)
 gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
 
 caimg_result_dirs = c(
-  get.subject.result.dirs(root_dir, 'E-BL'),
-  get.subject.result.dirs(root_dir, 'E-TR'),
-  get.subject.result.dirs(root_dir, 'F-BL'),
-  get.subject.result.dirs(root_dir, 'F-TL')
+  #get.subject.result.dirs(root_dir08, 'E-BL'),
+  #get.subject.result.dirs(root_dir08, 'E-TR'),
+  #get.subject.result.dirs(root_dir08, 'F-BL'),
+  #get.subject.result.dirs(root_dir08, 'F-TL'),
+  get.subject.result.dirs(root_dir07, 'A-BL'),
+  get.subject.result.dirs(root_dir07, 'B-BL'),
+  get.subject.result.dirs(root_dir07, 'C-1R'),
+  get.subject.result.dirs(root_dir07, 'D-BR')
 )
 
 caimg_result_dirs = Filter(
@@ -49,10 +54,19 @@ caimg_result_dirs = Filter(
 
 ```
 
+Read rewards locations
+```{r}
+all.locations.df = map_dfr(rootdirs, read_locations)
+rewards.df =  all.locations.df %>%
+  filter(!is_test) %>%
+  dplyr::rename(animal=Animal) %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
+```
+
+
 
 ```{r}
-Rcpp::sourceCpp('mutual_info.cpp')
-
 fr.hz = 20
 
 calc.reward.info = function(data.traces) {
@@ -60,35 +74,42 @@ calc.reward.info = function(data.traces) {
   data.traces = data.traces[x >= 0 & y >= 0, ]
   
   timebinned.traces = timebin.traces(data.traces, timebin.dur.msec = 200)
-  bin.quantile.fractions = c(0.2, 0.5, 0.8, 0.9, 0.95, 1.0)
-  binned.traces = bin.responses(timebinned.traces, bin.quantile.fractions, binned.var='trace')
-  binned.traces[,  atAnyReward := pmin(1, atReward0 + atReward1)]
+  bin.quantile.fractions = c(0.95, 1.0)
+  binned.traces = bin.responses(timebinned.traces, 
+                                get.bin.thresholds.fun = get.quantiles.fun(bin.quantile.fractions),
+                                binned.var='trace')
+  binned.traces[,  atAnyReward := ifelse(atReward0 + atReward1 > 0, 1, 0)]
+  binned.traces[, atReward0 := ceil(atReward0)]
+  binned.traces[, atReward1 := ceil(atReward1)]
   cells = unique(binned.traces$cell_id) %>% sort
   
   res = data.frame()
   for (cell_name in cells) {
     cell.df = binned.traces[cell_id == cell_name,]
-    trace.vals = cell.df[['trace']] %>% as.integer()
+    trace.vals = cell.df[['response_bin']] %>% as.integer()
     trial.ends = get.trial.ends(cell.df$timestamp)
     
     mi_anyreward = mutual_info_with_shuffles(
       trace.vals,
-      nresponseBins=2,
-      cell.df$atAnyReward, 
+      nresponseBins=length(bin.quantile.fractions),
+      cell.df$atAnyReward + 1, 
       nstim=2,
       trial.ends,
       nshuffles=100,
       shuffleChunkLength=2*fr.hz)
     mi_anyreward.signif.thresh = quantile(mi_anyreward$shuffle.mi, 0.95, na.rm=TRUE)[[1]]
+    anyreward.mfr_model = create_mfr_model(cell.df$atAnyReward + 1, 2, cell.df$nevents, minOccupancy=10)
     
     mi_onereward = mutual_info_with_shuffles(
       trace.vals,
-      cell.df$atReward0 + cell.df$atReward1 * 2,
+      cell.df$atReward0 + cell.df$atReward1 * 2 + 1,
       trial.ends,
-      nresponseBins=2,
+      nresponseBins=length(bin.quantile.fractions),
       nstim=3,
       nshuffles=100,
       shuffleChunkLength=2*fr.hz)
+    onereward.mfr_model = create_mfr_model(cell.df$atReward0 + cell.df$atReward1 * 2 + 1, 3, 
+                                           cell.df$nevents, minOccupancy=10)
     mi_onereward.signif.thresh = quantile(mi_onereward$shuffle.mi, 0.95, na.rm=TRUE)[[1]]
     
     cell_info = list(cell_id=cell_name,
@@ -98,15 +119,15 @@ calc.reward.info = function(data.traces) {
                      mi.anyrew.bias = mi_anyreward[['mutual.info.bias']],
                      mi.anyrew.signif.thresh = mi_anyreward.signif.thresh,
                      mi.anyrew.signif = mi_anyreward[['mutual.info']] > mi_anyreward.signif.thresh,
-                     mfr.norew = mi_anyreward[['field']][1],
-                     mfr.anyrew = mi_anyreward[['field']][2],
+                     mfr.norew = anyreward.mfr_model$fr[1],
+                     mfr.anyrew = anyreward.mfr_model$fr[2],
                      mi.onerew = mi_onereward[['mutual.info']],
                      mi.onerew.bias = mi_onereward[['mutual.info.bias']],
                      mi.onerew.signif.thresh = mi_onereward.signif.thresh,
                      mi.onerew.signif = mi_onereward[['mutual.info']] > mi_onereward.signif.thresh,
-                     mfr.rew0 = mi_onereward[['field']][2],
-                     mfr.rew1 = mi_onereward[['field']][3],
-                     mfr=mean(trace.vals))
+                     mfr.rew0 = onereward.mfr_model$fr[2],
+                     mfr.rew1 = onereward.mfr_model$fr[3],
+                     mfr=mean(cell.df$nevents))
     res = bind_rows(res, cell_info)
   }
   
@@ -132,19 +153,12 @@ for (ca_img_result_dir in caimg_result_dirs) {
   rewards.subset = filter(rewards.df, date==date_str, animal==animal_name)
   if (nrow(rewards.subset) > 0) {
     print(paste('Processing dir: ', ca_img_result_dir))
-    cellmapping_file = file.path(ca_img_result_dir, 'cell_mapping.csv')
-    cellmapping.df = read.csv(cellmapping_file)
-    traces_file = file.path(ca_img_result_dir, 'traces_and_positions.csv')
-    data = fread(traces_file)
-    data = data[exp_title == 'trial',]
-  
-    data.traces = melt.traces(data)
-    data.traces = left_join(data.traces, cellmapping.df, by=c('cell'='cell_no'))
-  
-    data.traces$animal = animal_name
+    data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
+    detect.events(data.traces, deconv.threshold=0.2)
     
     tic('Calculation of reward mutual information')
-    trial.reward.info = bind_rows(trial.reward.info, calc.reward.info(data.traces))
+    reward.info.df = calc.reward.info(data.traces)
+    trial.reward.info = bind_rows(trial.reward.info, reward.info.df)
     toc()
   }
 }

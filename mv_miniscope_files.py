@@ -19,6 +19,7 @@ make_dir(dest_dir)
 
 miniscope_subdirs = os.listdir(dated_dir)
 def scopedir2tuple(subdir):
+    subdir = subdir.replace('_','')
     digits = re.sub("[HMS]", ' ', subdir)
     return [int(x) for x in digits.strip().split(' ')]
 
