@@ -62,11 +62,11 @@ for session_i = 1:numel(session_info.session_fpaths)
 	trackingDir = fullfile(datedRootDir, exp_title, 'movie', 'tracking');
 	trackingFile = [ dateStr '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
 	trackingFilepath = [trackingDir filesep trackingFile]
-    if ~exist(trackingFilepath, 'file') && strcmp(exp_title, 'test')
-        trackingFile = [ dateStr '-test_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
+    if ~exist(trackingFilepath, 'file')
+        trackingFile = [ dateStr '-' exp_title '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
 	    trackingFilepath = [trackingDir filesep trackingFile]
     end
-    if 	~exist(trackingFilepath, 'file') && strcmp(exp_title, 'test')
+    if 	~exist(trackingFilepath, 'file')
         warning(['No tracking file for session: ', session_info.session_fpaths(session_i)])
 	end
     if strcmp(exp_title, 'homecage') || ...
