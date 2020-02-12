@@ -1,7 +1,12 @@
-expMonth = '2019-07';
-expDir = ['/home/prez/neurodata/cheeseboard-down/down_2/' expMonth];
-%expDir = ['/mnt/DATA/Prez/cheeseboard-down/down_2/' expMonth];
-animal = 'D-BR';
+%% Merges tracking and caimg traces produced by CaImAn.
+% The script requires that the variables: animal and expMonth are present in
+% the environment
+
+%animal = 'D-BR';
+%expMonth = '2020-01';
+%expDir = ['/home/prez/neurodata/cheeseboard-down/down_2/' expMonth];
+expDir = ['/mnt/DATA/Prez/cheeseboard/' expMonth];
+overwrite = 0;
 
 expTitles = {'habituation', 'learning'};
 for expTitle = expTitles
@@ -9,8 +14,13 @@ for expTitle = expTitles
     subdirs = dir(rootDir);
     for i = 1:numel(subdirs)
         dateStr = subdirs(i).name;
+
         if startsWith(dateStr, expMonth(1:2))
-            loadCaimanTrial
+            result_fpath = fullfile(rootDir, dateStr, 'caiman', animal, ...
+                                    'filtered', 'traces_and_positions.csv');
+			if overwrite || ~isfile(result_fpath)
+				loadCaimanTrial
+			end
         end
     end
 

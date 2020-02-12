@@ -35,6 +35,14 @@ if numel(ms.time) > size(ms.RawTraces, 1)
 end
 ts = ms.time;
 
+%size_diff = size(ms.RawTraces, 1) - numel(ts);
+%if size_diff > 0
+%	avg_timestamp = floor(mean(diff(ts)));
+%	last_ts = ts(numel(ts)) + avg_timestamp;
+%	missing_ts = linspace(last_ts, size_diff*avg_timestamp, size_diff);
+%	ts = [ts missing_ts];
+%	warning('Too few timestamps, approximating timestamp based on frame rate')
+%end
 timestampsBySession = mat2cell(ts', sessionLengths', 1);
 
 %% Load session info
@@ -48,7 +56,7 @@ allData = [];
 trackingVars = {'inside_roi', 'smooth_trans_x', 'smooth_trans_y',...
                 'velocity', 'dist_reward0', 'dist_reward1', ...
                 'atReward0', 'atReward1', 'arrivedAtReward', ...
-				'smooth_heading_angle'};
+				'smooth_heading_angle', 'is_headdip'};
 
 for session_i = 1:numel(session_info.session_fpaths)
     session_fpath_parts = split(session_info.session_fpaths{session_i}, filesep);
@@ -67,7 +75,7 @@ for session_i = 1:numel(session_info.session_fpaths)
 	    trackingFilepath = [trackingDir filesep trackingFile]
     end
     if 	~exist(trackingFilepath, 'file')
-        warning(['No tracking file for session: ', session_info.session_fpaths(session_i)])
+        warning('No tracking file for session: %s', session_info.session_fpaths{session_i})
 	end
     if strcmp(exp_title, 'homecage') || ...
            ~exist(trackingFilepath, 'file')
@@ -78,6 +86,8 @@ for session_i = 1:numel(session_info.session_fpaths)
     else
         opts = detectImportOptions(trackingFilepath);
         index = find(cellfun(@(x) strcmp(x, 'inside_roi'), opts.VariableNames, 'UniformOutput', 1));
+        opts.VariableTypes(index) = { 'logical' };
+        index = find(cellfun(@(x) strcmp(x, 'is_headdip'), opts.VariableNames, 'UniformOutput', 1));
         opts.VariableTypes(index) = { 'logical' };
 
         trialPositions = readtable(trackingFilepath, opts);

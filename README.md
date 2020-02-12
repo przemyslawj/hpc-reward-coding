@@ -9,10 +9,11 @@ Enter your data directory and copy there scripts for downloading the traces:
 Set `EXP_MONTH` variable, for example:
 `export EXP_MONTH=2019-08`
 
-2. Download traces with filtered components if not there already`./download_down2.sh filter_csv_traces.txt $EXP_MONTH`
+2. Download traces with filtered components if not there already:
+`./download_down2.sh filter_msresults.txt $EXP_MONTH`
 
 3. Download tracking csv files:
-`./download_tracking_csv.sh filter_csv_traces.txt $EXP_MONTH`
+`./download_tracking_csv.sh $EXP_MONTH`
 
 3. Prepare `session_info.yaml` files
 `./yaml2json.sh`
