@@ -9,18 +9,26 @@ assert(size(trace, 2) == ntimestamps);
 
 
 function avg = weightedAvg(datatable, indecies, colName, weights)
-    values = datatable{indecies, colName};
-    if values(1) <= 0
-        avg = values(2);
+    if ismember(colName, datatable.Properties.VariableNames)
+        values = datatable{indecies, colName};
+        if values(1) <= 0
+            avg = values(2);
+        else
+            avg = double(weights) * values / sum(weights);
+        end
     else
-        avg = double(weights) * values / sum(weights);
+        avg = 0;
     end
 end
 
 function val = closerVal(datatable, indecies, colName, time_diff)
-    [~, I] = min(time_diff);
-    values = datatable{indecies, colName};
-    val = values(I);
+    if ismember(colName, datatable.Properties.VariableNames)
+        [~, I] = min(time_diff);
+        values = datatable{indecies, colName};
+        val = values(I);
+    else
+        val = 0;
+    end
 end
 
 
