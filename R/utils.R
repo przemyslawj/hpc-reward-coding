@@ -14,6 +14,14 @@ get.subject.result.dirs = function(root_dir, subject) {
   sapply(dated_dirs, FUN=function(x) {paste0(x, '/caiman/', subject, '/filtered/')})
 }
 
+find.caimg.dir = function(caimg_result_dirs, subject, date) {
+  Filter(
+    function(caimg_dir) {
+      grepl(paste0(.Platform$file.sep, subject, .Platform$file.sep), caimg_dir) &&
+        grepl(paste0(.Platform$file.sep, date, .Platform$file.sep), caimg_dir)
+    },
+    caimg_result_dirs)  
+}
 
 max.consecutive.days = function(dates) {
   ordered.dates = ordered(dates) %>% as.Date

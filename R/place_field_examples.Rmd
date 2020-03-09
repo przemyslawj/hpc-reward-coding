@@ -57,6 +57,13 @@ geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20) {
              stroke=2,
              alpha=0.8)
 }
+
+all.locations.df = map_dfr(rootdirs, read_locations)
+rewards.df =  all.locations.df %>%
+  filter(!is_test) %>%
+  dplyr::rename(animal=Animal) %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
 ```
 
 ```{r}
@@ -169,17 +176,18 @@ Load the traces
 ```{r}
 animal_name = 'D-BR'
 exp_title='learning'
-day = '2019-07-30'
-root_dir = '/home/prez/neurodata/cheeseboard-down/down_2/2019-07'
+day = '2019-07-28'
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
 #cell_name = 47
 
 
 caimg_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered/')
 data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
 setorder(data.traces, trial_id, cell_id, timestamp)
-running.index = isRunning(data.traces, 2, 4, 500)
-data.traces.run = data.traces[which(running.index), ]
-detect.events(data.traces.run, deconv.threshold=0.2)
+data.traces$is_running = isRunning(data.traces, 2, 4, 500)
+data.traces = as.data.table(data.traces)
+data.traces.run = data.traces[(is_running), ]
+detect.events(data.traces.run, deconv.threshold=0.3)
 
 ```
 
@@ -239,20 +247,20 @@ plot.cell.trials = function(cell.df, trace.var='trace') {
   return(g)
 }
 
-cell_name = 71
-cell.df = data.traces.run[cell_id == cell_name & x >= 0 & y >= 0
-                          #& (atReward0 == 1 | atReward1 == 1)
-                          , ]
+cell_name = 34
+cell.df = data.traces.run[cell_id == cell_name & x >= 0 & y >= 0, ]
 binned.cell.df = bin.time.space(cell.df, 
                                 nbins.x = nbins,
                                 nbins.y = nbins,
                                 get.bin.thresholds.fun=get.quantiles.fun(c(0.2, 0.95, 1.0)),
                                 binned.var='deconv_trace',
                                 timebin.dur.msec=200)
+binned.cell.df[,is_running:=as.logical(is_running)]
 
 plot.cell.trials(binned.cell.df, trace.var='deconv_trace')
 
-plot.trace.events(binned.cell.df, event.var=nevents, event.thr=1) +
+plot.event.vectors(binned.cell.df, event.var=nevents, event.thr=1) +
+  geom_path(data=binned.cell.df, mapping=aes(x=x,y=100-y,group=trial_id), alpha=0.6) +
   geom_rewards(rewards.df, animal_name, day, 100) +
   facet_wrap(. ~ trial, nrow = 3)
 
@@ -263,12 +271,18 @@ plot.trace.events(binned.cell.df, event.var=nevents, event.thr=1) +
 # Changes in PF over days
 ```{r}
 #selected.days = c('2019-08-29', '2019-08-30', '2019-09-03', '2019-09-04', '2019-09-06','2019-09-07', '2019-09-08')
-all.days = place.cell.db$date %>% unique
-selected.days = format(all.days)
+#all.days = place.cell.db$date %>% unique
+#all.days = goal.cell.db$day_desc %>% unique
+#selected.days = format(all.days)
 
+trials.meta.df = data.table(trials.meta.df)
 create.selected.pf.df = function(animal_name, cell_name) {
-  ndays = length(selected.days)
-  data.frame(animal=rep(animal_name, ndays), cell_id=rep(format(cell_name), ndays), day=selected.days)  
+  selected.days = names(run.fields[[animal_name]])
+  day_descs = map_chr(selected.days, ~ trials.meta.df[date==.x & animal == animal_name, day_desc][1])
+  data.frame(animal=animal_name,
+             cell_id=format(cell_name),
+             day=selected.days,
+             day_desc = day_descs)  
 }
 
 rowwise.partial.df = function(row) {
@@ -315,9 +329,9 @@ plot.all.day.fields = function(animal_name, cell_id) {
     dplyr::rename(date=day)
   
   plot.pf(pf, max.x=nbins, max.y=nbins) +
-    facet_wrap(. ~ date, ncol=3) +
+    facet_wrap(. ~ day_desc, ncol=3) +
     geom_text(data=cell.desc.df, mapping=aes(x=1, y=nbins - 2, label=desc), size=3, hjust=0)+
-    geom_rewards(filter(rewards.df, date %in% selected.days), animal_name) 
+    geom_rewards(rewards.df, animal_name) 
 }
 
 plot.all.day.fields('D-BR', 3)
@@ -341,17 +355,72 @@ for (i in 1:nrow(animal.cells.df)) {
     dir.create(plot.dir, recursive=TRUE)
   }
   ggsave(file.path(plot.dir, paste0(row$cell_id, '.jpg')),
-         g, width=10, height=10, units='cm')
+         g, width=10, height=12, units='cm')
+}
+```
+
+## Plot event vectors
+```{r}
+animal_name = 'F-TL'
+exp_title = 'beforetest'
+
+animal.caimg_dirs = Filter(
+  function(caimg_dir) {
+    str_detect(caimg_dir, animal_name) & str_detect(caimg_dir, 'learning')
+  },
+  caimg_result_dirs)
+
+paths.df = data.frame()
+binned.events = data.frame()
+for (caimg_dir in animal.caimg_dirs) {
+  data.traces = read.data.trace(caimg_dir, filter_exp_title=exp_title)
+  if (nrow(data.traces) > 0) {
+    setorder(data.traces, trial_id, cell_id, timestamp)
+    detect.events(data.traces, deconv.threshold=0.3, minpeakdistance=10)
+    data.traces$is_running = as.logical(isRunning(data.traces, 2, 4, 500))
+    binned.traces = bin.time.space(data.traces, 
+                                   nbins.x = nbins,
+                                   nbins.y = nbins,
+                                   get.bin.thresholds.fun=get.quantiles.fun(c(0.2, 0.95, 1.0)),
+                                   binned.var='deconv_trace',
+                                   timebin.dur.msec=200)
+    
+    binned.events = bind_rows(binned.events, binned.traces[nevents >= 0.2, ])
+    
+    cell_name = binned.traces$cell_id[1]
+    paths.df = bind_rows(paths.df, binned.traces[cell_id==cell_name, ])
+  }
+}
+```
+
+```{r}
+binned.events = left_join(binned.events, trials.meta.df)
+paths.df = left_join(paths.df, trials.meta.df)
+
+binned.events = data.table(binned.events)
+paths.df = data.table(paths.df)
+plot.dir = file.path('/mnt/DATA/Prez/cheeseboard-events', animal_name, exp_title)
+if (!file.exists(plot.dir)) {
+  dir.create(plot.dir, recursive=TRUE)
+}
+for (cell_name in unique(binned.events$cell_id)) {
+  cell.events.df = binned.events[cell_id==cell_name, ]
+  g = plot.event.vectors(cell.events.df) +
+    geom_path(data=paths.df, mapping=aes(x=x, y=100-y, group=trial_id), alpha=0.2) +
+    geom_rewards(rewards.df, animal_name, nbins=100) +
+    facet_wrap(day_desc ~ .)
+  ggsave(file.path(plot.dir, paste0(cell_name, '.jpg')),
+       g, width=16, height=13, units='cm')
 }
 ```
 
 
 # Population activity across space
 ```{r}
-animal_name = 'D-BR'
+animal_name = 'G-BR'
 exp_title='learning'
-day = '2019-07-30'
-root_dir = '/home/prez/neurodata/cheeseboard-down/down_2/2019-07'
+day = '2020-01-31'
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01'
 #cell_name = 47
 
 caimg_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered/')
@@ -424,7 +493,7 @@ for (caimg_result_dir in caimg_result_dirs) {
 g = plot.pf(all.pf.df, max.x=nbins, max.y=nbins) +
   geom_rewards(rewards.df, nbins=nbins) +
   facet_wrap(date ~ animal) +
-  scale_fill_gradientn(limits=c(0, 0.6), colours=jet.colours(7))
+  scale_fill_gradientn(limits=c(0, 0.3), colours=jet.colours(7))
 
 ggsave('/tmp/all_fields_immobile.png', g, width=20, height=20, units='cm')
 g

@@ -17,9 +17,11 @@ add_location_set = function(merged.df) {
   
   # Add location_set column 
   merged.df$location_set = rep(0, nrow(merged.df))
-  for (animal in levels(merged.df$Animal)) {
-    animal.locations = filter(merged.df, Animal == animal) %>% 
-      arrange(date, desc(is_test))
+  merged.df$exp_title = factor(merged.df$exp_title,
+                               levels=c('beforetest', 'trial', 'aftertest'))
+  for (animal in levels(merged.df$animal)) {
+    animal.locations = filter(merged.df, animal == animal) %>% 
+      arrange(date, exp_title)
     location_set = 0
     animal_locs = c()
     prev_locs = c()
@@ -49,30 +51,40 @@ add_location_set = function(merged.df) {
   
   # Make location set consistent in one day: if one reward changed then update
   # the location set for all rewards
-  result.df = ddply(result.df, .(Animal, date, is_test), mutate,
+  result.df = ddply(result.df, .(animal, date, exp_title, is_test), mutate,
                     location_set = max(location_set)) %>%
-    arrange(Animal, date, desc(is_test))
+    arrange(animal, date, exp_title)
   return(result.df)
 }
 
 
-add_prev_locations = function(locations.df) {
-  locations.df = mutate(locations.df, prev_loc_set = location_set - 1,
-                        current_loc = TRUE, previous_loc = FALSE) %>%
-                 group_by(Animal, date, Valence, is_test) %>%
-                 mutate(position_no = row_number())
-  set.locations.df = group_by(locations.df, Animal, is_test, location_set, Valence, position_no) %>%
+add_prev_locations = function(locations.df, prev.loc.set.diff=1) {
+  locations.df = locations.df %>%
+    dplyr::mutate(prev_loc_set = location_set - prev.loc.set.diff) %>%
+    dplyr::group_by(animal, date, Valence, is_test) %>%
+    dplyr::mutate(position_no = row_number())
+  
+  if (!('current_loc' %in% colnames(locations.df))) {
+    locations.df$current_loc = TRUE
+    locations.df$previous_loc = FALSE
+  }
+  
+  set.locations.df = filter(locations.df, current_loc) %>%
+    group_by(animal, is_test, location_set, Valence, position_no) %>%
     slice(1) %>%
     select(-date, -prev_loc_set) %>%
-    mutate(current_loc = FALSE, previous_loc = TRUE)
+    #select(location_set, animal, is_test, Valence, position_no, -prev_loc_set) %>%
+    dplyr::mutate(current_loc = FALSE, previous_loc = TRUE)
   
-  previous.locations.df = select(locations.df, date, location_set, prev_loc_set, Animal, is_test, Valence, position_no) %>%
+  previous.locations.df = filter(locations.df, current_loc) %>%
+    select(date, location_set, prev_loc_set, animal, is_test, Valence, position_no) %>%
     left_join(set.locations.df, by=c('prev_loc_set'='location_set',
-                                     'Animal'='Animal', 'is_test'='is_test',
+                                     'animal'='animal', 'is_test'='is_test',
                                      'Valence'='Valence', 'position_no'='position_no')) %>%
     filter(prev_loc_set > 0)
   
-  joined.locations.df = bind_rows(locations.df, previous.locations.df)
+  joined.locations.df = bind_rows(locations.df, previous.locations.df) %>%
+    dplyr::distinct(animal, date, is_test, Valence, location_set, location_ordinal, .keep_all=TRUE)
   return (joined.locations.df)
 }
 
@@ -80,22 +92,22 @@ add_future_neg_locations = function(locations.df) {
   locations.df = mutate(locations.df, future_loc = FALSE)
   # Negative locations for each set
   set.locations.df = filter(locations.df, Valence == 'Negative', current_loc == TRUE) %>%
-    group_by(Animal, is_test, location_set, position_no) %>%
+    group_by(animal, is_test, location_set, position_no) %>%
     slice(1) %>%
     select(-date, -prev_loc_set) %>%
     rename(next_location_set = location_set) %>%
     mutate(future_loc = TRUE, current_loc = FALSE)
   
-  next.locations.df = select(locations.df, date, location_set, prev_loc_set, Animal, is_test, Valence, position_no) %>%
+  next.locations.df = select(locations.df, date, location_set, prev_loc_set, animal, is_test, Valence, position_no) %>%
     left_join(set.locations.df, by=c('location_set'='next_location_set',
-                                     'Animal'='Animal', 'is_test'='is_test',
+                                     'animal'='animal', 'is_test'='is_test',
                                      'position_no'='position_no'),
               suffix=c('.x', '')) %>%
-    group_by(Animal, date, is_test, location_set) %>% 
+    group_by(animal, date, is_test, location_set) %>% 
     slice(1)
   
   joined.locations.df = bind_rows(locations.df, next.locations.df) %>%
-    group_by(Animal, date, is_test, location_set, Valence, position_no, previous_loc) %>%
+    group_by(animal, date, is_test, location_set, Valence, position_no, previous_loc) %>%
     arrange(future_loc) %>%
     slice(1) %>%
     select(-Valence.x)
@@ -123,12 +135,13 @@ read_locations = function(root.data.dir) {
           is_test = TRUE
         }
         if (is.date(date_str)) {
-          print(paste('Reading locations from: ', dated_dir))
           fpath = file.path(exp_titledir, 'locations.csv')
+          #print(paste('Reading locations from: ', fpath))
           if (file.exists(fpath)) {
             locations.df = read.csv(fpath, stringsAsFactors=TRUE)
             locations.df$date = rep(date_str, nrow(locations.df))
             locations.df$is_test = rep(is_test, nrow(locations.df))
+            locations.df$exp_title = basename(exp_titledir)
             locations.df.pos = left_join(locations.df, cheeseboard.map, by=c("Well_row"="Row_X", "Well_col"="Row_Y"))
             merged.df = bind_rows(merged.df, locations.df.pos)
           }
@@ -140,10 +153,11 @@ read_locations = function(root.data.dir) {
   if (nrow(merged.df) == 0) {
     return(merged.df)
   }
+  merged.df = dplyr::rename(merged.df, animal=Animal)
+  merged.df$animal = as.factor(merged.df$animal)
+  result = add_location_set(merged.df)
   
-  merged.df$Animal = as.factor(merged.df$Animal)
-  
-  return(add_location_set(merged.df))
+  dplyr::distinct(result, animal, Valence, date, is_test, location_set, location_ordinal, .keep_all=TRUE)
 }
 
 
@@ -172,14 +186,14 @@ read.trials.meta = function(rootdirs) {
     
     if (nrow(rewards.df) > 0) {
       rewards.df = rewards.df %>% 
-        group_by(date, Animal) %>%
+        group_by(date, animal) %>%
         dplyr::arrange(is_test) %>%
         top_n(1) %>%
         ungroup()
       #dplyr::filter(!is_test)
       
       rewards.df = rewards.df %>%
-        dplyr::rename('animal' = 'Animal') %>%
+        dplyr::rename('animal' = 'animal') %>%
         dplyr::select('animal', 'date', 'location_set') %>%
         distinct()
       

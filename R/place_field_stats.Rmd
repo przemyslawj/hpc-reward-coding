@@ -3,6 +3,10 @@ title: "R Notebook"
 output: html_notebook
 ---
 
+```{r}
+library(permute)
+```
+
 The code assumes data frames with place fields information are loaded in the environment.
 
 Prepare data frames
@@ -23,7 +27,9 @@ summary(run.trials.si$mutual.info - run.trials.si$mutual.info.bias)
 
 ```{r}
 run.trials.si %>%
-  dplyr::summarise(pct.mi.signif=sum(signif.mi, na.rm = TRUE)/n()*100)
+  ungroup() %>%
+  dplyr::summarise(pct.mi.signif=sum(signif.mi, na.rm = TRUE)/n()*100,
+                   pct.si.signif=sum(signif.si, na.rm = TRUE)/n()*100,)
 ```
 
 Distribution of mutual information
@@ -38,41 +44,23 @@ run.trials.si %>%
 Pct of significant place cells
 ```{r}
 run.trials.si %>%
-  group_by(date, day_desc, animal) %>%
+  group_by(date, day_desc, implant, animal) %>%
   dplyr::summarise(pct.mi.signif=sum(signif.mi, na.rm=TRUE)/n()*100,
                    pct.si.signif=sum(signif.si, na.rm=TRUE)/n()*100) %>%
-  ggplot() +
-  geom_point(aes(x=day_desc, y=pct.mi.signif, colour='MI')) +
-  geom_point(aes(x=day_desc, y=pct.si.signif, colour='SI')) +
+  ggplot(aes(x=day_desc)) +
+  geom_point(aes(y=pct.mi.signif, colour='Mutual Info')) +
+  geom_point(aes(y=pct.si.signif, colour='Spatial Info')) +
   gtheme +
+  geom_hline(yintercept=25, linetype='dashed') +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  ylab('Significant information cells (%)')
+  facet_grid(implant ~ .) +
+  ylab('Significant spatial cells (%)')
 ```
 Increase in mutual information due to higher spatial specificity or due to lower sampling of space.
 Explanations not satisfied:
 - a higher proportion o place cells
 - the number of active cells did not increase?
 
-```{r}
-run.trials.si %>%
-  #mutate(is.active=(quantile99 - quantile20) > 0) %>%
-  mutate(is.active=1) %>%
-  group_by(date, day_desc, animal) %>%
-  dplyr::summarise(nactive=sum(is.active), n=n()) %>%
-  dplyr::arrange(date) %>%
-  ddply(.(animal), mutate, active.ratio=nactive/max(nactive)) %>% 
-  select(date, day_desc, animal, active.ratio) %>%
-  ggplot() +
-  geom_jitter(aes(x=day_desc, y=active.ratio, color=animal), height=0, width=0.1) +
-  geom_hline(yintercept=1, linetype='dashed') +
-  gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  labs(x='', y='Active cells\nratio of maximum')
-
-ggsave('/tmp/active_cells_ratio.svg', 
-       units = 'cm', width=15, height=10)
-  
-```
 
 Place cells have not necessairly sparser fields than non-place cells
 ```{r}
@@ -103,6 +91,14 @@ run.trials.si = run.trials.si %>%
 ```
 
 ```{r classify place cells}
+sample.by.animal = function(df, nsamples=50, other.cols=c('date.fst', 'date.snd')) {
+  #group_by(df, animal, date.fst, date.snd) %>%
+  cols = c('animal', other.cols)
+  group_by_at(df, dplyr::vars(cols)) %>%
+    sample_n(nsamples, replace = TRUE) %>%
+    ungroup()
+}
+
 mi.thresh = 0.0
 #field.size.thresh.50 = 5
 field.size.thresh.50 = 100
@@ -130,13 +126,20 @@ run.trials.pc = run.trials.si %>%
                                field.mean, early.late.cor))
 
 place.cell.db = run.trials.pc %>%
-  select(date, animal, cell_id, implant, is.pc, 
+  select(date, day_desc, exp, animal, cell_id, implant, is.pc, 
          spatial.information, mutual.info, mutual.info.bias, 
          sparsity, field.size.50, field.size.25,
-         early.late.cor) %>%
+         early.late.cor, signif.mi, signif.si) %>%
   ungroup()
 
-place.cell.db %>% group_by(implant) %>% dplyr::summarise(pct.pc=sum(is.pc)/n() * 100)
+place.cell.db %>% group_by(implant, animal, exp) %>% 
+  dplyr::summarise(pc.pct=sum(is.pc)/n() * 100,
+                   si.signif.pct=sum(signif.si)/n() * 100) %>%
+  group_by(implant, exp) %>%
+  dplyr::summarise(mean(pc.pct),
+                   sem(pc.pct),
+                   mean(si.signif.pct),
+                   sem(si.signif.pct))
 ```
 
 Sparsity of the selected cells
@@ -163,22 +166,63 @@ run.trials.pc %>%
 ## How many place cells per day
 ```{r}
 run.trials.pc %>%
-  group_by(date, animal) %>%
-  dplyr::summarise(pc.pct = sum(is.pc) / n() * 100) %>% 
+  group_by(date, animal, implant) %>%
+  dplyr::summarise(pc.pct = sum(signif.si) / n() * 100) %>% 
   ggplot() +
-  geom_line(aes(x=date, y=pc.pct, group=animal, color=animal)) +
+  geom_line(aes(x=date, y=pc.pct, group=animal, color=animal, linetype=implant)) +
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   xlab('Date') + 
   ylab('Place cells (%)')
 ```
+```{r}
+run.trials.pc %>%
+  filter(exp=='learning', day_desc != 'learning3 day#3') %>%
+  sample.by.animal(n=50, other.cols = c('day_desc')) %>%
+  group_by(animal, implant, day_desc) %>%
+  dplyr::summarise(pc.pct=mean(is.pc),
+                   pc.sem=sem(is.pc),
+                   signif.pct=mean(signif.si)) %>%
+  ggplot(aes(x=day_desc, y=pc.pct, group=implant, color=implant)) +
+  geom_point(position=position_dodge(width=0.5)) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab('Date') + 
+  ylab('Place cells (%)')
+```
+
+
+Comparison dCA1 vs vCA1
+```{r}
+run.trials.pc %>%
+  group_by(exp, implant, day_desc, animal) %>%
+  dplyr::summarise(pc.pct = sum(is.pc) / n() * 100) %>%
+  group_by(exp, implant) %>%
+  dplyr::summarise(med.pct = median(pc.pct),
+                   sem.pct = sem(pc.pct))
+
+
+run.trials.pc %>%
+  group_by(exp, implant, day_desc, animal) %>%
+  dplyr::summarise(pc.pct = sum(is.pc) / n() * 100) %>%
+  ggplot(aes(x=implant, y=pc.pct)) +
+  geom_point(aes(color=animal)) +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  facet_grid(exp ~ .)
+```
+
+
 ## Place field size and sparsity dCA1 vs vCA1
 Sparsity not different between vCA1 and dCA1, possibly larger fields in vCA1
 ```{r}
-plot.pc.stat = function(metric) {
+cheeseboard.bin.cm = 9
+
+plot.pc.stat = function(metric, exp_name='habituation') {
   metric = enquo(metric)
   place.cell.db %>%
     filter(is.pc) %>%
+    left_join(trials.meta.df) %>%
+    filter(exp==exp_name) %>%
     group_by(date,animal) %>%
     sample_n(50, replace=TRUE) %>%
     ungroup() %>%
@@ -189,10 +233,13 @@ plot.pc.stat = function(metric) {
 }
 
 plot_grid(
-  plot.pc.stat(field.size.25) + ylim(c(1,10)),
-  plot.pc.stat(sparsity) + ylim(c(1,12)),
-  plot.pc.stat(mutual.info - mutual.info.bias),
-  plot.pc.stat(spatial.information),
+  plot.pc.stat(field.size.25 / nbins / nbins * 100) +
+    ylab('Field size (% of cheeseboard)')  + ylim(c(0,7)),
+  plot.pc.stat(sparsity) + ylim(c(1,12)) +
+    ylab('Sparsity'),
+  plot.pc.stat(mutual.info - mutual.info.bias) +
+    ylab('Mutual Info (bias subtracted)'),
+  plot.pc.stat(spatial.information) + ylab('Spatial Info\n(bits / unit fluorescence change)'),
   nrow = 1)
 ```
 
@@ -203,7 +250,6 @@ Load reward locations
 all.locations.df = map_dfr(rootdirs, read_locations)
 rewards.df =  all.locations.df %>%
   filter(!is_test) %>%
-  dplyr::rename(animal=Animal) %>%
   left_join(mouse.meta.df, by='animal') %>% 
   left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
   
@@ -216,67 +262,80 @@ setkey(locations.df, date, animal)
 
 test.rewards.df = all.locations.df %>%
   filter(is_test) %>%
-  dplyr::rename(animal=Animal) %>%
   left_join(mouse.meta.df, by='animal') %>% 
-  left_join(select(trials.meta.df, -location_set), by=c('date', 'animal'))
+  left_join(select(trials.meta.df, -location_set), by=c('date', 'animal')) %>%
+  replace_na(list(exp_title = 'beforetest'))
 ```
 Distance of place fields to goal
 ```{r}
-rewards.df = data.table(rewards.df)
-test.rewards.df = data.table(test.rewards.df)
 
 calc.min.rew.dist = function(rew.df, day, animal_name, field.x, field.y) {
+  rew.df = as.data.table(rew.df)
   rews = rew.df[date==format(day) & animal == animal_name, ]
-  if (nrow(rews)==0) {
-    return(list(location.ordinal=0, rew.dist=100))
+  if (nrow(rews)==0 | length(field.x) == 0) {
+    return(list(location.ordinal=0, rew.dist=NA))
   }
-  dist1 = norm2(rews$trans_x[1] - field.x, rews$trans_y[1] - field.y)
-  dist2 = norm2(rews$trans_x[2] - field.x, rews$trans_y[2] - field.y)
-  min.i = which.min(c(dist1, dist2))
+  dist.vals = c()
+  for (rew_i in 1:nrow(rews)) {
+    dist.vals = cbind(
+      dist.vals,
+      norm2(rews$trans_x[rew_i] - field.x, rews$trans_y[rew_i] - field.y))
+  }
+  
+  min.i = apply(dist.vals, 1, which.min)
+  min.dist = apply(dist.vals, 1, min)
   return(list(location.ordinal=rews$location_ordinal[min.i],
-              rew.dist=ifelse(min.i==1, dist1, dist2)))
+              rew.dist=min.dist))
 }
 
 merged.run.trials.pc = left_join(run.trials.pc, locations.df, by=c('animal', 'date'))
 
-goal.cell.max.dist = 10
+goal.cell.max.dist = 15
 pc.rew.dist.df = merged.run.trials.pc %>%
-  #filter(!is.na(location_set), is.pc) %>%
-  ddply(.(date, day_desc, animal, cell_id), mutate, 
-        #min.rew.dist=calc.min.rew.dist(date[1], animal[1], field.centre.x[1], field.centre.y[1]))
-        closest.location.ordinal=calc.min.rew.dist(rewards.df, date[1], animal[1], field.max.x[1], field.max.y[1])$location.ordinal,
-        min.rew.dist=calc.min.rew.dist(rewards.df, date[1], animal[1], field.max.x[1], field.max.y[1])$rew.dist) %>%
-  mutate(is.goal.cell = is.pc & (min.rew.dist <= goal.cell.max.dist)) %>%
+  dplyr::group_by(date, day_desc, animal) %>%
+  dplyr::mutate(
+        closest.location.ordinal=calc.min.rew.dist(rewards.df, date[1], animal[1], field.max.x, field.max.y)$location.ordinal,
+        min.rew.dist=calc.min.rew.dist(rewards.df, date[1], animal[1], field.max.x, field.max.y)$rew.dist) %>%
+  dplyr::mutate(is.goal.cell = signif.si & (min.rew.dist <= goal.cell.max.dist)) %>%
   replace_na(is.goal.cell=FALSE)
 
 pc.rew.dist.df %>%
   filter(exp != 'habituation') %>%
-  ggplot() +
-  geom_violin(aes(x=day_desc, y=min.rew.dist, color=implant)) +
+  sample.by.animal(nsamples=25, other.cols=c('day_desc')) %>%
+  ggplot(aes(x=day_desc, y=min.rew.dist, fill=implant)) +
+  geom_violin() +
+  geom_hline(yintercept = goal.cell.max.dist, linetype='dashed') +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  xlab('') + ylab('Field dist from reward')
+  xlab('') + ylab('Place field distance\nto reward (%)')
   
 ```
 
 ## Pct during the trials
 ```{r}
 pc.rew.dist.df %>%
-  group_by(date, day_desc, animal) %>%
-  dplyr::summarise(pct.goal = sum(is.goal.cell) / n() * 100) -> goal.cells.df
+  group_by(date, day_desc, implant, animal) %>%
+  dplyr::summarise(pct.goal = sum(is.goal.cell) / n() * 100,
+                   pct.pc = mean(is.pc) * 100,
+                   pct.signif = mean(signif.si) * 100) -> goal.cells.df
 
 goal.cell.db = pc.rew.dist.df %>%
-  select(animal, date, day_desc, cell_id, is.goal.cell, closest.location.ordinal) %>%
+  dplyr::select(implant, animal, date, day_desc, cell_id, is.goal.cell, closest.location.ordinal) %>%
   right_join(place.cell.db, by=c('animal', 'date', 'cell_id')) %>%
   replace_na(list(is.goal.cell=FALSE, is.pc=FALSE))
   
 mean(goal.cells.df$pct.goal)
 sem(goal.cells.df$pct.goal)
 
+learning15.goal.cells.df = subset(goal.cells.df, day_desc == 'learning1 day#5')
+tapply(learning15.goal.cells.df$pct.goal, learning15.goal.cells.df$implant, summary)
+tapply(learning15.goal.cells.df$pct.signif, learning15.goal.cells.df$implant, summary)
+
 goal.cells.df %>%
   filter(startsWith(day_desc, 'learning')) %>%
   ggplot() +
-  geom_point(aes(x=day_desc, y=pct.goal, color=animal)) +
+  geom_point(aes(x=day_desc, y=pct.goal, color=implant)) +
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   xlab('') + ylab('Goal cells (% of all cells)')
@@ -285,21 +344,24 @@ goal.cells.df %>%
 ##During the test trial vs during the habituation
 
 ```{r}
+beforetest.rewards.df = filter(test.rewards.df, exp_title == 'beforetest')
+beforetest.rewards.df = data.table(beforetest.rewards.df)
+
 habit.run.trials.pc = merged.run.trials.pc %>%
-  filter(is.pc) %>%
-  left_join(test.rewards.df, by=c('animal', 'implant'), suffix=c('.activity', '.reward')) %>%
+  filter(signif.si) %>%
+  left_join(beforetest.rewards.df, by=c('animal', 'implant'), suffix=c('.activity', '.reward')) %>%
   mutate(rew.dist = norm2(field.max.x - trans_x, field.max.y - trans_y)) %>% 
   group_by(animal, date.activity, date.reward, cell_id) %>% 
   dplyr::top_n(1, wt=desc(rew.dist)) %>% # choose closer reward
   dplyr::rename(min.rew.dist=rew.dist)
-  #dplyr::rename(date=date.y)
   
 # select place cells
-pc.test.df = test.trials.si %>%
-  mutate(is.pc = is.place.cell(signif.mi, mutual.info - mutual.info.bias, field.size.50, field.size.25, field.max, field.mean, 1.0))
-# Place cell stats during test runs
+pc.test.df = beforetest.trials.si %>%
+  mutate(is.pc = is.place.cell(signif.si, mutual.info - mutual.info.bias, field.size.50, field.size.25, field.max, field.mean, 1.0))
+# Pct of place cell during test runs
 pc.test.df %>% group_by(date, animal) %>%
-  dplyr::summarise(pc.pct= (sum(is.pc)/n()*100) %>% round)
+  dplyr::summarise(npc=sum(is.pc),
+                   pc.pct= (sum(is.pc)/n()*100) %>% round)
 
 pc.test.df = pc.test.df %>%
   left_join(mouse.meta.df, by='animal') %>% 
@@ -307,11 +369,10 @@ pc.test.df = pc.test.df %>%
 
 
 # calc dist to rew
-test.rewards.df = data.table(test.rewards.df)
 pc.test.df = pc.test.df %>%
   ddply(.(date, animal, cell_id), dplyr::mutate, 
-        min.rew.dist=calc.min.rew.dist(test.rewards.df, date[1], animal[1], field.max.x[1], field.max.y[1])$rew.dist,
-        closest.location.ordinal=calc.min.rew.dist(test.rewards.df, date[1], animal[1], field.max.x[1], field.max.y[1])$location.ordinal)
+        min.rew.dist=calc.min.rew.dist(beforetest.rewards.df, date[1], animal[1], field.max.x[1], field.max.y[1])$rew.dist,
+        closest.location.ordinal=calc.min.rew.dist(beforetest.rewards.df, date[1], animal[1], field.max.x[1], field.max.y[1])$location.ordinal)
 
 ```
 
@@ -321,29 +382,32 @@ baseline.trials.pc = filter(habit.run.trials.pc, day_desc.activity=='habituation
   dplyr::rename(date=date.reward)
 ggplot() +
   geom_density(data=baseline.trials.pc, aes(x=min.rew.dist), linetype='dashed') +
-  geom_density(data=pc.test.df, aes(x=min.rew.dist), alpha=0.2) +
-  facet_grid(. ~ animal) +
-  geom_vline(xintercept = 10, linetype='dotted') +
+  geom_density(data=filter(pc.test.df, signif.si), aes(x=min.rew.dist), alpha=0.2) +
+  #facet_grid(. ~ animal) +
+  #facet_grid(implant ~ day_desc.reward) +
+  facet_grid(. ~ implant) +
+  geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
   coord_flip() +
   gtheme +
   xlim(c(0,100)) +
-  xlab('Place field distance from reward (%)') + ylab('')
+  xlab('Place field distance from reward (%)') + ylab('Density')
 ```
 
 Compare the last day trials with habituation trials
 ```{r}
-baseline.trials.pc = filter(habit.run.trials.pc, day_desc.activity=='habituation day#3') 
-compared.trials.pc = filter(habit.run.trials.pc, date.activity == format(as.Date(date.reward) - 1))
+baseline.trials.pc = filter(habit.run.trials.pc, day_desc.activity=='habituation day#3', animal!='A-BL') 
+compared.trials.pc = filter(habit.run.trials.pc, date.activity == format(as.Date(date.reward) - 1), animal!='A-BL')
 ggplot() +
   geom_density(data=baseline.trials.pc, aes(x=min.rew.dist), linetype='dashed') +
   geom_density(data=compared.trials.pc, aes(x=min.rew.dist), alpha=0.2) +
-  geom_vline(xintercept = 10, linetype='dotted') +
-  #facet_grid(. ~ date.reward) +
-  facet_grid(. ~ animal) +
+  geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
+  facet_grid(implant ~ day_desc.reward) +
+  #facet_grid(implant ~ date.reward , scales = 'free') +
+  #facet_grid(. ~ implant) +
   coord_flip() +
   gtheme +
   xlim(c(0,100)) +
-  xlab('Place field distance from reward (%)') + ylab('')
+  xlab('Place field distance from reward (%)') + ylab('Density')
 ```
 
 Plot location of the place field centres with regards to the rewards
@@ -352,14 +416,16 @@ plot.field.locs = function(pc.df, rewards.day_desc) {
   pc.df %>%
     ggplot() +
     geom_jitter(aes(x=field.max.x, y=100-field.max.y, color=min.rew.dist <= goal.cell.max.dist), 
-                alpha=0.3, width=0.3, height=0.3, size=5) +
-    geom_point(data=filter(test.rewards.df, day_desc==rewards.day_desc), mapping=aes(trans_x, 100-trans_y), color='red') +
+                alpha=0.35, width=0.5, height=0.5, size=2) +
+    geom_point(data=filter(beforetest.rewards.df, day_desc==rewards.day_desc), 
+               mapping=aes(trans_x, 100-trans_y), 
+               color='black', shape=2) +
     facet_wrap(. ~ animal, ncol=2) +
     xlim(c(0,100)) + ylim(c(0,100)) +
     labs(size='Mutual info', colour='Goal cell', x='X position (a.u.)', y='Y position (a.u.)') 
 }
 
-plot.field.locs(filter(pc.test.df, day_desc=='learning2 day#1'), 'learning2 day#1') +
+plot.field.locs(filter(pc.test.df, is.pc, day_desc=='learning2 day#1'), 'learning2 day#1') +
   labs(title='Test after first learning')
 
 plot.field.locs(
@@ -410,20 +476,22 @@ summary.habit.trials.pc = habit.run.trials.pc %>%
   dplyr::summarise(pct.reward=sum(min.rew.dist <= goal.cell.max.dist) / n() * 100)
 
 summary.pc.test.df = pc.test.df %>%
-  group_by(date, animal, implant) %>%
+  group_by(date, day_desc, animal, implant) %>%
   dplyr::summarise(at.reward=sum(min.rew.dist <= goal.cell.max.dist),
                    pct.reward=at.reward / n() * 100)
 
 summary.lastday.df = habit.run.trials.pc %>%
   filter(date.activity == format(as.Date(date.reward) - 1)) %>%
-  dplyr::rename(date=date.reward) %>%
+  dplyr::rename(date=date.reward,
+                day_desc=day_desc.reward) %>%
   group_by(date, animal) %>%
   dplyr::summarise(at.reward=sum(min.rew.dist <= goal.cell.max.dist),
                    pct.reward=at.reward / n() * 100)
 
 compared.habit.trials.df = summary.habit.trials.pc %>%
   filter(day_desc.activity=='habituation day#3') %>%
-  dplyr::rename(date=date.reward) %>%
+  dplyr::rename(date=date.reward,
+                day_desc=day_desc.reward) %>%
   mutate(group='habituation')
     
 combined.place.cell.pct = 
@@ -432,35 +500,55 @@ combined.place.cell.pct =
   #bind_rows(mutate(summary.lastday.df, group='lastday', compared.with='lastday')) %>%
   bind_rows(mutate(summary.pc.test.df, group='test', compared.with='test'))
 
-ggplot(combined.place.cell.pct) +
-  geom_point(aes(y=pct.reward, x=group, shape=group), position = position_dodge(width=0.2)) +
+# Insert 0 % where place cells on days when 0 place cells found
+paired.place.cell.pct = reshape2::dcast(combined.place.cell.pct, 
+                                        implant + animal + day_desc ~ group, 
+                                        value.var='pct.reward') %>%
+  filter(animal != 'A-BL') %>% # No test trials for that animal
+  replace_na(list(habituation=0, test=0))
+
+place.cell.change.pct = reshape2::melt(paired.place.cell.pct, 
+               id.vars=c('implant', 'animal', 'day_desc'), 
+               measue_vars=c('test', 'habituation'), 
+               variable.name='group', value.name='pct.reward')
+
+place.cell.change.pct %>%
+  filter(animal != 'A-BL') %>%
+  ggplot() +
+  geom_point(aes(y=pct.reward, x=group), position = position_dodge(width=0.2)) +
   geom_line(aes(x=group, y=pct.reward, group=animal, color=implant)) +
   gtheme +
-  facet_wrap(compared.with ~ date) +
+  facet_grid(implant ~ day_desc) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position='right') +
-  xlab('') + ylab('Place cells (%)')
+  xlab('') + ylab('Place cells at reward (%)')
 
 ```
+Statistical tests for change
+```{r}
+wilcox.test(pct.reward ~ group, subset(place.cell.change.pct, implant=='vCA1'), paired=TRUE)
+wilcox.test(pct.reward ~ group, subset(place.cell.change.pct, implant=='dCA1'), paired=TRUE)
+```
+
 
 Goal cells per day
 ```{r}
 DT::datatable(summary.pc.test.df)
 ```
 
-
-I don't see an increase in proportion of place cells.
-Could Dupret see an increase due to shifting towards the path?- if the same number of place cells, then in a shorter path their firing will 
-be condensed. Higher density of place cells?
-The maps on test trials suspicious - check occupation fields or running fields very incomplete?
-
-First of all -- verify quality of the place cells.
-
-Compare with the place cell pct during the trials
-
-
 # Change of place fields and statistics across days
 Calculate stats for changes between day combinations.
 ```{r}
+calc.field.cor = function(fst.fields, snd.fields, 
+                          fst.occupanices, snd.occupanices) {
+    if (is.null(fst.fields) | is.null(snd.fields)) { 
+      return(NA)
+    }
+    cor.res = field.cor(create.pf.df(fst.fields, fst.occupanices), 
+                        create.pf.df(snd.fields, snd.occupanices),
+                        max.xy=nbins)
+    cor.res$cor
+}
+
 daypair.diff = function(animal.daypair.df, days, include.cors=TRUE) {
   pc.change = animal.daypair.df %>%
     arrange(animal, cell_id, desc(date)) %>%
@@ -491,23 +579,18 @@ daypair.diff = function(animal.daypair.df, days, include.cors=TRUE) {
     select(-field.max.x.diff, -field.max.y.diff)
 
   # Calculate field correlation
-  if (include.cors) {
-    pc.change = data.table(pc.change)
-    setkey(pc.change, date.fst, date.snd, animal, cell_id)
-  }
   cells = unique(pc.change$cell_id)
-  pc.change$field.cor = rep(0, length(cells))
-  for (cell_name in cells) {
-    m1 = run.fields[[animal_name]][[format(days[1])]][[paste(cell_name)]]
-    m2 = run.fields[[animal_name]][[format(days[2])]][[paste(cell_name)]]
-    if (include.cors && !is.null(m1) && !is.null(m2)) {  # check the cell present on both days
-      o1 = run.occupancies[[animal_name]][[format(days[1])]][[paste(cell_name)]]
-      o2 = run.occupancies[[animal_name]][[format(days[2])]][[paste(cell_name)]]
-
-      cor.res = field.cor(create.pf.df(m1, o1), 
-                          create.pf.df(m2, o2),
-                          max.xy=nbins)
-      pc.change[date.fst==days[1] & date.snd==days[2] & animal==animal_name & cell_id==cell_name,]$field.cor = cor.res$cor
+  pc.change$field.cor = rep(0.0, length(cells))
+  pc.change = data.table(pc.change)
+  animal_name = animal.daypair.df$animal[1]
+  if (include.cors) {
+    setkey(pc.change, date.fst, date.snd, animal, cell_id)
+    for (cell_name in cells) {
+      cor.res = calc.field.cor(run.fields[[animal_name]][[format(days[1])]][[paste(cell_name)]], 
+                               run.fields[[animal_name]][[format(days[2])]][[paste(cell_name)]],
+                               run.occupancies[[animal_name]][[format(days[1])]][[paste(cell_name)]],
+                               run.occupancies[[animal_name]][[format(days[2])]][[paste(cell_name)]])
+      pc.change[date.fst==days[1] & date.snd==days[2] & animal==animal_name & cell_id==cell_name,]$field.cor = cor.res
     }
   }
  
@@ -542,23 +625,24 @@ pc.change.df = data.table(pc.change.df)
 setkey(pc.change.df, animal, date.fst, date.snd, cell_id)
 nshuffles=100
 field.xy.dist.thr.df = data.frame()
-for (i in 1:(length(all.days)-1)) {
-  day.fst = all.days[i]
-  day.snd = all.days[i+1]
-  for (animal_name in unique(pc.rew.dist.df$animal)) {
-
+for (animal_name in unique(pc.rew.dist.df$animal)) {
+  all.days = unique(subset(pc.rew.dist.df, animal==animal_name)$date) %>% as.Date
+  for (i in 1:(length(all.days)-1)) {
+    day.fst = all.days[i]
+    day.snd = all.days[i+1]
     animal.fstday.df = pc.rew.dist.df[animal == animal_name & date == day.fst,]
     setorder(animal.fstday.df, cell_id)
     animal.sndday.df = pc.rew.dist.df[animal == animal_name & date == day.snd,]
-
+    days = c(day.fst, day.snd)
     shuffled.field.cor = data.frame()
     shuffled.field.xy.dist = data.frame()
-    for (i in 1:nshuffles) {
+    for (j in 1:nshuffles) {
       animal.sndday.df$cell_id = shuffle(animal.sndday.df$cell_id)
       shuffled.change = daypair.diff(bind_rows(animal.fstday.df, animal.sndday.df), days, include.cors=FALSE) %>%
-        arrange(cell_id)
+          arrange(cell_id)
       #shuffled.field.cor = bind_rows(shuffled.field.cor, select(shuffled.change, animal, cell_id, field.cor))
-      shuffled.field.xy.dist = bind_rows(shuffled.field.xy.dist, select(shuffled.change, animal, cell_id, field.xy.dist))
+      shuffled.field.xy.dist = bind_rows(shuffled.field.xy.dist, 
+                                         select(shuffled.change, implant, animal, cell_id, field.xy.dist))
     }
     
     dist.thrs = ddply(shuffled.field.xy.dist, .(cell_id), summarise, 
@@ -576,12 +660,6 @@ for (i in 1:(length(all.days)-1)) {
 ```
 
 ```{r}
-sample.by.animal = function(df, nsamples=50) {
-  group_by(df, animal, date.fst, date.snd) %>%
-    sample_n(nsamples, replace = TRUE) %>%
-    ungroup()
-}
-
 pc.change.df2 = pc.change.df %>% left_join(field.xy.dist.thr.df, by=c('animal', 'date.fst', 'date.snd', 'cell_id'))
 pc.change.df2 %>%
   filter(n>1) %>%
@@ -593,7 +671,7 @@ pc.change.df2 %>%
 ```
 
 ```{r}
-fst.learning.days = (as.Date(test.rewards.df$date))  %>% unique
+fst.learning.days = (as.Date(beforetest.rewards.df$date))  %>% unique
 fst.learning.day = filter(rewards.df, !is.na(location_set))$date %>% as.Date %>% min
 fst.learning.days = c(fst.learning.day, fst.learning.days)
 ```
@@ -605,12 +683,12 @@ TODO make sure the % includes cells which were not detected
 pc.change.df %>%
   filter(pc.fst) %>%
   filter(same.rew.loc) %>%
-  filter(as.Date(date.fst) >= fst.learning.day) %>%
+  filter(startsWith(day_desc.fst, 'learning')) %>%
   filter(as.integer(days.diff) < max.days.diff) %>%
-  group_by(animal, days.diff) %>%
+  group_by(animal, implant, days.diff) %>%
   dplyr::summarise(pct.unchanged=sum(mean.pc == 1.0 & n > 1) / n() * 100) %>% 
   ggplot() +
-  geom_line(aes(x=days.diff, y=pct.unchanged, color=animal, group=animal)) +
+  geom_line(aes(x=days.diff, y=pct.unchanged, color=animal, group=animal, linetype=implant)) +
   labs(x='Days later', y='Remained a place cell (%)')
 ```
 
@@ -632,7 +710,6 @@ pc.change.df$date.fst = as.factor(pc.change.df$date.fst)
 
 pc.change.df %>%
   filter(days.diff==1) %>%
-  filter(mean.pc >= 0.5) %>%
   filter(pc.fst, n > 1) %>%
   sample.by.animal() %>%
   ggplot(aes(x=day_desc.fst, y=field.xy.dist)) +
@@ -643,15 +720,170 @@ pc.change.df %>%
   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
   geom_hline(aes(yintercept=goal.cell.max.dist), linetype='dashed')
 ```
+```{r}
+pc.change.df %>%
+  filter(days.diff==1) %>%
+  filter(pc.fst, n > 1) %>%
+  sample.by.animal() %>%
+  ggplot(aes(x=day_desc.fst, y=field.cor)) +
+  geom_violin() +
+  facet_grid(implant ~ .) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(fill='Place cell\non both days', x='Reference day', y='Field correlation') +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  geom_hline(yintercept=0, linetype='dashed')
+```
+
+# How many goal cells active during the next beforetest trial
+
+There are few place cells during the beforetest (87), so few cells are matched between days.
+
+Amongst the cells matched: (but problem that the goal cell not necessairly moved)
+```{r}
+pc.test.df %>%
+  dplyr::select(implant, animal, day_desc, cell_id, signif.si, min.rew.dist) %>%
+  dplyr::mutate(is.reward.zone = min.rew.dist < goal.cell.max.dist, 
+                is.goal.cell = signif.si & is.reward.zone) %>%
+  filter((day_desc == 'learning2 day#1' & is.goal.cell) | day_desc == 'learning3 day#1') %>%
+  reshape2::dcast(implant + animal + cell_id  ~ day_desc, 
+                  value.var='is.reward.zone') %>% 
+  filter(!is.na(`learning2 day#1`)) %>%
+  dplyr::group_by(implant) %>%
+  dplyr::summarise(both.goal.cells=mean(`learning3 day#1`, na.rm=TRUE), n=n(), 
+                   matched.cells=n-sum(is.na(`learning3 day#1`)))
+```
+
+
+
+# Place field correlation between trials and test sessions
+```{r}
+day.cors.df = place.cell.db %>%
+  rowwise() %>%
+  dplyr::mutate(
+    aftertest2trial.cor = calc.field.cor(
+        aftertest.fields[[animal]][[date]][[paste(cell_id)]], 
+        late.fields[[animal]][[date]][[paste(cell_id)]], 
+        aftertest.occupancies[[animal]][[date]][[paste(cell_id)]], 
+        late.occupancies[[animal]][[date]][[paste(cell_id)]]),
+    beforetest2trial.cor = calc.field.cor(
+        beforetest.fields[[animal]][[date]][[paste(cell_id)]],
+        early.fields[[animal]][[date]][[paste(cell_id)]], 
+        beforetest.occupancies[[animal]][[date]][[paste(cell_id)]], 
+        early.occupancies[[animal]][[date]][[paste(cell_id)]]
+    )
+  )
+```
+
+```{r}
+day.cors.df %>%
+  filter(!is.na(aftertest2trial.cor)) %>%
+  group_by(date, animal, is.pc) %>%
+  dplyr::summarise(med.cor=median(aftertest2trial.cor)) %>%
+  group_by(is.pc) %>%
+  dplyr::summarise(median(med.cor))
+
+day.cors.df %>%
+  filter(!is.na(aftertest2trial.cor)) %>%
+  ggplot(aes(x=day_desc, y=aftertest2trial.cor, fill=is.pc)) +
+  geom_violin() +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  geom_hline(yintercept = 0.0, linetype='dashed') +
+  facet_grid(implant ~ .) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+```
+```{r}
+day.cors.df %>%
+  filter(!is.na(beforetest2trial.cor)) %>%
+  group_by(date, animal, is.pc, implant) %>%
+  dplyr::summarise(med.cor=median(beforetest2trial.cor)) %>%
+  group_by(is.pc, implant) %>%
+  dplyr::summarise(median(med.cor))
+
+day.cors.df %>%
+  filter(!is.na(beforetest2trial.cor)) %>%
+  sample.by.animal(n=100, other.cols=c('date')) %>%
+  ggplot(aes(x=day_desc, y=beforetest2trial.cor, fill=is.pc)) +
+  geom_violin() +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  geom_hline(yintercept = 0.0, linetype='dashed') +
+  #facet_wrap(. ~ animal, ncol=4) +
+  facet_grid(. ~ implant) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+```
+Early vs late trial cors
+```{r}
+day.cors.df %>%
+  filter(!is.na(early.late.cor), exp=='learning') %>%
+  group_by(date, animal, signif.si, implant) %>%
+  dplyr::summarise(med.cor=median(early.late.cor)) %>%
+  group_by(signif.si, implant) %>%
+  dplyr::summarise(median(med.cor),
+                   sem(med.cor))
+
+day.cors.df %>%
+  filter(day_desc != 'learning3 day#3') %>%
+  filter(!is.na(early.late.cor)) %>%
+  #sample.by.animal(other.cols=c('date')) %>%
+  ggplot(aes(x=day_desc, y=early.late.cor, fill=signif.si)) +
+  geom_violin() +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  geom_hline(yintercept = 0.3, linetype='dashed') +
+  #facet_wrap(. ~ animal, ncol=4) +
+  facet_grid(implant ~ .) +
+  ylab('Place field correlation:\nearly vs late trials') +
+  xlab('') +
+  labs(fill='Significant\nSpatial Info') +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position = 'right')
+```
+
+Early vs late correlations are higher than late vs after
+```{r}
+day.cors.df %>%
+  filter(!is.na(aftertest2trial.cor)) %>%
+  dplyr::mutate(late.after.cor.diff = early.late.cor - aftertest2trial.cor) %>%
+  sample.by.animal(nsamples=100, other.cols=c('date')) %>%
+  ggplot(aes(x=implant, y=late.after.cor.diff, fill=signif.si)) +
+  geom_violin() +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  geom_hline(yintercept = 0.0, linetype='dashed') +
+  #facet_wrap(. ~ animal, ncol=4) +
+  #facet_grid(implant ~ .) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position = 'top')
+```
+Median Early vs late correlations are about the same as the before test vs early
+TODO: interesting to look at cells which remapped during the learning. They would have one place field
+in the before and early trials and another after. Therefore, look at cells significant in the late trials, and quantify 
+if they moved.
+```{r}
+day.cors.df %>%
+  filter(!is.na(beforetest2trial.cor)) %>%
+  dplyr::mutate(early.before.cor.diff = early.late.cor - beforetest2trial.cor) %>%
+  sample.by.animal(nsamples=100,  other.cols=c('date')) %>%
+  ggplot(aes(x=implant, y=early.before.cor.diff, fill=signif.si)) +
+  geom_violin() +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  geom_hline(yintercept = 0.0, linetype='dashed') +
+  #facet_wrap(. ~ animal, ncol=4) +
+  #facet_grid(implant ~ .) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position = 'top')
+```
 
 Split for habituation and learning
 ```{r}
 pc.nextday.unchanged = pc.change.df %>%
-  filter(days.diff==1) %>%
+  filter(days.diff==1, n > 1) %>%
   filter(pc.fst) %>%
   #filter(mean.pc == 1.0) %>%
   sample.by.animal() %>%
-  mutate(stage=ifelse(as.Date(date.snd) < fst.learning.day, 'Habituation', 'Learning') ) %>% 
+  mutate(stage=ifelse(startsWith(day_desc.fst, 'habituation'), 'Habituation', 'Learning') ) %>% 
   filter(stage == 'Habituation' || same.rew.loc)
 
 pc.nextday.unchanged %>%
@@ -679,6 +911,7 @@ pc.change.df %>%
   geom_violin() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  facet_grid(implant ~ .) +
   labs(fill='Place cell\non both days', x='Reference day', y='Field correlation') + 
   geom_hline(aes(yintercept=0), linetype='dashed') 
 ```
@@ -688,6 +921,7 @@ pc.nextday.unchanged %>%
   ggplot(aes(x=stage, y=field.cor, color=mean.pc==1)) +
   geom_violin() +
   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  facet_grid(implant ~ .) +
   labs(y='Field correlation', x='', color='Place cell\non both days')
 ```
 ```{r}
@@ -707,33 +941,34 @@ pc.nextday.changed %>%
  #ggplot(aes(y=field.xy.dist, x=same.rew.loc)) +
   ggplot(aes(y=field.cor, x=same.rew.loc)) +
   geom_violin() +
+  facet_grid(implant ~ .) +
   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
-  labs(y='Field moved (%)', x='Same reward location', color='Place cell\non both days')
+  labs(y='Field cor', x='Same reward location', color='Place cell\non both days')
 ```
-Conclusion: learning makes the fields less stable...
+Conclusion: moving reward causes remapping to a higher degree in vCA1
 
 
 Goal cell field shifting between days
 ```{r}
 gc.nextday.unchanged = pc.change.df %>%
   filter(days.diff==1, n>1) %>%
-  filter(goal.cell.fst) %>%
-  filter(same.rew.loc)
+  filter(goal.cell.fst) 
 
 gc.nextday.unchanged %>%
-  filter(mean.pc >= 0.5) %>%
-  ggplot(aes(x=date.fst, y=field.xy.dist, color=mean.goal.cells==1.0)) +
+  ggplot(aes(x=day_desc.fst, y=field.xy.dist, color=mean.pc==1.0)) +
   geom_point() +
   #stat_summary(fun.y=median, geom="point", shape=23, size=2) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  labs(color='Goal cell\non both days', x='Reference day', y='Field moved (%)') 
+  facet_grid(implant ~ .) +
+  labs(color='Place cell\non both days', x='Reference day', y='Field moved (%)') 
 ```
   
 Field correlation
 ```{r}
 gc.nextday.unchanged %>%
-  ggplot(aes(x=date.fst, y=field.cor, color=mean.pc==1)) +
+  ggplot(aes(x=day_desc.fst, y=field.cor, color=mean.pc==1)) +
   geom_point() +
+  facet_grid(implant ~ .) +
   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   labs(y='Field correlation', x='', color='Place cell\non both days')
@@ -743,3 +978,162 @@ Can't answer - have about 2 cells per day pair which are goal cells on both days
 
 TODO:
 is the shift in the place fields random? compare with shuffled cell identities of place fields.
+
+
+# Place cells at previous reward location
+```{r}
+prev.locations.df = all.locations.df %>%
+  filter(!is_test) %>%
+  add_prev_locations(prev.loc.set.diff=1) %>%
+  add_prev_locations(prev.loc.set.diff=2) %>%
+  filter()
+```
+
+```{r}
+prev.locations.df = data.table(prev.locations.df)
+setkey(prev.locations.df, date, animal)
+
+get.prev.loc.ordinal = function(date_str, animal_name) {
+  x = prev.locations.df[date==date_str & animal==animal_name & !current_loc, location_ordinal]
+  if (length(x) == 0) {
+    return(-1)
+  }
+  print(x)
+  return(x)
+}
+
+pc.prev.rew = merged.run.trials.pc %>%
+  dplyr::group_by(date, day_desc, animal) %>%
+  dplyr::mutate(
+        closest.location.ordinal=calc.min.rew.dist(prev.locations.df, date[1], animal[1], field.max.x, field.max.y)$location.ordinal,
+        min.rew.dist=calc.min.rew.dist(prev.locations.df, date[1], animal[1], field.max.x, field.max.y)$rew.dist,
+        is.prev.loc=closest.location.ordinal == get.prev.loc.ordinal(date[1], animal[1])) %>%
+  dplyr::mutate(is.prev.rew.closest = is.prev.loc,
+                is.new.rew.closest =  !is.prev.loc)
+
+pc.prev.rew %>%
+  filter(exp != 'habituation') %>%
+  filter(is.pc) %>%
+  filter(implant == 'dCA1') %>%
+  ggplot(aes(x=day_desc, y=min.rew.dist, color=is.prev.rew.closest)) +
+  geom_violin() +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  facet_grid(animal ~ .) +
+  geom_hline(yintercept = 5, linetype='dashed') +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab('') + ylab('Field dist from reward')
+```
+
+For each place field calculate the count of its peaks, and how many of them are in the rew or prev rew zone
+```{r warning=FALSE}
+max.rew.dist.thr = 15
+calc.field.peaks.info = function(day, animal_name) {
+  prev.locations.df = as.data.table(prev.locations.df)
+  rew.df = prev.locations.df[animal==animal_name & date==day, ]
+  if (nrow(rew.df) == 0) {
+    return(data.frame())
+  }
+  bin.size = 100 / nbins
+  
+  cell_names = all.fields[[animal_name]][[day]] %>% names
+  
+  map_dfr(cell_names, ~ {
+    cell_name = .x
+    field = run.fields[[animal_name]][[day]][[paste(cell_name)]]
+    #peaks.rowcol = fieldPeaks(field) * bin.size
+    rew.df = rew.df[, `:=`(x=ceil(trans_x/bin.size), y=ceil(trans_y/bin.size))]
+    peaks.rowcol = findPeaksAtRewards(field, rew.df, max.rewdistance = max.rew.dist.thr / bin.size)
+    peaks.rowcol = peaks.rowcol * bin.size
+    
+    if (nrow(peaks.rowcol) > 0) {
+      min.rew.dist.res = calc.min.rew.dist(rew.df, day, animal_name, peaks.rowcol[,'row'], peaks.rowcol[,'col'])
+    } else {
+      min.rew.dist.res = list(rew.dist=100, location.ordinal=-1)
+    }
+    loc.ordinals = unique(min.rew.dist.res$location.ordinal)
+    rew.peaks.index = which(min.rew.dist.res$rew.dist <= max.rew.dist.thr + bin.size/2)
+    
+    return(list(
+      animal = animal_name,
+      date = day,
+      cell_id = cell_name,
+      maxpeakval = max(field, na.rm=TRUE),
+      npeaks = nrow(peaks.rowcol),
+      rew.peaks.count = length(rew.peaks.index),  
+      current.rew.peaks.count = sum(rew.df[location_ordinal %in% loc.ordinals[rew.peaks.index], current_loc], na.rm = TRUE)
+    ))
+  })
+  
+}
+
+trial.days = trials.meta.df %>%
+  dplyr::select(date, animal) %>%
+  dplyr::distinct()
+
+field.peaks.df = map2_dfr(trial.days$date, trial.days$animal, ~ calc.field.peaks.info(.x, .y))
+```
+
+```{r}
+field.peaks.df = field.peaks.df %>% 
+  left_join(trials.meta.df) %>%
+  left_join(mouse.meta.df) 
+field.peaks.df$cell_id = as.integer(field.peaks.df$cell_id)
+
+field.peaks.df %>%
+  left_join(place.cell.db) %>%
+  filter(signif.si) %>%
+  #filter(location_set > 1) %>%
+  ggplot() +
+  geom_violin(aes(x=day_desc, y=current.rew.peaks.count, color=implant)) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+```{r}
+day.peak.summary = field.peaks.df %>%
+  left_join(place.cell.db) %>%
+  #filter(animal == 'K-BR') %>%
+  #filter(day_desc == 'learning1 day#5') %>%
+  filter(signif.si) %>%
+  group_by(implant, animal, day_desc) %>%
+  dplyr::summarise(ncells=n(),
+                   signif.pct=sum(signif.si)/ncells,
+                   hasrew.peak.pct=sum(current.rew.peaks.count > 0) / ncells,
+                   multipeak.rew.pct = sum((npeaks > 1) & (rew.peaks.count > 0)) / ncells,
+                   multireward.pct = sum(rew.peaks.count > 1) / ncells,
+                   current.multireward.pct = sum(current.rew.peaks.count > 1) / ncells,
+                   singleprev.reward.peak = sum((npeaks==1) & (rew.peaks.count - current.rew.peaks.count > 0)) / ncells,
+                   hasprev.reward = sum((rew.peaks.count - current.rew.peaks.count > 0)) / ncells) 
+
+day.peak.summary %>%
+  filter(ncells >= 5, day_desc=='learning2 day#1') %>%
+  dplyr::mutate_if(is.numeric, round, 2) %>%
+  DT::datatable()
+
+day.peak.summary %>%
+  #fitler(day_desc=='learning2 day#1') %>%
+  #filter(ncells >= 5) %>%
+  dplyr::group_by(day_desc, implant) %>%
+  dplyr::summarise(ncells.mean=mean(ncells),
+                   nanimals=n(),
+                   mean(hasrew.peak.pct),
+                   sem(hasrew.peak.pct),
+                   mean(multipeak.rew.pct),
+                   mean(multireward.pct),
+                   sem(multireward.pct),
+                   mean(current.multireward.pct),
+                   sem(current.multireward.pct),
+                   mean(singleprev.reward.peak),
+                   mean(hasprev.reward),
+                   sem(hasprev.reward)) %>%
+  dplyr::mutate_if(is.numeric, round, 2) %>%
+  DT::datatable()
+
+wilcox.test(current.multireward.pct ~ implant, day.peak.summary, subset=day_desc == 'learning1 day#5')
+
+```
+Using the main peak
+```{r}
+
+```
+
