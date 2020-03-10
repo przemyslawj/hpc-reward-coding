@@ -17,8 +17,13 @@ library(data.table)
 library(ggplot2)
 library(cowplot)
 library(scales)
+
 gtheme = theme_minimal() + theme_cowplot() + 
   theme(text = element_text(size=18), axis.text = element_text(size=15))
+gxaxis.blank = theme(axis.line.x = element_blank(),
+                     axis.title.x = element_blank(),
+                     axis.text.x = element_blank(),
+                     axis.ticks.x = element_blank())
 
 summarise = dplyr::summarise
 summarize = dplyr::summarize
@@ -119,14 +124,29 @@ cell.day.activity.df = cell.day.activity.df %>%
 
 Mean deconv values during the day in the detected cells, one datapoint per cell per day
 ```{r}
+cell.day.activity.df$exp_title = factor(cell.day.activity.df$exp_title,
+                                        levels = c('homecage', 'trial', 'aftertest','beforetest'))
+
 cell.day.activity.df %>%
   filter(exp_title != 'aftertest') %>%
   ggplot() +
   geom_histogram(aes(event.rate, y = stat(width*density))) +
   facet_grid(implant ~ exp_title) +
-  xlim(c(0, 0.2)) + 
+  xlim(c(0, 0.4)) + 
   xlab('Mean event rate (Hz)') + ylab('Cells (%)') +
   scale_y_continuous(labels = percent_format())
+
+g.mer = cell.day.activity.df %>%
+  filter(exp_title != 'aftertest') %>%
+  ggplot() +
+  geom_boxplot(aes(y=event.rate, x=implant, fill=implant)) +
+  facet_grid(. ~ exp_title) +
+  gtheme +
+  gxaxis.blank +
+  ylim(c(0,0.4)) +
+  ylab('Cell event rate (Hz)') + labs(fill='') +
+  theme(legend.position = 'top')
+g.mer
 ```
 
 Count of active cells:
@@ -147,7 +167,7 @@ filter(cell.day.activity.df, exp_title=='trial') %>%
 ```{r}
 min.day.nevents = 20
 
-cell.day.activity.df %>%
+g.nactive.cells = cell.day.activity.df %>%
   group_by(day_desc, animal, implant) %>%
   mutate(is.active = day.nevents >= min.day.nevents) %>%
   dplyr::summarise(nactive=sum(is.active)) %>%
@@ -162,9 +182,10 @@ cell.day.activity.df %>%
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   labs(x='', y='Active cells\nratio of maximum')
 
-
+g.nactive.cells
+plot_grid(g.nactive.cells, g.mer, nrow=1, rel_widths = c(1.0, 0.8))
 ggsave('/tmp/active_cells_ratio.svg', 
-       units = 'cm', width=15, height=10)
+       units = 'cm', width=24, height=11)
 ```
 
 ## Mean event rate
@@ -355,8 +376,10 @@ for (animal_name in unique(cell.day.activity.df$animal)) {
       animal = animal_name,
       implant = implant,
       day1 = days[1],
-      day2 = days[1],
+      day2 = days[2],
       days.diff = days[2] - days[1],
+      nfstday.cells = length(fstday.cells),
+      nsndday.cells = length(sndday.cells),
       overlap = length(intersect(fstday.cells, sndday.cells)) /
                 length(union(fstday.cells, sndday.cells)) * 100,
       recall = length(intersect(fstday.cells, sndday.cells)) /
@@ -385,7 +408,24 @@ ggplot(data=summary.cell.overlap) +
   ylab('Cell recall (%)') +
   xlab('Days apart') +
   scale_x_continuous(breaks=1:ndays, limits=c(1,ndays-1))
+
+ggsave('/tmp/cell_recall_pct.svg', 
+       width = 15, height = 8, units='cm')
 ```
+
+Next day recall
+```{r}
+cell.overlap.df %>%
+  dplyr::mutate(day1.str=format(day1)) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'day1.str'='date')) %>%
+  filter(as.integer(days.diff) == 1)  %>%
+  dplyr::mutate(nrecalled=recall/100*nfstday.cells,
+                recall=round(recall)) %>%
+  select(animal, implant, day_desc, day2, recall, nrecalled) %>%
+  DT::datatable()
+```
+
+
 
 Total days a cell active
 ```{r}

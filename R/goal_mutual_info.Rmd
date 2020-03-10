@@ -141,7 +141,7 @@ rewards.df = all.locations.df = map_dfr(rootdirs, read_locations) %>%
 
 
 ```{r}
-filter.running = FALSE
+filter.running = TRUE
 trial.reward.info = data.frame()
 
 prev.locations.df = all.locations.df %>%
@@ -168,7 +168,7 @@ for (caimg_result_dir in learning_caimg_result_dirs) {
     }
   
     timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec = 200)
-    bin.quantile.fractions = c(0.95, 1.0)
+    bin.quantile.fractions = c(0.9, 1.0)
     binned.traces = bin.responses(timebinned.traces, 
                                   get.bin.thresholds.fun = get.quantiles.fun(bin.quantile.fractions),
                                   binned.var='trace')

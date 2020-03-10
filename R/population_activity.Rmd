@@ -1,0 +1,119 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+caimg_result_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01//learning/2020-01-30/caiman/G-BR/filtered/'
+#caimg_result_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08//learning/2019-08-30/caiman/E-BL/filtered/'
+data.traces = read.data.trace(caimg_result_dir, filter_exp_title = 'trial')
+setorder(data.traces, trial_id, cell_id, timestamp)
+detect.events(data.traces, deconv.threshold=0.2)
+  
+data.traces$is_running = !isRunning(data.traces, 2, 4, 500)
+
+nbins = 20
+response.bin.quantiles = c(0.95, 1.0)
+binned.traces = bin.time.space(data.traces[x >= 0 & y >= 0, ],
+                               nbins.x = nbins,
+                               nbins.y = nbins,
+                               get.bin.thresholds.fun = get.quantiles.fun(response.bin.quantiles),
+                               binned.var='trace',
+                               timebin.dur.msec=100)
+
+response.matrix = reshape2::acast(binned.traces, time_bin ~ cell_id, value.var='response_bin')
+#response.matrix = reshape2::acast(timebinned.traces, time_bin ~ cell_id, value.var='mean.trace')
+```
+
+Population activity
+```{r}
+pop.traces = binned.traces[, .(pop.events=sum(nevents) / .N, nactive=sum(nevents)),
+                           by=c('trial', 'time_bin', 'x', 'y', 'arrivedAtReward', 'velocity', 'atReward0', 'atReward1', 'is_headdip', 'is_running')] 
+pop.traces
+```
+Draw population activity
+```{r}
+large.pop.events = filter(pop.traces, pop.events > 0.1)#, is_running >= 0.5)
+ggplot(pop.traces) +
+  geom_path(aes(x=x, y=100-y, color=pop.events, group=trial), size=1) +
+  scale_colour_gradient2(low='blue', mid='white', high='red', midpoint = 0.05) +
+  geom_point(data=large.pop.events, mapping=aes(x=x, y=100-y), color='red') +
+  geom_rewards(rewards.df, data.traces$animal[1], data.traces$date[1], nbins = 100) +
+  #facet_wrap(trial ~ .) +
+  theme_void()
+```
+
+
+Principal components analysis
+```{r}
+day.pca = prcomp(response.matrix, center = TRUE, scale. = TRUE)
+
+day.pca$x[,1:50] %>% image
+```
+
+#NMF
+```{r}
+library(NMF)
+
+res20 <- nmf(t(response.matrix), 20, seed='nndsvd')
+t(coef(res20))[,1:20] %>% image
+```
+
+
+# Correlations
+- order by similarity?
+```{r}
+cor(response.matrix) %>% image
+```
+
+
+
+Population activity at reward:
+
+```{r}
+source('tracking_info.R')
+
+get_index_arrived = function(at.reward.vec, timestamps) {
+  indecies = which(at.reward.vec == 1)
+  if (length(indecies) == 0) {
+    return(-1)
+  }
+  return(timestamps[indecies[1]])
+}
+
+aligned.data.df = filter(data.traces) %>%
+         group_by(trial_id, date, trial, cell) %>%
+         # mutate(at_rew0 = is.at.reward(velocity, dist_reward0, timestamp, running.thresh = 2),
+         #        at_rew1 = is.at.reward(velocity, dist_reward1, timestamp, running.thresh = 2)) %>%
+         mutate(arrived.rew0=get_index_arrived(atReward0, timestamp),
+                arrived.rew1=get_index_arrived(atReward1, timestamp),
+                timestamp.rew0 = timestamp  - arrived.rew0,
+                timestamp.rew1 = timestamp - arrived.rew1) %>%
+         ungroup()
+```
+
+
+
+```{r}
+is.within = function(val, range=c(-3000, 20000)) {
+  return (val >= range[1] & val <= range[2])
+}
+
+trace.at.reward = dplyr::filter(aligned.data.df, is.within(timestamp.rew1)) %>%
+  dplyr::rename(timestamp.rew = timestamp.rew1)
+```
+
+```{r}
+time_bin_sec = 1
+pop.mean.at.reward = trace.at.reward %>%
+  mutate(timestamp_bin = floor(timestamp.rew / time_bin_sec / 1000)) %>%
+  group_by(trial, timestamp_bin) %>%
+  dplyr::summarise(trace.mean = mean(trace))
+```
+
+```{r}
+ggplot(pop.mean.at.reward) +
+  geom_raster(aes(x=timestamp_bin, y=trial, fill=trace.mean))
+```
+

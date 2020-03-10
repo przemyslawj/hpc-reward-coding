@@ -227,20 +227,27 @@ plot.pc.stat = function(metric, exp_name='habituation') {
     sample_n(50, replace=TRUE) %>%
     ungroup() %>%
     ggplot(aes(x=implant, y=!!metric)) +
+    #geom_violin(aes(fill=implant)) +
     geom_violin() +
     stat_summary(fun.y=median, geom="point", shape=23, size=2) +
-    xlab('')
+    gtheme +
+    xlab('') +
+    #gxaxis.blank +
+    theme(axis.title.x = element_blank(),
+          legend.position = 'top')
 }
 
 plot_grid(
   plot.pc.stat(field.size.25 / nbins / nbins * 100) +
-    ylab('Field size (% of cheeseboard)')  + ylim(c(0,7)),
+    ylab('Field size\n(% of cheeseboard)')  + ylim(c(0,7)),
   plot.pc.stat(sparsity) + ylim(c(1,12)) +
     ylab('Sparsity'),
   plot.pc.stat(mutual.info - mutual.info.bias) +
-    ylab('Mutual Info (bias subtracted)'),
-  plot.pc.stat(spatial.information) + ylab('Spatial Info\n(bits / unit fluorescence change)'),
+    ylab('Mutual Info\n(bias subtracted)'),
+  plot.pc.stat(spatial.information) + ylab('Spatial Info\n(bits / dF)'),
   nrow = 1)
+
+ggsave('/tmp/pf_stats.svg', width=20, height=7.5, units='cm')
 ```
 
 
@@ -380,7 +387,7 @@ Compare with the test trials with habituation trials
 ```{r}
 baseline.trials.pc = filter(habit.run.trials.pc, day_desc.activity=='habituation day#3') %>%
   dplyr::rename(date=date.reward)
-ggplot() +
+g.test.pf.shift = ggplot() +
   geom_density(data=baseline.trials.pc, aes(x=min.rew.dist), linetype='dashed') +
   geom_density(data=filter(pc.test.df, signif.si), aes(x=min.rew.dist), alpha=0.2) +
   #facet_grid(. ~ animal) +
@@ -391,6 +398,7 @@ ggplot() +
   gtheme +
   xlim(c(0,100)) +
   xlab('Place field distance from reward (%)') + ylab('Density')
+g.test.pf.shift
 ```
 
 Compare the last day trials with habituation trials
@@ -512,7 +520,7 @@ place.cell.change.pct = reshape2::melt(paired.place.cell.pct,
                measue_vars=c('test', 'habituation'), 
                variable.name='group', value.name='pct.reward')
 
-place.cell.change.pct %>%
+g.pf.change.pct = place.cell.change.pct %>%
   filter(animal != 'A-BL') %>%
   ggplot() +
   geom_point(aes(y=pct.reward, x=group), position = position_dodge(width=0.2)) +
@@ -520,8 +528,15 @@ place.cell.change.pct %>%
   gtheme +
   facet_grid(implant ~ day_desc) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position='right') +
-  xlab('') + ylab('Place cells at reward (%)')
+  xlab('') + ylab('Place cells at reward (%)') + labs(color='')
+g.pf.change.pct
 
+g.pf.shift.fig = plot_grid(g.test.pf.shift, 
+                           g.pf.change.pct + theme(legend.position = 'top'), 
+                           nrow=1, rel_widths = c(0.6, 1.0))
+
+ggsave('/tmp/test_pf_shift.svg', g.pf.shift.fig, 
+       width=26, height=11, units='cm')
 ```
 Statistical tests for change
 ```{r}
@@ -677,21 +692,6 @@ fst.learning.days = c(fst.learning.day, fst.learning.days)
 ```
 
 
-How many place cells remained place cells during the same reward location set.
-TODO make sure the % includes cells which were not detected
-```{r}
-pc.change.df %>%
-  filter(pc.fst) %>%
-  filter(same.rew.loc) %>%
-  filter(startsWith(day_desc.fst, 'learning')) %>%
-  filter(as.integer(days.diff) < max.days.diff) %>%
-  group_by(animal, implant, days.diff) %>%
-  dplyr::summarise(pct.unchanged=sum(mean.pc == 1.0 & n > 1) / n() * 100) %>% 
-  ggplot() +
-  geom_line(aes(x=days.diff, y=pct.unchanged, color=animal, group=animal, linetype=implant)) +
-  labs(x='Days later', y='Remained a place cell (%)')
-```
-
 How many place cells have their field at the same place:
 
 ```{r}
@@ -721,18 +721,59 @@ pc.change.df %>%
   geom_hline(aes(yintercept=goal.cell.max.dist), linetype='dashed')
 ```
 ```{r}
-pc.change.df %>%
+g.pf.day2day.cor =  pc.change.df %>%
   filter(days.diff==1) %>%
   filter(pc.fst, n > 1) %>%
   sample.by.animal() %>%
   ggplot(aes(x=day_desc.fst, y=field.cor)) +
   geom_violin() +
   facet_grid(implant ~ .) +
+  gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   labs(fill='Place cell\non both days', x='Reference day', y='Field correlation') +
   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
-  geom_hline(yintercept=0, linetype='dashed')
+  geom_hline(yintercept=field.cor.min, linetype='dashed')
+
+g.pf.day2day.cor
 ```
+
+How many place cells kept their place field during the same reward location set.
+Includes cells that were detected on both days
+```{r}
+g.kept.pf = pc.change.df %>%
+  filter(pc.fst, n==2) %>%
+  filter(same.rew.loc) %>%
+  filter(startsWith(day_desc.fst, 'learning1')) %>%
+  filter(as.integer(days.diff) < max.days.diff) %>%
+  dplyr::mutate(kept.field = field.cor >= field.cor.min) %>% 
+  group_by(animal, implant, date.fst, days.diff) %>%
+  dplyr::summarise(kept.field.pct=mean(kept.field)*100) %>% 
+  dplyr::group_by(implant, days.diff) %>%
+  dplyr::summarise(mean.kept.field.pct=mean(kept.field.pct),
+                   sem.kept.field.pct=sem(kept.field.pct)) %>%
+  #dplyr::summarise(pct.unchanged=sum(mean.pc == 1.0 & n > 1) / n() * 100) %>% 
+  ggplot(aes(x=days.diff, group=implant, linetype=implant)) +
+  geom_line(aes(y=mean.kept.field.pct)) +
+  geom_ribbon(aes(ymin=mean.kept.field.pct - sem.kept.field.pct, ymax=mean.kept.field.pct + sem.kept.field.pct),
+              alpha=0.1) +
+  #facet_grid(. ~  implant) +
+  labs(x='Days later', y='Kept the place field\nduring learning1(%)', linetype='') +
+  gtheme +
+  theme(legend.position = 'top')
+
+g.kept.pf
+```
+
+```{r}
+ggsave(
+  '/tmp/day2day_field.svg',
+  plot_grid(
+    g.pf.day2day.cor,
+    g.kept.pf, 
+    nrow=1, rel_widths = c(1.0, 0.7)),
+  width=21, height=10, units='cm')
+```
+
 
 # How many goal cells active during the next beforetest trial
 
@@ -838,6 +879,8 @@ day.cors.df %>%
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1),
         legend.position = 'right')
+
+ggsave('/tmp/field_cors_earlylate.svg', height=11, width=23, units = 'cm')
 ```
 
 Early vs late correlations are higher than late vs after
@@ -1028,19 +1071,21 @@ pc.prev.rew %>%
 For each place field calculate the count of its peaks, and how many of them are in the rew or prev rew zone
 ```{r warning=FALSE}
 max.rew.dist.thr = 15
-calc.field.peaks.info = function(day, animal_name) {
-  prev.locations.df = as.data.table(prev.locations.df)
-  rew.df = prev.locations.df[animal==animal_name & date==day, ]
+calc.field.peaks.info = function(day, animal_name, 
+                                 fields.list=run.fields,
+                                 rews.df=prev.locations.df) {
+  rews.df = as.data.table(rews.df)
+  rew.df = rews.df[animal==animal_name & date==day, ]
   if (nrow(rew.df) == 0) {
     return(data.frame())
   }
   bin.size = 100 / nbins
   
-  cell_names = all.fields[[animal_name]][[day]] %>% names
+  cell_names = fields.list[[animal_name]][[day]] %>% names
   
   map_dfr(cell_names, ~ {
     cell_name = .x
-    field = run.fields[[animal_name]][[day]][[paste(cell_name)]]
+    field = fields.list[[animal_name]][[day]][[paste(cell_name)]]
     #peaks.rowcol = fieldPeaks(field) * bin.size
     rew.df = rew.df[, `:=`(x=ceil(trans_x/bin.size), y=ceil(trans_y/bin.size))]
     peaks.rowcol = findPeaksAtRewards(field, rew.df, max.rewdistance = max.rew.dist.thr / bin.size)
@@ -1071,19 +1116,40 @@ trial.days = trials.meta.df %>%
   dplyr::select(date, animal) %>%
   dplyr::distinct()
 
-field.peaks.df = map2_dfr(trial.days$date, trial.days$animal, ~ calc.field.peaks.info(.x, .y))
+field.peaks.df = map2_dfr(trial.days$date, 
+                          trial.days$animal, 
+                          ~ calc.field.peaks.info(.x, .y, run.fields))
+field.peaks.df$exp_title = 'trial'
 ```
 
+```{r warning=FALSE}
+
+field.peaks.beforetest = map2_dfr(trial.days$date, 
+                                  trial.days$animal, 
+                                  ~ calc.field.peaks.info(.x, .y, beforetest.fields))
+field.peaks.beforetest$exp_title = 'beforetest'
+field.peaks.beforetest$cell_id = as.integer(field.peaks.beforetest$cell_id)
+field.peaks.beforetest = left_join(field.peaks.beforetest, trials.meta.df)
+
+field.peaks.aftertest = map2_dfr(trial.days$date, 
+                                 trial.days$animal, 
+                                 ~ calc.field.peaks.info(.x, .y, aftertest.fields))
+field.peaks.aftertest$exp_title = 'aftertest'
+field.peaks.aftertest$cell_id = as.integer(field.peaks.aftertest$cell_id)
+field.peaks.aftertest = left_join(field.peaks.aftertest, trials.meta.df)
+
+field.peaks.all = bind_rows(field.peaks.aftertest,
+                            field.peaks.beforetest,
+                            field.peaks.df)
+```
+
+
 ```{r}
-field.peaks.df = field.peaks.df %>% 
-  left_join(trials.meta.df) %>%
-  left_join(mouse.meta.df) 
 field.peaks.df$cell_id = as.integer(field.peaks.df$cell_id)
+field.peaks.df = left_join(field.peaks.df, place.cell.db) 
 
 field.peaks.df %>%
-  left_join(place.cell.db) %>%
   filter(signif.si) %>%
-  #filter(location_set > 1) %>%
   ggplot() +
   geom_violin(aes(x=day_desc, y=current.rew.peaks.count, color=implant)) +
   gtheme +
@@ -1091,7 +1157,6 @@ field.peaks.df %>%
 ```
 ```{r}
 day.peak.summary = field.peaks.df %>%
-  left_join(place.cell.db) %>%
   #filter(animal == 'K-BR') %>%
   #filter(day_desc == 'learning1 day#5') %>%
   filter(signif.si) %>%
@@ -1111,7 +1176,7 @@ day.peak.summary %>%
   DT::datatable()
 
 day.peak.summary %>%
-  #fitler(day_desc=='learning2 day#1') %>%
+  filter(day_desc=='learning1 day#5') %>%
   #filter(ncells >= 5) %>%
   dplyr::group_by(day_desc, implant) %>%
   dplyr::summarise(ncells.mean=mean(ncells),
@@ -1132,8 +1197,125 @@ day.peak.summary %>%
 wilcox.test(current.multireward.pct ~ implant, day.peak.summary, subset=day_desc == 'learning1 day#5')
 
 ```
-Using the main peak
-```{r}
 
+```{r}
+field.peaks.df %>%
+  filter(day_desc=='learning1 day#5') %>% 
+  filter(signif.si) %>%
+  #filter( current.rew.peaks.count > 0) %>%
+  left_join(subset(field.peaks.df, day_desc=='learning2 day#2'), by=c('implant','animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
+  dplyr::mutate(at.rew.fst = current.rew.peaks.count.fst>0,
+                two.rews.fst = current.rew.peaks.count.fst==2,
+                both.rews.both.days = two.rews.fst & current.rew.peaks.count.snd==2,
+                single.rew.both.days = current.rew.peaks.count.fst==1 & current.rew.peaks.count.snd>0,
+                at.rew.both.days = at.rew.fst & current.rew.peaks.count.snd>0) %>%
+  filter(at.rew.fst) %>%
+  dplyr::group_by(implant, animal) %>% 
+  dplyr::summarise(nmatched=sum(!is.na(current.rew.peaks.count.snd)),
+                   nmatched.pct = nmatched/n(),
+                   at.rew.both.pct=mean(at.rew.both.days, na.rm = TRUE),
+                   two.rews.pct=mean(both.rews.both.days, na.rm = TRUE),
+                   )  %>%
+  dplyr::group_by(implant) %>% 
+  dplyr::summarise(median(nmatched),
+                   median(nmatched.pct),
+                   mean(at.rew.both.pct, na.rm=T),
+                   sem(at.rew.both.pct),
+                   mean(nmatched, na.rm=T),
+                   sem(two.rews.pct)) %>%
+  dplyr::mutate_if(is.double, percent, 1)
 ```
+
+
+```{r}
+field.peaks.df %>%
+  filter(day_desc=='learning1 day#5') %>% 
+  filter(signif.si) %>%
+  #filter( current.rew.peaks.count > 0) %>%
+  left_join(subset(field.peaks.df, day_desc=='learning2 day#2'), by=c('implant','animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
+  dplyr::mutate(at.rew.fst = current.rew.peaks.count.fst>0,
+                two.rews.fst = current.rew.peaks.count.fst==2,
+                both.rews.both.days = two.rews.fst & current.rew.peaks.count.snd==2,
+                single.rew.both.days = current.rew.peaks.count.fst==1 & current.rew.peaks.count.snd>0,
+                at.rew.both.days = at.rew.fst & current.rew.peaks.count.snd>0) %>%
+  filter(at.rew.fst) %>%
+  dplyr::group_by(implant) %>% 
+  dplyr::summarise(nmatched=sum(!is.na(current.rew.peaks.count.snd)),
+                   nmatched.pct = nmatched/n(),
+                   #at.rew.fst.pct = mean(at.rew.fst),
+                   at.rew.both.pct=mean(at.rew.both.days, na.rm = TRUE),
+                   #sem(at.rew.both.days),
+                   #two.rews.fst.pct = mean(two.rews.fst),
+                   two.rews.pct=mean(both.rews.both.days, na.rm = TRUE),
+                   #one.rews.pct=mean(single.rew.both.days, na.rm = TRUE)
+                   )  %>%
+  dplyr::mutate_if(is.double, percent, 1) 
+```
+
+How many cells active at previous reward are still active at that reward after learning?
+```{r}
+field.peaks.beforetest %>%
+  filter(day_desc=='learning2 day#1') %>%
+  #filter(animal=='G-BR') %>%
+  left_join(pc.test.df) %>% 
+  #filter(signif.si) %>%
+  dplyr::filter((rew.peaks.count - current.rew.peaks.count) > 0) %>%
+  left_join(filter(field.peaks.aftertest, day_desc=='learning2 day#1'), by=c('animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
+  dplyr::mutate(old.present = (rew.peaks.count.snd - current.rew.peaks.count.snd) > 0,
+                old.disappeared = !old.present,
+                old.moved = !old.present & (current.rew.peaks.count.snd > 0),
+                peaks.unmoved = old.present & (current.rew.peaks.count.fst == current.rew.peaks.count.snd),
+                peaks.increased = old.present & (rew.peaks.count.snd > rew.peaks.count.fst)) %>% 
+  dplyr::group_by(animal) %>%
+  dplyr::summarise(ncells=sum(!is.na(current.rew.peaks.count.snd)),
+                   mean(old.present, na.rm=T),
+                   mean(old.disappeared, na.rm=T),
+                   mean(old.moved, na.rm=T),
+                   mean(peaks.unmoved, na.rm=T),
+                   mean(peaks.increased, na.rm=T)) %>%
+  filter(ncells > 0) %>%
+  dplyr::mutate_if(is.double, scales::percent, 1) 
+```
+How many cells active at previous reward are still active at that reward during trial learning?
+```{r}
+transloc.rew.pf.change = 
+  filter(field.peaks.beforetest, day_desc=='learning2 day#1') %>%
+  #filter(field.peaks.df, day_desc=='learning2 day#1') %>%
+  left_join(mouse.meta.df) %>%
+  left_join(pc.test.df) %>% 
+  #filter(signif.si) %>% 
+  dplyr::filter((rew.peaks.count - current.rew.peaks.count) > 0) %>%
+  left_join(filter(field.peaks.df, day_desc=='learning2 day#2'), by=c('implant', 'animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
+  dplyr::mutate(old.present = (rew.peaks.count.snd - current.rew.peaks.count.snd) > 0,
+                old.disappeared = !old.present,
+                old.moved = !old.present & (current.rew.peaks.count.snd > 0),
+                peaks.unmoved = old.present & (current.rew.peaks.count.fst == current.rew.peaks.count.snd),
+                old.present.and.new.present = old.present & current.rew.peaks.count.snd > 0,
+                peaks.increased = old.present & (rew.peaks.count.snd > rew.peaks.count.fst))  
+
+transloc.rew.pf.change %>%
+  dplyr::group_by(implant, animal) %>%
+  dplyr::summarise(ncells=sum(!is.na(current.rew.peaks.count.snd)),
+                   old.present.mean=mean(old.present, na.rm=T),
+                   old.disappeared.mean=mean(old.disappeared, na.rm=T),
+                   old.moved.mean=mean(old.moved, na.rm=T),
+                   old.and.new.present.mean=mean(old.present.and.new.present, na.rm=T),
+                   peaks.unmoved.mean=mean(peaks.unmoved, na.rm=T),
+                   peaks.increased.mean=mean(peaks.increased, na.rm=T)) %>%
+  filter(ncells>0) %>%
+  dplyr::mutate_if(is.double, scales::percent, 1) 
+```
+
+
+```{r}
+field.peaks.beforetest %>%
+  left_join(trials.meta.df) %>%
+  filter(day_desc=='learning2 day#1', animal=='D-BR') %>%
+  left_join(pc.test.df) %>% 
+  filter(signif.si) %>%
+  dplyr::filter((rew.peaks.count - current.rew.peaks.count) > 0) %>%
+  left_join(subset(field.peaks.df, day_desc=='learning2 day#1'), by=c('implant','animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
+  dplyr::filter((rew.peaks.count.snd - current.rew.peaks.count.snd) > 0) %>% View
+```
+
 
