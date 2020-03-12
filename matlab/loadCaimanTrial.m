@@ -68,15 +68,14 @@ for session_i = 1:numel(session_info.session_fpaths)
     sessionNo = str2num(replace(session_fpath_parts{end}, 'Session', ''));
 
 	trackingDir = fullfile(datedRootDir, exp_title, 'movie', 'tracking');
-	trackingFile = [ dateStr '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
-	trackingFilepath = [trackingDir filesep trackingFile]
-    if ~exist(trackingFilepath, 'file')
-        trackingFile = [ dateStr '-' exp_title '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
-	    trackingFilepath = [trackingDir filesep trackingFile]
+    filenamepattern = [ dateStr '*' '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
+    trackfiles = dir(fullfile(trackingDir, filenameSuffix));
+    if numel(trackfiles) > 0
+        trackingFilepath = fullfile(trackingDir trackfiles.name(1))
     end
     if 	~exist(trackingFilepath, 'file')
         warning('No tracking file for session: %s', session_info.session_fpaths{session_i})
-	end
+    end
     if strcmp(exp_title, 'homecage') || ...
            ~exist(trackingFilepath, 'file')
         sessionData = table();
