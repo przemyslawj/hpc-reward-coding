@@ -1,0 +1,97 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+set.seed(3456)
+nplace.fields=100
+r = runif(nplace.fields)
+set.seed(3457)
+alpha = runif(nplace.fields, 0, 2)
+field.x = (r * cospi(alpha) / 2 + 0.5) * 100
+field.y = (r * sinpi(alpha) / 2 + 0.5) * 100
+```
+
+```{r}
+
+rews.df = filter(test.rewards.df, day_desc=='learning2 day#1')
+rew.distances.df= map_dfr(
+  unique(rews.df$animal), ~ 
+  data.frame(min.rew.dist=calc.min.rew.dist(rews.df, NULL, .x, field.x, field.y)$rew.dist,
+             animal=.x))
+```
+
+```{r}
+rew.distances.df %>%
+  #filter(animal %in% c('C-1R', 'D-BR')) %>%
+  ggplot() +
+  geom_density(aes(x=min.rew.dist)) +
+  xlab('Reward distance (cm)') +
+  facet_wrap(. ~ animal, ncol=4) +
+  geom_vline(xintercept=20, linetype='dashed')+
+  ggplot2::coord_flip()
+```
+
+Percent of cells at reward for different thresholds
+```{r}
+get.pct.at.rew = function(rew.distances.df, thr) {
+  rew.distances.df %>%
+    dplyr::mutate(at.rew = min.rew.dist <= thr) %>%
+    dplyr::group_by(animal) %>%
+    dplyr::summarise(pct.at.rew = mean(at.rew)) %>%
+    dplyr::summarise(thr=thr,
+                     mean.pct=mean(pct.at.rew),
+                     sem.pct = sem(pct.at.rew))
+}
+
+map_dfr(c(10, 15, 20, 25, 30, 35, 40), ~ get.pct.at.rew(rew.distances.df, .x)) 
+```
+
+# Counting the place fields overlapping with the reward zone
+Genera place fields
+```{r}
+simulated.fields = list()
+
+for (i in 1:nplace.fields) {
+  M = matrix(data = 0, nrow=nbins, ncol=nbins)
+  M[floor(field.x[i] / bin.size), floor(field.y[i] / bin.size)] = 1
+  M1 = gauss2dsmooth(M, lambda=0.8, nx=7, ny=7)
+  
+  #field.size = sum(M1 >= 0.25 * max(M1))
+  for (animal_name in unique(rewards.df$animal)) {
+    date_str = subset(rews.df, animal==animal_name)$date[1]
+    simulated.fields[[animal_name]][[date_str]][[paste(i)]] = M1
+  }
+}
+```
+
+```{r warning=FALSE}
+calc.pct.peaks.overlapping = function(max.rew.dist.thr=15) {
+  rews.df$current_loc = TRUE
+  simulated.peaks.df = map2_dfr(trial.days$date, 
+                                trial.days$animal, 
+                                ~ calc.field.peaks.info(.x, .y, simulated.fields, 
+                                                        rews.df = rews.df,
+                                                        max.rew.dist.thr=max.rew.dist.thr))
+  
+  group_by(simulated.peaks.df, animal) %>%
+    dplyr::summarise(mean.rew.peaks.count = mean(rew.peaks.count)) %>%
+    dplyr::summarise(max.rew.dist.thr=max.rew.dist.thr,
+                     mean(mean.rew.peaks.count),
+                     sem(mean.rew.peaks.count))
+}
+
+map_dfr(c(10, 15, 20, 25, 30), ~ calc.pct.peaks.overlapping(.x)) 
+```
+
+
+mean(mean.rew.peaks.count)
+<dbl>
+sem(mean.rew.peaks.count)
+<dbl>
+0.1554545	0.01410117			
+0.2600000	0.02231999			
+0.3927273	0.03773330			
+0.5718182	0.05491842			
+0.7209091	0.04745246	

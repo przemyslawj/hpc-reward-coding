@@ -31,7 +31,7 @@ fieldPeaks = function(M, minpeaksize=3, minpeakdistance=4, min.peakheight = 0.33
   return(maxRowCol)
 }
 
-findPeaksAtRewards = function(M, rewLocXY, minpeaksize=3, min.peakheight=0.33, max.rewdistance=2) {
+findPeaksAtRewards = function(M, rewLocXY, minpeaksize=3, min.peakheight=0.20, max.rewdistance=2) {
   sigma = 1.4
   M1 = gauss2dsmooth(M, lambda=sigma, nx=11, ny=11)
   minpeakval = max(M1, na.rm=TRUE) * min.peakheight

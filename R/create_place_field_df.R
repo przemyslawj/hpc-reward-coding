@@ -60,7 +60,7 @@ calc.spatial.info = function(data.traces, plot.dir='/tmp/pf_stability/',
   occupancies = list()
 
   #response.bin.quantiles = c(0.2, 0.5, 0.8, 0.9, 0.95, 1.0)
-  response.bin.quantiles = c(0.5, 0.95, 1.0)
+  response.bin.quantiles = c(0.9, 1.0)
   binned.data.traces = bin.time.space(data.traces[x >= 0 & y >= 0, ],
                                       nbins.x = nbins,
                                       nbins.y = nbins,

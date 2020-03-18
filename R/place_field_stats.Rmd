@@ -278,7 +278,11 @@ Distance of place fields to goal
 
 calc.min.rew.dist = function(rew.df, day, animal_name, field.x, field.y) {
   rew.df = as.data.table(rew.df)
-  rews = rew.df[date==format(day) & animal == animal_name, ]
+  rews = rew.df[animal == animal_name, ]
+  if (!is.null(day) && ('date' %in% colnames(rews.df))) {
+    
+    rews = rews[date==format(day) ,]  
+  }
   if (nrow(rews)==0 | length(field.x) == 0) {
     return(list(location.ordinal=0, rew.dist=NA))
   }
@@ -1033,6 +1037,17 @@ prev.locations.df = all.locations.df %>%
 ```
 
 ```{r}
+fst.moved.location.df = all.locations.df %>%
+  filter(!is_test) %>%
+  add_prev_locations(prev.loc.set.diff=1) %>%
+  filter(!current_loc, prev_loc_set==1) %>% 
+  ungroup() %>%
+  dplyr::select(-date) %>%
+  dplyr::distinct()
+```
+
+
+```{r}
 prev.locations.df = data.table(prev.locations.df)
 setkey(prev.locations.df, date, animal)
 
@@ -1070,12 +1085,17 @@ pc.prev.rew %>%
 
 For each place field calculate the count of its peaks, and how many of them are in the rew or prev rew zone
 ```{r warning=FALSE}
-max.rew.dist.thr = 15
+
 calc.field.peaks.info = function(day, animal_name, 
                                  fields.list=run.fields,
-                                 rews.df=prev.locations.df) {
-  rews.df = as.data.table(rews.df)
-  rew.df = rews.df[animal==animal_name & date==day, ]
+                                 rews.df=fst.moved.location.df,
+                                 max.rew.dist.thr=20) {
+  rews.df = data.table(rews.df)
+  if ('date' %in% colnames(rews.df)) {
+    rew.df = rews.df[animal==animal_name & date==day, ]
+  } else {
+    rew.df = rews.df[animal==animal_name, ]
+  }
   if (nrow(rew.df) == 0) {
     return(data.frame())
   }
@@ -1086,9 +1106,9 @@ calc.field.peaks.info = function(day, animal_name,
   map_dfr(cell_names, ~ {
     cell_name = .x
     field = fields.list[[animal_name]][[day]][[paste(cell_name)]]
-    #peaks.rowcol = fieldPeaks(field) * bin.size
-    rew.df = rew.df[, `:=`(x=ceil(trans_x/bin.size), y=ceil(trans_y/bin.size))]
-    peaks.rowcol = findPeaksAtRewards(field, rew.df, max.rewdistance = max.rew.dist.thr / bin.size)
+    peaks.rowcol = fieldPeaks(field) 
+    #rew.df = rew.df[, `:=`(x=ceil(trans_x/bin.size), y=ceil(trans_y/bin.size))]
+    #peaks.rowcol = findPeaksAtRewards(field, rew.df, max.rewdistance = max.rew.dist.thr / bin.size)
     peaks.rowcol = peaks.rowcol * bin.size
     
     if (nrow(peaks.rowcol) > 0) {
@@ -1096,17 +1116,19 @@ calc.field.peaks.info = function(day, animal_name,
     } else {
       min.rew.dist.res = list(rew.dist=100, location.ordinal=-1)
     }
-    loc.ordinals = unique(min.rew.dist.res$location.ordinal)
-    rew.peaks.index = which(min.rew.dist.res$rew.dist <= max.rew.dist.thr + bin.size/2)
+    peak.atrew.index = which(min.rew.dist.res$rew.dist <= max.rew.dist.thr)
+    
+    loc.ordinals.with.peaks = unique(min.rew.dist.res$location.ordinal[peak.atrew.index])
     
     return(list(
       animal = animal_name,
       date = day,
       cell_id = cell_name,
       maxpeakval = max(field, na.rm=TRUE),
-      npeaks = nrow(peaks.rowcol),
-      rew.peaks.count = length(rew.peaks.index),  
-      current.rew.peaks.count = sum(rew.df[location_ordinal %in% loc.ordinals[rew.peaks.index], current_loc], na.rm = TRUE)
+      npeaks.at.rew = length(peak.atrew.index),
+      rew.peaks.count = length(loc.ordinals.with.peaks),  
+      current.rew.peaks.count = sum(rew.df[location_ordinal %in% loc.ordinals.with.peaks, current_loc], na.rm = TRUE),
+      peak2rew.mindist = min(min.rew.dist.res$rew.dist)
     ))
   })
   
@@ -1137,11 +1159,34 @@ field.peaks.aftertest = map2_dfr(trial.days$date,
 field.peaks.aftertest$exp_title = 'aftertest'
 field.peaks.aftertest$cell_id = as.integer(field.peaks.aftertest$cell_id)
 field.peaks.aftertest = left_join(field.peaks.aftertest, trials.meta.df)
-
-field.peaks.all = bind_rows(field.peaks.aftertest,
-                            field.peaks.beforetest,
-                            field.peaks.df)
 ```
+Peaks in place fields from habituation with regards to first reward locations
+```{r warning=FALSE}
+habit.future.rewards.df = trials.meta.df %>%
+  filter(exp=='habituation') %>%
+  dplyr::mutate(location_set=2) %>%
+  left_join(filter(prev.locations.df, !is_test, !current_loc) %>% dplyr::select(-date), 
+            by=c('location_set', 'animal'))
+
+field.peaks.habituation = map2_dfr(trial.days$date, 
+                                   trial.days$animal, 
+                                    ~ calc.field.peaks.info(.x, .y, run.fields, rews.df=fst.moved.location.df))
+field.peaks.habituation$exp_title = 'habituation'
+field.peaks.habituation$cell_id = as.integer(field.peaks.habituation$cell_id)
+field.peaks.habituation = left_join(field.peaks.habituation, trials.meta.df) %>%
+  left_join(mouse.meta.df)
+```
+```{r}
+field.peaks.habituation %>% 
+  left_join(place.cell.db) %>%
+  filter(signif.si) -> a
+a.hist = hist(subset(a, implant=='dCA1')$rew.peaks.count)
+a.hist$counts
+
+a.hist = hist(subset(a, implant=='vCA1')$rew.peaks.count)
+a.hist$counts
+```
+
 
 
 ```{r}
@@ -1164,10 +1209,10 @@ day.peak.summary = field.peaks.df %>%
   dplyr::summarise(ncells=n(),
                    signif.pct=sum(signif.si)/ncells,
                    hasrew.peak.pct=sum(current.rew.peaks.count > 0) / ncells,
-                   multipeak.rew.pct = sum((npeaks > 1) & (rew.peaks.count > 0)) / ncells,
+                   multipeak.rew.pct = sum((npeaks.at.rew > 1) & (rew.peaks.count > 0)) / ncells,
                    multireward.pct = sum(rew.peaks.count > 1) / ncells,
                    current.multireward.pct = sum(current.rew.peaks.count > 1) / ncells,
-                   singleprev.reward.peak = sum((npeaks==1) & (rew.peaks.count - current.rew.peaks.count > 0)) / ncells,
+                   singleprev.reward.peak = sum((rew.peaks.count==1) & (rew.peaks.count - current.rew.peaks.count > 0)) / ncells,
                    hasprev.reward = sum((rew.peaks.count - current.rew.peaks.count > 0)) / ncells) 
 
 day.peak.summary %>%
@@ -1285,7 +1330,7 @@ transloc.rew.pf.change =
   left_join(pc.test.df) %>% 
   #filter(signif.si) %>% 
   dplyr::filter((rew.peaks.count - current.rew.peaks.count) > 0) %>%
-  left_join(filter(field.peaks.df, day_desc=='learning2 day#2'), by=c('implant', 'animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
+  left_join(filter(field.peaks.df, day_desc=='learning2 day#1'), by=c('implant', 'animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
   dplyr::mutate(old.present = (rew.peaks.count.snd - current.rew.peaks.count.snd) > 0,
                 old.disappeared = !old.present,
                 old.moved = !old.present & (current.rew.peaks.count.snd > 0),
@@ -1305,6 +1350,44 @@ transloc.rew.pf.change %>%
   filter(ncells>0) %>%
   dplyr::mutate_if(is.double, scales::percent, 1) 
 ```
+
+How many of the cells present at prev reward were place cells at that spot.
+Few cells at rews on L2D1 matching with the HD3. confirm with recall.
+
+Expected about 30 % of place fields to be at reward, and this is lower...
+```{r}
+transloc.rew.pf.change %>%
+  left_join(filter(field.peaks.habituation, day_desc == 'habituation day#3') %>% dplyr::select(-date, -day_desc), 
+            by=c('animal', 'cell_id')) %>% 
+  filter(!is.na(old.present)) %>%
+  #filter(old.present) %>%
+  dplyr::mutate(present.from.habit = old.present & rew.peaks.count > 0) %>%
+  dplyr::group_by(animal) %>%
+  dplyr::summarise(m.present.from.habit=sum(present.from.habit, na.rm=T)/n(),
+                   ncells.matched=sum(!is.na(rew.peaks.count)),
+                   m.present.from.habit.narm=mean(present.from.habit, na.rm=T))
+```
+
+Check what happened with the place fields which were at the reward from during habituation
+```{r}
+filter(field.peaks.habituation, day_desc=='habituation day#3') %>%
+  left_join(filter(field.peaks.beforetest, day_desc=='learning2 day#1'),
+            by=c('animal', 'cell_id'),
+            suffix=c('.habit', '.test')) %>% 
+  dplyr::mutate(loc.present.test=(rew.peaks.count.test - current.rew.peaks.count.test) > 0,
+                loc.present.habit=rew.peaks.count.habit > 0,
+                loc.moved.to = !loc.present.habit & loc.present.test,
+                loc.stayed=loc.present.habit & loc.present.test) %>%
+  #filter(loc.present.habit) %>%
+  dplyr::group_by(animal) %>%
+  dplyr::summarise(ncells.matched=sum(!is.na(loc.present.test)),
+                   loc.present.habit.pct=mean(loc.present.habit),
+                   loc.stayed.pct=mean(loc.stayed, na.rm=T) / loc.present.habit.pct,
+                   loc.moved.to.pct=mean(loc.moved.to, na.rm=T),
+                   loc.present.test.pct=mean(loc.present.test, na.rm=T))
+  
+```
+
 
 
 ```{r}

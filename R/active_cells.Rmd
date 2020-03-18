@@ -416,12 +416,29 @@ ggsave('/tmp/cell_recall_pct.svg',
 Next day recall
 ```{r}
 cell.overlap.df %>%
-  dplyr::mutate(day1.str=format(day1)) %>%
-  left_join(trials.meta.df, by=c('animal'='animal', 'day1.str'='date')) %>%
+  dplyr::mutate(day1.str=format(day1), day2.str=format(day2)) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'day1.str'='date')) %>% 
+  dplyr::rename(day_desc1 = day_desc) %>% 
+  left_join(trials.meta.df, by=c('animal'='animal', 'day2.str'='date')) %>% 
+  dplyr::rename(day_desc2 = day_desc) %>%
+  #filter(as.integer(days.diff) == 1)  %>%
+  filter(day_desc1 == 'habituation day#3', day_desc2 == 'learning2 day#1') %>%
+  dplyr::mutate(nrecalled=recall/100*nfstday.cells,
+                recall=round(recall)) %>%
+  select(animal, implant, day_desc1, day_desc2, day2, recall, nrecalled) %>%
+  DT::datatable()
+```
+```{r}
+cell.overlap.df %>%
+  dplyr::mutate(day1.str=format(day1), day2.str=format(day2)) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'day1.str'='date')) %>% 
+  dplyr::rename(day_desc1 = day_desc) %>% 
+  left_join(trials.meta.df, by=c('animal'='animal', 'day2.str'='date')) %>% 
+  dplyr::rename(day_desc2 = day_desc) %>%
   filter(as.integer(days.diff) == 1)  %>%
   dplyr::mutate(nrecalled=recall/100*nfstday.cells,
                 recall=round(recall)) %>%
-  select(animal, implant, day_desc, day2, recall, nrecalled) %>%
+  select(animal, implant, day_desc1, day_desc2, recall, nrecalled) %>%
   DT::datatable()
 ```
 

@@ -14,6 +14,13 @@ get.subject.result.dirs = function(root_dir, subject) {
   sapply(dated_dirs, FUN=function(x) {paste0(x, '/caiman/', subject, '/filtered/')})
 }
 
+get.trial.meta.from.path = function(caimg_result_dir) {
+  dir.parts = str_split(caimg_result_dir, '/')[[1]]
+  animal_name = dir.parts[length(dir.parts) - 2]
+  date_str = dir.parts[length(dir.parts) - 4]
+  return(list(animal=animal_name, date=date_str))
+}
+
 find.caimg.dir = function(caimg_result_dirs, subject, date) {
   Filter(
     function(caimg_dir) {
