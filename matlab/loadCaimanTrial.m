@@ -69,9 +69,9 @@ for session_i = 1:numel(session_info.session_fpaths)
 
 	trackingDir = fullfile(datedRootDir, exp_title, 'movie', 'tracking');
     filenamepattern = [ dateStr '*' '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
-    trackfiles = dir(fullfile(trackingDir, filenameSuffix));
+    trackfiles = dir(fullfile(trackingDir, filenamepattern));
     if numel(trackfiles) > 0
-        trackingFilepath = fullfile(trackingDir trackfiles.name(1))
+        trackingFilepath = fullfile(trackingDir trackfiles(1).name)
     end
     if 	~exist(trackingFilepath, 'file')
         warning('No tracking file for session: %s', session_info.session_fpaths{session_i})
