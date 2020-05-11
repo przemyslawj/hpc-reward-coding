@@ -4,7 +4,28 @@ output: html_notebook
 ---
 
 ```{r}
+library(dplyr)
 library(permute)
+library(raster)
+library(smoothie)
+library(tidyr)
+library(data.table)
+library(datatrace)
+library(DT)
+
+# Plotting
+library(ggplot2)
+library(cowplot)
+gtheme = theme_minimal() + theme_cowplot() +
+  theme(text = element_text(size=10), axis.text = element_text(size=8))
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+
+source('distances.R')
+source('locations.R')
+source('utils.R')
+source('simulations/sim_rew_distances.R')
 ```
 
 The code assumes data frames with place fields information are loaded in the environment.
@@ -106,7 +127,7 @@ field.size.thresh.50 = 100
 field.size.thresh.25 = 100
 #field.peak.thresh = 2
 field.peak.thresh = 0
-field.cor.min = 0.3
+field.cor.min = 0.0
 
 is.place.cell = function(is.signif, mutual.info.wo.bias, field.size.50, field.size.25, field.max, field.mean, field.cor) {
   is.pc = is.signif & 
@@ -118,7 +139,7 @@ is.place.cell = function(is.signif, mutual.info.wo.bias, field.size.50, field.si
   ifelse(is.na(is.pc), FALSE, is.pc)
 }
 
-# Classification of place cells based on MI on each subset of day sessions
+# Classification of place cells based on day SI 
 run.trials.pc = run.trials.si %>%
   mutate(is.pc = is.place.cell(signif.si, 
                                mutual.info - mutual.info.bias, 
@@ -131,8 +152,11 @@ place.cell.db = run.trials.pc %>%
          sparsity, field.size.50, field.size.25,
          early.late.cor, signif.mi, signif.si) %>%
   ungroup()
+```
 
-place.cell.db %>% group_by(implant, animal, exp) %>% 
+```{r place_cell_summary}
+place.cell.db %>% 
+  group_by(implant, animal, exp) %>% 
   dplyr::summarise(pc.pct=sum(is.pc)/n() * 100,
                    si.signif.pct=sum(signif.si)/n() * 100) %>%
   group_by(implant, exp) %>%
@@ -154,7 +178,8 @@ run.trials.pc %>%
   facet_grid(date ~ animal) +
   xlim(c(1,6))
 ```
-Sparsity of the selected cells
+
+Early-late correlation of spatial information
 ```{r}
 run.trials.pc %>%
   ggplot(aes(x=early.late.cor, y=spatial.information, color=is.pc)) +
@@ -175,6 +200,8 @@ run.trials.pc %>%
   xlab('Date') + 
   ylab('Place cells (%)')
 ```
+
+
 ```{r}
 run.trials.pc %>%
   filter(exp=='learning', day_desc != 'learning3 day#3') %>%
@@ -211,9 +238,9 @@ run.trials.pc %>%
   facet_grid(exp ~ .)
 ```
 
-
 ## Place field size and sparsity dCA1 vs vCA1
 Sparsity not different between vCA1 and dCA1, possibly larger fields in vCA1
+
 ```{r}
 cheeseboard.bin.cm = 9
 
@@ -275,38 +302,16 @@ test.rewards.df = all.locations.df %>%
 ```
 Distance of place fields to goal
 ```{r}
-
-calc.min.rew.dist = function(rew.df, day, animal_name, field.x, field.y) {
-  rew.df = as.data.table(rew.df)
-  rews = rew.df[animal == animal_name, ]
-  if (!is.null(day) && ('date' %in% colnames(rews.df))) {
-    
-    rews = rews[date==format(day) ,]  
-  }
-  if (nrow(rews)==0 | length(field.x) == 0) {
-    return(list(location.ordinal=0, rew.dist=NA))
-  }
-  dist.vals = c()
-  for (rew_i in 1:nrow(rews)) {
-    dist.vals = cbind(
-      dist.vals,
-      norm2(rews$trans_x[rew_i] - field.x, rews$trans_y[rew_i] - field.y))
-  }
-  
-  min.i = apply(dist.vals, 1, which.min)
-  min.dist = apply(dist.vals, 1, min)
-  return(list(location.ordinal=rews$location_ordinal[min.i],
-              rew.dist=min.dist))
-}
-
 merged.run.trials.pc = left_join(run.trials.pc, locations.df, by=c('animal', 'date'))
 
 goal.cell.max.dist = 15
 pc.rew.dist.df = merged.run.trials.pc %>%
   dplyr::group_by(date, day_desc, animal) %>%
   dplyr::mutate(
-        closest.location.ordinal=calc.min.rew.dist(rewards.df, date[1], animal[1], field.max.x, field.max.y)$location.ordinal,
-        min.rew.dist=calc.min.rew.dist(rewards.df, date[1], animal[1], field.max.x, field.max.y)$rew.dist) %>%
+        closest.location.ordinal=calc.min.rew.dist(filter.rews.df(rewards.df, date[1], animal[1]), 
+                                                   field.max.x, field.max.y)$location.ordinal,
+        min.rew.dist=calc.min.rew.dist(filter.rews.df(rewards.df, date[1], animal[1]), 
+                                       field.max.x, field.max.y)$rew.dist) %>%
   dplyr::mutate(is.goal.cell = signif.si & (min.rew.dist <= goal.cell.max.dist)) %>%
   replace_na(is.goal.cell=FALSE)
 
@@ -366,13 +371,18 @@ habit.run.trials.pc = merged.run.trials.pc %>%
   dplyr::top_n(1, wt=desc(rew.dist)) %>% # choose closer reward
   dplyr::rename(min.rew.dist=rew.dist)
   
-# select place cells
 pc.test.df = beforetest.trials.si %>%
   mutate(is.pc = is.place.cell(signif.si, mutual.info - mutual.info.bias, field.size.50, field.size.25, field.max, field.mean, 1.0))
 # Pct of place cell during test runs
-pc.test.df %>% group_by(date, animal) %>%
+pc.test.df %>% 
+  left_join(mouse.meta.df, by='animal') %>% 
+  group_by(date, animal, implant) %>%
   dplyr::summarise(npc=sum(is.pc),
-                   pc.pct= (sum(is.pc)/n()*100) %>% round)
+                   pc.pct= mean(is.pc),
+                   signif.pct = mean(signif.si)) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(implant) %>%
+  dplyr::summarise(mean(npc), mean(pc.pct), mean(signif.pct), sem(signif.pct))
 
 pc.test.df = pc.test.df %>%
   left_join(mouse.meta.df, by='animal') %>% 
@@ -382,36 +392,57 @@ pc.test.df = pc.test.df %>%
 # calc dist to rew
 pc.test.df = pc.test.df %>%
   ddply(.(date, animal, cell_id), dplyr::mutate, 
-        min.rew.dist=calc.min.rew.dist(beforetest.rewards.df, date[1], animal[1], field.max.x[1], field.max.y[1])$rew.dist,
-        closest.location.ordinal=calc.min.rew.dist(beforetest.rewards.df, date[1], animal[1], field.max.x[1], field.max.y[1])$location.ordinal)
+        min.rew.dist=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]), 
+                                       field.max.x[1], field.max.y[1])$rew.dist,
+        closest.location.ordinal=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
+                                                   field.max.x[1], field.max.y[1])$location.ordinal)
 
 ```
 
 Compare with the test trials with habituation trials
-```{r}
+```{r warning=FALSE}
 baseline.trials.pc = filter(habit.run.trials.pc, day_desc.activity=='habituation day#3') %>%
   dplyr::rename(date=date.reward)
+
+uniform.xycoords = sim.xy.coord(nplace.fields=100)
+uniform.pc.dist = calc.rew.distances.df(filter(test.rewards.df, exp_title=='beforetest'),
+                                        uniform.xycoords$field.x, uniform.xycoords$field.y) %>%
+  left_join(test.rewards.df, by=c('animal', 'location_set')) %>%
+  dplyr::rename(day_desc.reward = day_desc)
+
 g.test.pf.shift = ggplot() +
   geom_density(data=baseline.trials.pc, aes(x=min.rew.dist), linetype='dashed') +
-  geom_density(data=filter(pc.test.df, signif.si), aes(x=min.rew.dist), alpha=0.2) +
-  #facet_grid(. ~ animal) +
+  geom_density(data=filter(pc.test.df, signif.si), aes(x=min.rew.dist)) +
+  geom_density(data=uniform.pc.dist, aes(x=min.rew.dist), linetype='dotted') +
+  facet_wrap(animal ~ .) +
   #facet_grid(implant ~ day_desc.reward) +
-  facet_grid(. ~ implant) +
+  #facet_grid(. ~ implant) +
   geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
   coord_flip() +
   gtheme +
   xlim(c(0,100)) +
-  xlab('Place field distance from reward (%)') + ylab('Density')
+  xlab('Place field distance from closer reward (%)') + ylab('Density')
 g.test.pf.shift
 ```
+
+Place cells not distributed uniformly across space, even durng habituation. Can I have some confidence intervals around these?
+Idea: Check the distribution against the scaled by occupation probability.
+
+
 
 Compare the last day trials with habituation trials
 ```{r}
 baseline.trials.pc = filter(habit.run.trials.pc, day_desc.activity=='habituation day#3', animal!='A-BL') 
 compared.trials.pc = filter(habit.run.trials.pc, date.activity == format(as.Date(date.reward) - 1), animal!='A-BL')
+
+beforetest.days = c('learning2 day#1', 'learning3 day#1', 'learning3 day#3')
 ggplot() +
-  geom_density(data=baseline.trials.pc, aes(x=min.rew.dist), linetype='dashed') +
-  geom_density(data=compared.trials.pc, aes(x=min.rew.dist), alpha=0.2) +
+  geom_density(data=filter(baseline.trials.pc, day_desc.reward %in% beforetest.days),
+               aes(x=min.rew.dist), linetype='dashed') +
+  geom_density(data=filter(compared.trials.pc, day_desc.reward %in% beforetest.days), 
+               aes(x=min.rew.dist), alpha=0.2) +
+  geom_density(data=filter(uniform.pc.dist, day_desc.reward %in% beforetest.days),
+               aes(x=min.rew.dist), linetype='dotted') +
   geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
   facet_grid(implant ~ day_desc.reward) +
   #facet_grid(implant ~ date.reward , scales = 'free') +
@@ -542,7 +573,8 @@ g.pf.shift.fig = plot_grid(g.test.pf.shift,
 ggsave('/tmp/test_pf_shift.svg', g.pf.shift.fig, 
        width=26, height=11, units='cm')
 ```
-Statistical tests for change
+
+Statistical tests for number of goal cells vs number of cells at those locations during habituation
 ```{r}
 wilcox.test(pct.reward ~ group, subset(place.cell.change.pct, implant=='vCA1'), paired=TRUE)
 wilcox.test(pct.reward ~ group, subset(place.cell.change.pct, implant=='dCA1'), paired=TRUE)
@@ -678,6 +710,7 @@ for (animal_name in unique(pc.rew.dist.df$animal)) {
 }
 ```
 
+Distance between place field centre on consecutive days
 ```{r}
 pc.change.df2 = pc.change.df %>% left_join(field.xy.dist.thr.df, by=c('animal', 'date.fst', 'date.snd', 'cell_id'))
 pc.change.df2 %>%
@@ -696,8 +729,7 @@ fst.learning.days = c(fst.learning.day, fst.learning.days)
 ```
 
 
-How many place cells have their field at the same place:
-
+How many place cells have their field at the same place
 ```{r}
 pc.change.df$days.diff = as.factor(pc.change.df$days.diff)
 pc.change.df %>%
@@ -950,7 +982,7 @@ Field correlations
 ```{r}
 pc.change.df %>%
   filter(days.diff==1, n > 1) %>%
-  #filter(mean.pc >= 0.5) %>%
+  filter(mean.pc >= 0.5) %>%
   #filter(mean.pc == 1.0) %>%
   sample.by.animal() %>%
   filter(pc.fst) %>%
@@ -962,6 +994,7 @@ pc.change.df %>%
   labs(fill='Place cell\non both days', x='Reference day', y='Field correlation') + 
   geom_hline(aes(yintercept=0), linetype='dashed') 
 ```
+
 ```{r}
 pc.nextday.unchanged %>%
   sample.by.animal() %>%
@@ -971,6 +1004,7 @@ pc.nextday.unchanged %>%
   facet_grid(implant ~ .) +
   labs(y='Field correlation', x='', color='Place cell\non both days')
 ```
+
 ```{r}
 wilcox.test(field.cor ~ stage, data=pc.nextday.unchanged)
 ```
@@ -1063,8 +1097,10 @@ get.prev.loc.ordinal = function(date_str, animal_name) {
 pc.prev.rew = merged.run.trials.pc %>%
   dplyr::group_by(date, day_desc, animal) %>%
   dplyr::mutate(
-        closest.location.ordinal=calc.min.rew.dist(prev.locations.df, date[1], animal[1], field.max.x, field.max.y)$location.ordinal,
-        min.rew.dist=calc.min.rew.dist(prev.locations.df, date[1], animal[1], field.max.x, field.max.y)$rew.dist,
+        closest.location.ordinal=calc.min.rew.dist(filter.rews.df(prev.locations.df, date[1], animal[1]),
+                                                   field.max.x, field.max.y)$location.ordinal,
+        min.rew.dist=calc.min.rew.dist(filter.rews.df(prev.locations.df, date[1], animal[1]),
+                                       field.max.x, field.max.y)$rew.dist,
         is.prev.loc=closest.location.ordinal == get.prev.loc.ordinal(date[1], animal[1])) %>%
   dplyr::mutate(is.prev.rew.closest = is.prev.loc,
                 is.new.rew.closest =  !is.prev.loc)
@@ -1086,16 +1122,13 @@ pc.prev.rew %>%
 For each place field calculate the count of its peaks, and how many of them are in the rew or prev rew zone
 ```{r warning=FALSE}
 
-calc.field.peaks.info = function(day, animal_name, 
+calc.field.peaks.info = function(day, 
+                                 animal_name, 
                                  fields.list=run.fields,
                                  rews.df=fst.moved.location.df,
                                  max.rew.dist.thr=20) {
-  rews.df = data.table(rews.df)
-  if ('date' %in% colnames(rews.df)) {
-    rew.df = rews.df[animal==animal_name & date==day, ]
-  } else {
-    rew.df = rews.df[animal==animal_name, ]
-  }
+  rew.df = filter.rews.df(rews.df, day, animal_name)
+
   if (nrow(rew.df) == 0) {
     return(data.frame())
   }
@@ -1112,7 +1145,7 @@ calc.field.peaks.info = function(day, animal_name,
     peaks.rowcol = peaks.rowcol * bin.size
     
     if (nrow(peaks.rowcol) > 0) {
-      min.rew.dist.res = calc.min.rew.dist(rew.df, day, animal_name, peaks.rowcol[,'row'], peaks.rowcol[,'col'])
+      min.rew.dist.res = calc.min.rew.dist(rew.df, peaks.rowcol[,'row'], peaks.rowcol[,'col'])
     } else {
       min.rew.dist.res = list(rew.dist=100, location.ordinal=-1)
     }
@@ -1123,7 +1156,7 @@ calc.field.peaks.info = function(day, animal_name,
     return(list(
       animal = animal_name,
       date = day,
-      cell_id = cell_name,
+      cell_id = as.integer(cell_name),
       maxpeakval = max(field, na.rm=TRUE),
       npeaks.at.rew = length(peak.atrew.index),
       rew.peaks.count = length(loc.ordinals.with.peaks),  
@@ -1138,28 +1171,28 @@ trial.days = trials.meta.df %>%
   dplyr::select(date, animal) %>%
   dplyr::distinct()
 
-field.peaks.df = map2_dfr(trial.days$date, 
-                          trial.days$animal, 
-                          ~ calc.field.peaks.info(.x, .y, run.fields))
-field.peaks.df$exp_title = 'trial'
+create.peaks.df.at.locs = function(fields, locs.df) {
+  res = map2_dfr(trial.days$date, 
+                 trial.days$animal, 
+                 ~ calc.field.peaks.info(.x, .y, fields, rews.df=locs.df))
+  res %>% 
+    left_join(trials.meta.df, by=c('animal', 'date')) %>%
+    left_join(place.cell.db, by=c('animal', 'date', 'cell_id', 'day_desc', 'exp'))
+}
 ```
 
 ```{r warning=FALSE}
+trial.peaks.at.rew = create.peaks.df.at.locs(run.fields, prev.locations.df)
+trial.peaks.at.fst.moved = create.peaks.df.at.locs(run.fields, fst.moved.location.df)
+trial.peaks.at.current.rew = create.peaks.df.at.locs(run.fields, prev.locations.df[current_loc==TRUE,])
 
-field.peaks.beforetest = map2_dfr(trial.days$date, 
-                                  trial.days$animal, 
-                                  ~ calc.field.peaks.info(.x, .y, beforetest.fields))
-field.peaks.beforetest$exp_title = 'beforetest'
-field.peaks.beforetest$cell_id = as.integer(field.peaks.beforetest$cell_id)
-field.peaks.beforetest = left_join(field.peaks.beforetest, trials.meta.df)
+beforetest.peaks.at.rew = create.peaks.df.at.locs(beforetest.fields, prev.locations.df)
+beforetest.peaks.fst.moved = create.peaks.df.at.locs(beforetest.fields, fst.moved.location.df)
 
-field.peaks.aftertest = map2_dfr(trial.days$date, 
-                                 trial.days$animal, 
-                                 ~ calc.field.peaks.info(.x, .y, aftertest.fields))
-field.peaks.aftertest$exp_title = 'aftertest'
-field.peaks.aftertest$cell_id = as.integer(field.peaks.aftertest$cell_id)
-field.peaks.aftertest = left_join(field.peaks.aftertest, trials.meta.df)
+aftertest.peaks.at.rew = create.peaks.df.at.locs(aftertest.fields, prev.locations.df)
+aftertest.peaks.fst.moved = create.peaks.df.at.locs(aftertest.fields, fst.moved.location.df)
 ```
+
 Peaks in place fields from habituation with regards to first reward locations
 ```{r warning=FALSE}
 habit.future.rewards.df = trials.meta.df %>%
@@ -1168,40 +1201,37 @@ habit.future.rewards.df = trials.meta.df %>%
   left_join(filter(prev.locations.df, !is_test, !current_loc) %>% dplyr::select(-date), 
             by=c('location_set', 'animal'))
 
-field.peaks.habituation = map2_dfr(trial.days$date, 
-                                   trial.days$animal, 
-                                    ~ calc.field.peaks.info(.x, .y, run.fields, rews.df=fst.moved.location.df))
-field.peaks.habituation$exp_title = 'habituation'
-field.peaks.habituation$cell_id = as.integer(field.peaks.habituation$cell_id)
-field.peaks.habituation = left_join(field.peaks.habituation, trials.meta.df) %>%
-  left_join(mouse.meta.df)
-```
-```{r}
-field.peaks.habituation %>% 
-  left_join(place.cell.db) %>%
-  filter(signif.si) -> a
-a.hist = hist(subset(a, implant=='dCA1')$rew.peaks.count)
-a.hist$counts
-
-a.hist = hist(subset(a, implant=='vCA1')$rew.peaks.count)
-a.hist$counts
+habituation.peaks.at.fst.moved = create.peaks.df.at.locs(run.fields, habit.future.rewards.df)
+  #left_join(mouse.meta.df)
 ```
 
 
-
+Count of field peaks at current reward
 ```{r}
-field.peaks.df$cell_id = as.integer(field.peaks.df$cell_id)
-field.peaks.df = left_join(field.peaks.df, place.cell.db) 
-
-field.peaks.df %>%
+trial.peaks.at.rew %>%
   filter(signif.si) %>%
   ggplot() +
   geom_violin(aes(x=day_desc, y=current.rew.peaks.count, color=implant)) +
   gtheme +
+  facet_grid(animal ~ .) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
+Distribution of min distance to peak 
 ```{r}
-day.peak.summary = field.peaks.df %>%
+trial.peaks.at.rew %>% 
+  filter(day_desc == 'learning1 day#5') %>%
+  ggplot(aes(x=peak2rew.mindist, color=signif.si, group=signif.si)) +
+  geom_density() + 
+  #stat_summary(aes(y=0.0), fun.x=median, geom="point", shape=23, size=2) +
+  facet_wrap(implant + animal ~ ., ncol=4) +
+  geom_vline(xintercept = 20, linetype='dashed')
+```
+
+
+
+Summary about peaks at rewards for different trial days
+```{r}
+day.peak.summary = trial.peaks.at.rew %>%
   #filter(animal == 'K-BR') %>%
   #filter(day_desc == 'learning1 day#5') %>%
   filter(signif.si) %>%
@@ -1221,10 +1251,10 @@ day.peak.summary %>%
   DT::datatable()
 
 day.peak.summary %>%
-  filter(day_desc=='learning1 day#5') %>%
+  filter(day_desc=='learning3 day#2') %>%
   #filter(ncells >= 5) %>%
   dplyr::group_by(day_desc, implant) %>%
-  dplyr::summarise(ncells.mean=mean(ncells),
+  dplyr::summarise(nsignif.cells.mean=mean(ncells),
                    nanimals=n(),
                    mean(hasrew.peak.pct),
                    sem(hasrew.peak.pct),
@@ -1240,15 +1270,18 @@ day.peak.summary %>%
   DT::datatable()
 
 wilcox.test(current.multireward.pct ~ implant, day.peak.summary, subset=day_desc == 'learning1 day#5')
+wilcox.test(current.multireward.pct ~ implant, day.peak.summary, subset=day_desc == 'learning2 day#1')
 
 ```
 
+Comparison with peaks at rewards two days after translocation. 
+Stats calculated per animal and grouped by implant
 ```{r}
-field.peaks.df %>%
+trial.peaks.at.rew %>%
   filter(day_desc=='learning1 day#5') %>% 
   filter(signif.si) %>%
   #filter( current.rew.peaks.count > 0) %>%
-  left_join(subset(field.peaks.df, day_desc=='learning2 day#2'), by=c('implant','animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
+  left_join(subset(trial.peaks.at.rew, day_desc=='learning2 day#2'), by=c('implant','animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
   dplyr::mutate(at.rew.fst = current.rew.peaks.count.fst>0,
                 two.rews.fst = current.rew.peaks.count.fst==2,
                 both.rews.both.days = two.rews.fst & current.rew.peaks.count.snd==2,
@@ -1268,16 +1301,17 @@ field.peaks.df %>%
                    sem(at.rew.both.pct),
                    mean(nmatched, na.rm=T),
                    sem(two.rews.pct)) %>%
-  dplyr::mutate_if(is.double, percent, 1)
+  dplyr::mutate_if(is.double, scales::percent, 1)
 ```
 
-
+Comparison of peaks at rewards for two trial days after translocation. 
+Stats pooled for all cells from the same implant
 ```{r}
-field.peaks.df %>%
+trial.peaks.at.rew %>%
   filter(day_desc=='learning1 day#5') %>% 
   filter(signif.si) %>%
   #filter( current.rew.peaks.count > 0) %>%
-  left_join(subset(field.peaks.df, day_desc=='learning2 day#2'), by=c('implant','animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
+  left_join(subset(trial.peaks.at.rew, day_desc=='learning2 day#2'), by=c('implant','animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
   dplyr::mutate(at.rew.fst = current.rew.peaks.count.fst>0,
                 two.rews.fst = current.rew.peaks.count.fst==2,
                 both.rews.both.days = two.rews.fst & current.rew.peaks.count.snd==2,
@@ -1294,18 +1328,19 @@ field.peaks.df %>%
                    two.rews.pct=mean(both.rews.both.days, na.rm = TRUE),
                    #one.rews.pct=mean(single.rew.both.days, na.rm = TRUE)
                    )  %>%
-  dplyr::mutate_if(is.double, percent, 1) 
+  dplyr::mutate_if(is.double, scales::percent, 1) 
 ```
 
-How many cells active at previous reward are still active at that reward after learning?
+How many cells active at the previous reward are still active at that reward after learning a new set?
+Comparison between the beforetest and aftertest.
 ```{r}
-field.peaks.beforetest %>%
+beforetest.peaks.at.rew %>%
   filter(day_desc=='learning2 day#1') %>%
   #filter(animal=='G-BR') %>%
   left_join(pc.test.df) %>% 
   #filter(signif.si) %>%
   dplyr::filter((rew.peaks.count - current.rew.peaks.count) > 0) %>%
-  left_join(filter(field.peaks.aftertest, day_desc=='learning2 day#1'), by=c('animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
+  left_join(filter(aftertest.peaks.at.rew, day_desc=='learning2 day#1'), by=c('animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
   dplyr::mutate(old.present = (rew.peaks.count.snd - current.rew.peaks.count.snd) > 0,
                 old.disappeared = !old.present,
                 old.moved = !old.present & (current.rew.peaks.count.snd > 0),
@@ -1324,13 +1359,13 @@ field.peaks.beforetest %>%
 How many cells active at previous reward are still active at that reward during trial learning?
 ```{r}
 transloc.rew.pf.change = 
-  filter(field.peaks.beforetest, day_desc=='learning2 day#1') %>%
+  filter(beforetest.peaks.at.rew, day_desc=='learning2 day#1') %>%
   #filter(field.peaks.df, day_desc=='learning2 day#1') %>%
   left_join(mouse.meta.df) %>%
   left_join(pc.test.df) %>% 
   #filter(signif.si) %>% 
   dplyr::filter((rew.peaks.count - current.rew.peaks.count) > 0) %>%
-  left_join(filter(field.peaks.df, day_desc=='learning2 day#1'), by=c('implant', 'animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
+  left_join(filter(trial.peaks.at.rew, day_desc=='learning2 day#1'), by=c('implant', 'animal', 'cell_id'), suffix=c('.fst', '.snd')) %>%
   dplyr::mutate(old.present = (rew.peaks.count.snd - current.rew.peaks.count.snd) > 0,
                 old.disappeared = !old.present,
                 old.moved = !old.present & (current.rew.peaks.count.snd > 0),
@@ -1357,7 +1392,7 @@ Few cells at rews on L2D1 matching with the HD3. confirm with recall.
 Expected about 30 % of place fields to be at reward, and this is lower...
 ```{r}
 transloc.rew.pf.change %>%
-  left_join(filter(field.peaks.habituation, day_desc == 'habituation day#3') %>% dplyr::select(-date, -day_desc), 
+  left_join(filter(habituation.peaks.at.fst.moved, day_desc == 'habituation day#3') %>% dplyr::select(-date, -day_desc), 
             by=c('animal', 'cell_id')) %>% 
   filter(!is.na(old.present)) %>%
   #filter(old.present) %>%
@@ -1370,7 +1405,7 @@ transloc.rew.pf.change %>%
 
 Check what happened with the place fields which were at the reward from during habituation
 ```{r}
-filter(field.peaks.habituation, day_desc=='habituation day#3') %>%
+filter(habituation.peaks.at.fst.moved, day_desc=='habituation day#3') %>%
   left_join(filter(field.peaks.beforetest, day_desc=='learning2 day#1'),
             by=c('animal', 'cell_id'),
             suffix=c('.habit', '.test')) %>% 
@@ -1391,7 +1426,7 @@ filter(field.peaks.habituation, day_desc=='habituation day#3') %>%
 
 
 ```{r}
-field.peaks.beforetest %>%
+beforetest.peaks.at.rew %>%
   left_join(trials.meta.df) %>%
   filter(day_desc=='learning2 day#1', animal=='D-BR') %>%
   left_join(pc.test.df) %>% 

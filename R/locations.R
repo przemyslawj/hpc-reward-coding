@@ -217,3 +217,13 @@ read.trials.meta = function(rootdirs) {
     day_ordinal))
   df
 }
+
+filter.rews.df = function(locs.df, day, animal_name) {
+  locs.df = as.data.table(locs.df)
+  locs = locs.df[animal == animal_name, ]
+  if (!is.null(day) && ('date' %in% colnames(locs))) {
+    locs = locs[date==format(day) ,]  
+  }
+  
+  return(locs)
+}

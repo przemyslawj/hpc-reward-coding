@@ -4,22 +4,13 @@ output: html_notebook
 ---
 
 ```{r}
-set.seed(3456)
-nplace.fields=100
-r = runif(nplace.fields)
-set.seed(3457)
-alpha = runif(nplace.fields, 0, 2)
-field.x = (r * cospi(alpha) / 2 + 0.5) * 100
-field.y = (r * sinpi(alpha) / 2 + 0.5) * 100
+source('sim_rew_distances.R')
+xycoords = sim.xy.coord(nplace.fields=100)
 ```
 
 ```{r}
-
 rews.df = filter(test.rewards.df, day_desc=='learning2 day#1')
-rew.distances.df= map_dfr(
-  unique(rews.df$animal), ~ 
-  data.frame(min.rew.dist=calc.min.rew.dist(rews.df, NULL, .x, field.x, field.y)$rew.dist,
-             animal=.x))
+rew.distances.df = calc.rew.distances.df(rews.df, xycoords$field.x, xycoords$field.y)
 ```
 
 ```{r}
@@ -32,6 +23,14 @@ rew.distances.df %>%
   geom_vline(xintercept=20, linetype='dashed')+
   ggplot2::coord_flip()
 ```
+For each animal what distance do 15 % of cells are
+```{r}
+rew.distances.df %>%
+  dplyr::group_by(animal) %>%
+  dplyr::summarise(quantile15.distance=quantile(min.rew.dist, 0.15)[[1]]) %>%
+  dplyr::summarise(mean(quantile15.distance))
+```
+
 
 Percent of cells at reward for different thresholds
 ```{r}
@@ -45,7 +44,7 @@ get.pct.at.rew = function(rew.distances.df, thr) {
                      sem.pct = sem(pct.at.rew))
 }
 
-map_dfr(c(10, 15, 20, 25, 30, 35, 40), ~ get.pct.at.rew(rew.distances.df, .x)) 
+map_dfr(c(10, 15, 20, 25, 30, 35, 40), ~ get.pct.at.rew(rew.distances.df, .x))
 ```
 
 # Counting the place fields overlapping with the reward zone
@@ -95,3 +94,9 @@ sem(mean.rew.peaks.count)
 0.3927273	0.03773330			
 0.5718182	0.05491842			
 0.7209091	0.04745246	
+
+
+
+TODO:
+- is the distribution of the place fields different than occupancy guided?
+- how does dist of place fields compare with the uniform distribution

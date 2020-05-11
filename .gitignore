@@ -30,3 +30,4 @@ codegen/
 *.RData
 *.Rhistory
 
+.Rproj.user

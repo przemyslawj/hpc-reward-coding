@@ -230,5 +230,5 @@ for (caimg_result_dir in caimg_result_dirs) {
 
 
 print("Saving env variables")
-save.image(file="data/merged_place_field_dfs_shuffled_percentile20_50_80_90_95.RData")
+save.image(file="data/merged_place_field_dfs_shifted_percentile_90.RData")
 

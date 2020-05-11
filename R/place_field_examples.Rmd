@@ -8,9 +8,11 @@ output: html_notebook
 library(dplyr)
 library(plyr)
 library(pracma)
+library(purrr)
 library(readr)
 library(tidyr)
 library(tibble)
+library(smoothie)
 library(stringr)
 library(DT)
 library(data.table)
@@ -180,10 +182,10 @@ for (i in 1:nrow(tmp.df)) {
 # Plots on example trace
 Load the traces
 ```{r}
-animal_name = 'G-BR'
+animal_name = 'F-TL'
 exp_title='learning'
-day = '2020-02-06'
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
+day = '2019-09-04'
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
 
 
 caimg_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered/')
@@ -191,8 +193,8 @@ data.traces = read.data.trace(caimg_result_dir)
 setorder(data.traces, trial_id, cell_id, timestamp)
 data.traces$is_running = isRunning(data.traces, 2, 4, 500)
 data.traces = as.data.table(data.traces)
+detect.events(data.traces, deconv.threshold=0.2)
 data.traces.run = data.traces[(is_running), ]
-detect.events(data.traces.run, deconv.threshold=0.2)
 
 ```
 
@@ -273,7 +275,7 @@ plot.cell.trials = function(cell.df, trace.var='trace', facet.ncols=3) {
   return(g)
 }
 
-cell_name = 17
+cell_name = 183
 cell.df = data.traces.run[cell_id == cell_name & x >= 0 & y >= 0, ]
 binned.cell.df = bin.time.space(cell.df, 
                                 nbins.x = nbins,
@@ -283,6 +285,7 @@ binned.cell.df = bin.time.space(cell.df,
                                 timebin.dur.msec=200)
 binned.cell.df[,is_running:=as.logical(is_running)]
 
+gen_imgs_dir = '/home/prez/tmp/cheeseboard/'
 plot.cell.trials(binned.cell.df, trace.var='deconv_trace', facet.ncols=5)
 ggsave(file.path(gen_imgs_dir, paste0(cell_name, '_place_fields.svg')),
        width=23, height=8, units='cm')
@@ -294,7 +297,7 @@ plot.event.vectors(binned.cell.df, event.var=nevents, event.thr=1) +
   facet_wrap(. ~ trial_name, ncol = 5) +
   theme(legend.position = 'none')
 
-gen_imgs_dir = '/home/prez/tmp/cheeseboard/'
+
 ggsave(file.path(gen_imgs_dir, paste0(cell_name, '_trial_events.svg')),
        width=23, height=8, units='cm')
 
@@ -462,14 +465,22 @@ Multicell plot of several day activity
 ```{r}
 rewards.df = as.data.table(rewards.df)
 animal_name = 'E-TR'
+
+day.normalize.vals = function(pf.df) {
+  pf.df %>%
+    group_by(animal, date, day_desc, cell_id) %>%
+    dplyr::mutate(value.conv = value.conv / max(value.conv))
+}
+
 g.etr = bind_rows(
-  create.all.day.pf(create.selected.pf.df(animal_name, 89), T),
-  create.all.day.pf(create.selected.pf.df(animal_name, 90), T),
-  create.all.day.pf(create.selected.pf.df(animal_name, 99), T),
-  create.all.day.pf(create.selected.pf.df(animal_name, 122), T),
-  create.all.day.pf(create.selected.pf.df(animal_name, 139), T),
+  create.all.day.pf(create.selected.pf.df(animal_name, 89), F),
+  create.all.day.pf(create.selected.pf.df(animal_name, 90), F),
+  create.all.day.pf(create.selected.pf.df(animal_name, 99), F),
+  create.all.day.pf(create.selected.pf.df(animal_name, 122), F),
+  create.all.day.pf(create.selected.pf.df(animal_name, 139), F),
   ) %>% 
   filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning3 day#3') %>%
+  day.normalize.vals() %>%
   plot.pf(max.x=nbins, max.y=nbins) +
     facet_grid(cell_id ~ day_desc) +
     geom_rewards(rewards.df[day_desc != 'learning3 day#3',], animal_name) +
@@ -495,7 +506,7 @@ g.gbr = bind_rows(
   theme(legend.position = 'none')
   
 g.gbr
-ggsave('/tmp/pf_ggbr.svg', plot = g.gbr, width = 22, height = 12, units = 'cm')
+ggsave('/tmp/pf_ggbr.pdf', plot = g.gbr, width = 22, height = 12, units = 'cm')
 ```
 
 
