@@ -36,7 +36,6 @@ caimg_result_dirs = c(
   get.subject.result.dirs(root_dir08, 'E-TR'),
   get.subject.result.dirs(root_dir08, 'F-BL'),
   get.subject.result.dirs(root_dir08, 'F-TL'),
-  get.subject.result.dirs(root_dir07, 'A-BL'),
   get.subject.result.dirs(root_dir07, 'B-BL'),
   get.subject.result.dirs(root_dir07, 'C-1R'),
   get.subject.result.dirs(root_dir07, 'D-BR'),

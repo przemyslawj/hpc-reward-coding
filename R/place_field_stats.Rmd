@@ -412,11 +412,6 @@ uniform.pc.dist = calc.rew.distances.for.fields(filter(test.rewards.df, exp_titl
   left_join(test.rewards.df, by=c('animal', 'location_set')) %>%
   dplyr::rename(day_desc.reward = day_desc)  
 
-#uniform.pc.dist = calc.rew.distances.df(filter(test.rewards.df, exp_title=='beforetest'),
-#                                        uniform.xycoords$field.x, uniform.xycoords$field.y) %>%
-#  left_join(test.rewards.df, by=c('animal', 'location_set')) %>%
-#  dplyr::rename(day_desc.reward = day_desc)
-
 g.test.pf.shift = ggplot() +
   geom_density(data=baseline.trials.pc, aes(x=min.rew.dist), linetype='dashed') +
   geom_density(data=filter(pc.test.df, signif.si), aes(x=min.rew.dist)) +
@@ -546,8 +541,8 @@ compared.habit.trials.df = summary.habit.trials.pc %>%
     
 combined.place.cell.pct = 
   #mutate(compared.habit.trials.df, compared.with='lastday') %>%
-  bind_rows(mutate(compared.habit.trials.df, compared.with='test')) %>%
   #bind_rows(mutate(summary.lastday.df, group='lastday', compared.with='lastday')) %>%
+  bind_rows(mutate(compared.habit.trials.df, compared.with='test')) %>%
   bind_rows(mutate(summary.pc.test.df, group='test', compared.with='test'))
 
 # Insert 0 % where place cells on days when 0 place cells found
@@ -1226,17 +1221,21 @@ trial.peaks.at.rew %>%
   facet_grid(animal ~ .) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
-Distribution of min distance to peak 
+Distribution of min distance to the first translocated peak 
 ```{r}
-trial.peaks.at.rew %>% 
-  filter(day_desc == 'learning1 day#5') %>%
-  ggplot(aes(x=peak2rew.mindist, color=signif.si, group=signif.si)) +
-  geom_density() + 
-  #stat_summary(aes(y=0.0), fun.x=median, geom="point", shape=23, size=2) +
-  facet_wrap(implant + animal ~ ., ncol=4) +
-  geom_vline(xintercept = 20, linetype='dashed')
-```
+baseline.peaks.fst.moved = filter(trial.peaks.at.fst.moved, day_desc=='habituation day#3', signif.si) 
 
+ggplot() +
+  geom_density(data=baseline.peaks.fst.moved, aes(x=peak2rew.mindist), linetype='dashed') +
+  geom_density(data=filter(beforetest.peaks.fst.moved, signif.si, day_desc == 'learning2 day#1 test'), aes(x=peak2rew.mindist)) +
+  #geom_density(data=filter(trial.peaks.at.fst.moved, signif.si, day_desc == 'learning1 day#5'), aes(x=peak2rew.mindist)) +
+  #facet_wrap(animal ~ ., scales='free_x') +
+  facet_grid(. ~ implant) +
+  geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
+  coord_flip() +
+  gtheme +
+  xlab('Field distance from the first translocated reward (%)') + ylab('Density')
+```
 
 
 Summary about peaks at rewards for different trial days

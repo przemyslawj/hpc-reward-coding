@@ -440,7 +440,46 @@ left_join(bind_rows(peakatrew.mindist, peakat.prev.rew.mindist), mouse.meta.df) 
   scale_x_discrete(labels=c('habituation', 'learning1 probe', 'learning2 probe', 'learning3 probe'))
 
 
+dplyr::filter(peakatrew.mindist, exp %in% c('l3d1t')) %>%
+  mutate(is.at.rew = peak2rew.mindist <= rew.dist.threshold) %>%
+  group_by(animal, cell_id) %>%
+  dplyr::summarise(npresent = sum(!is.na(peak2rew.mindist)), 
+                   nactive = sum(is.at.rew)) %>% 
+  filter(npresent == 1) %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  group_by(implant) %>%
+  dplyr::summarise(implant.active=sum(nactive), n=n(), implant.notactive=n-implant.active, mean(nactive)) %>%
+  arrange(implant) ->
+  learning2test.rew.following.summary
 
+habituation.peaks.fst.moved = filter(trial.peaks.at.fst.moved, exp=='habituation', signif.si, animal!='A-BL') 
+dplyr::mutate(habituation.peaks.fst.moved, is.at.rew = peak2rew.mindist <= rew.dist.threshold) %>%
+  dplyr::group_by(animal, implant) %>%
+  dplyr::summarise(at.rew = sum(is.at.rew), at.rew.pct = mean(is.at.rew), n=n()) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(implant) %>%
+  dplyr::summarise(mean.at.rew.pct = mean(at.rew.pct)) %>%
+  arrange(implant) ->
+  habituation.fields.at.fst.moved.pct
+
+print('Binomial test on dCA1 cells')
+binom.test(x=learning2test.rew.following.summary$implant.active[1], 
+           n=learning2test.rew.following.summary$n[1], 
+           p=habituation.fields.at.fst.moved.pct$mean.at.rew.pct[1])
+print('Binomial test on vCA1 cells')
+binom.test(x=learning2test.rew.following.summary$implant.active[2], 
+           n=learning2test.rew.following.summary$n[2], 
+           p=habituation.fields.at.fst.moved.pct$mean.at.rew.pct[2])
+
+print('The count of reward following cells higher in vCA1 than in the vCA1')
+reward.cells.comparison = 
+  matrix(c(learning2test.rew.following.summary$implant.active[1],
+           learning2test.rew.following.summary$implant.active[2],
+           learning2test.rew.following.summary$implant.notactive[1],
+           learning2test.rew.following.summary$implant.notactive[2]),
+  nrow = 2,
+  dimnames = list(c("dCA1", "vCA1"), c("reward", "non-reward") ))
+fisher.test(reward.cells.comparison)
 
 ################
 # Cluster plot
