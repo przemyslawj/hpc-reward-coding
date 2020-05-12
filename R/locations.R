@@ -72,12 +72,12 @@ add_prev_locations = function(locations.df, prev.loc.set.diff=1) {
   set.locations.df = filter(locations.df, current_loc) %>%
     group_by(animal, is_test, location_set, Valence, position_no) %>%
     slice(1) %>%
-    select(-date, -prev_loc_set) %>%
-    #select(location_set, animal, is_test, Valence, position_no, -prev_loc_set) %>%
+    dplyr::select(-date, -prev_loc_set) %>%
+    #dplyr::select(location_set, animal, is_test, Valence, position_no, -prev_loc_set) %>%
     dplyr::mutate(current_loc = FALSE, previous_loc = TRUE)
   
   previous.locations.df = filter(locations.df, current_loc) %>%
-    select(date, location_set, prev_loc_set, animal, is_test, Valence, position_no) %>%
+    dplyr::select(date, location_set, prev_loc_set, animal, is_test, Valence, position_no) %>%
     left_join(set.locations.df, by=c('prev_loc_set'='location_set',
                                      'animal'='animal', 'is_test'='is_test',
                                      'Valence'='Valence', 'position_no'='position_no')) %>%
@@ -94,11 +94,12 @@ add_future_neg_locations = function(locations.df) {
   set.locations.df = filter(locations.df, Valence == 'Negative', current_loc == TRUE) %>%
     group_by(animal, is_test, location_set, position_no) %>%
     slice(1) %>%
-    select(-date, -prev_loc_set) %>%
+    dplyr::select(-date, -prev_loc_set) %>%
     rename(next_location_set = location_set) %>%
     mutate(future_loc = TRUE, current_loc = FALSE)
   
-  next.locations.df = select(locations.df, date, location_set, prev_loc_set, animal, is_test, Valence, position_no) %>%
+  next.locations.df = locations.df %>%
+    dplyr::select(date, location_set, prev_loc_set, animal, is_test, Valence, position_no) %>%
     left_join(set.locations.df, by=c('location_set'='next_location_set',
                                      'animal'='animal', 'is_test'='is_test',
                                      'position_no'='position_no'),
@@ -110,14 +111,14 @@ add_future_neg_locations = function(locations.df) {
     group_by(animal, date, is_test, location_set, Valence, position_no, previous_loc) %>%
     arrange(future_loc) %>%
     slice(1) %>%
-    select(-Valence.x)
+    dplyr::select(-Valence.x)
   return (joined.locations.df)
 }
 
 
 read_locations = function(root.data.dir) {
   cheeseboard.map = read.csv(file.path(root.data.dir, 'cheeseboard_map.csv')) %>%
-    select(Row_X, Row_Y, trans_x, trans_y)
+    dplyr::select(Row_X, Row_Y, trans_x, trans_y)
   
   expdirs = get.subdirs(root.data.dir)
   merged.df = data.frame()

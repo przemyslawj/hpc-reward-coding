@@ -21,6 +21,7 @@ gtheme = theme_minimal() + theme_cowplot() +
 
 summarise = dplyr::summarise
 summarize = dplyr::summarize
+select = dplyr::select
 
 source('distances.R')
 source('locations.R')
@@ -147,10 +148,10 @@ run.trials.pc = run.trials.si %>%
                                field.mean, early.late.cor))
 
 place.cell.db = run.trials.pc %>%
-  select(date, day_desc, exp, animal, cell_id, implant, is.pc, 
-         spatial.information, mutual.info, mutual.info.bias, 
-         sparsity, field.size.50, field.size.25,
-         early.late.cor, signif.mi, signif.si) %>%
+  dplyr::select(date, day_desc, exp, animal, cell_id, implant, is.pc, 
+                spatial.information, mutual.info, mutual.info.bias, 
+                sparsity, field.size.50, field.size.25,
+                early.late.cor, signif.mi, signif.si) %>%
   ungroup()
 ```
 
@@ -288,7 +289,7 @@ rewards.df =  all.locations.df %>%
   left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
   
 locations.df = rewards.df %>%
-  select(date, animal, location_set) %>%
+  dplyr::select(date, animal, location_set) %>%
   dplyr::distinct()
 
 locations.df = data.table(locations.df)
@@ -297,7 +298,7 @@ setkey(locations.df, date, animal)
 test.rewards.df = all.locations.df %>%
   filter(is_test) %>%
   left_join(mouse.meta.df, by='animal') %>% 
-  left_join(select(trials.meta.df, -location_set), by=c('date', 'animal')) %>%
+  left_join(dplyr::select(trials.meta.df, -location_set), by=c('date', 'animal')) %>%
   replace_na(list(exp_title = 'beforetest'))
 ```
 Distance of place fields to goal
@@ -363,7 +364,7 @@ goal.cells.df %>%
 beforetest.rewards.df = filter(test.rewards.df, exp_title == 'beforetest')
 beforetest.rewards.df = data.table(beforetest.rewards.df)
 
-habit.run.trials.pc = merged.run.trials.pc %>%
+run.trials.pc2rew.dist = merged.run.trials.pc %>%
   filter(signif.si) %>%
   left_join(beforetest.rewards.df, by=c('animal', 'implant'), suffix=c('.activity', '.reward')) %>%
   mutate(rew.dist = norm2(field.max.x - trans_x, field.max.y - trans_y)) %>% 
@@ -401,14 +402,20 @@ pc.test.df = pc.test.df %>%
 
 Compare with the test trials with habituation trials
 ```{r warning=FALSE}
-baseline.trials.pc = filter(habit.run.trials.pc, day_desc.activity=='habituation day#3') %>%
+baseline.trials.pc = filter(run.trials.pc2rew.dist, day_desc.activity=='habituation day#3') %>%
   dplyr::rename(date=date.reward)
 
 uniform.xycoords = sim.xy.coord(nplace.fields=100)
-uniform.pc.dist = calc.rew.distances.df(filter(test.rewards.df, exp_title=='beforetest'),
-                                        uniform.xycoords$field.x, uniform.xycoords$field.y) %>%
+uniform.fields.df = sim.fields.from.occupied(beforetest.occupancies, min.occupancy = 5)
+uniform.pc.dist = calc.rew.distances.for.fields(filter(test.rewards.df, exp_title=='beforetest'),
+                                                uniform.fields.df) %>%
   left_join(test.rewards.df, by=c('animal', 'location_set')) %>%
-  dplyr::rename(day_desc.reward = day_desc)
+  dplyr::rename(day_desc.reward = day_desc)  
+
+#uniform.pc.dist = calc.rew.distances.df(filter(test.rewards.df, exp_title=='beforetest'),
+#                                        uniform.xycoords$field.x, uniform.xycoords$field.y) %>%
+#  left_join(test.rewards.df, by=c('animal', 'location_set')) %>%
+#  dplyr::rename(day_desc.reward = day_desc)
 
 g.test.pf.shift = ggplot() +
   geom_density(data=baseline.trials.pc, aes(x=min.rew.dist), linetype='dashed') +
@@ -432,8 +439,8 @@ Idea: Check the distribution against the scaled by occupation probability.
 
 Compare the last day trials with habituation trials
 ```{r}
-baseline.trials.pc = filter(habit.run.trials.pc, day_desc.activity=='habituation day#3', animal!='A-BL') 
-compared.trials.pc = filter(habit.run.trials.pc, date.activity == format(as.Date(date.reward) - 1), animal!='A-BL')
+baseline.trials.pc = filter(run.trials.pc2rew.dist, day_desc.activity=='habituation day#3', animal!='A-BL') 
+compared.trials.pc = filter(run.trials.pc2rew.dist, date.activity == format(as.Date(date.reward) - 1), animal!='A-BL')
 
 beforetest.days = c('learning2 day#1', 'learning3 day#1', 'learning3 day#3')
 ggplot() +
@@ -472,7 +479,7 @@ plot.field.locs(filter(pc.test.df, is.pc, day_desc=='learning2 day#1'), 'learnin
   labs(title='Test after first learning')
 
 plot.field.locs(
-  filter(habit.run.trials.pc, day_desc.activity =='habituation day#3', day_desc.reward == 'learning2 day#1'), 
+  filter(run.trials.pc2rew.dist, day_desc.activity =='habituation day#3', day_desc.reward == 'learning2 day#1'), 
   'learning2 day#1') +
   labs(title='Last day habituation')
 ```
@@ -482,7 +489,7 @@ plot.field.locs(filter(pc.test.df, day_desc=='learning3 day#1'), 'learning3 day#
   labs(title='Test after second learning')
 
 plot.field.locs(
-  filter(habit.run.trials.pc, day_desc.activity =='habituation day#3', day_desc.reward == 'learning3 day#1'), 
+  filter(run.trials.pc2rew.dist, day_desc.activity =='habituation day#3', day_desc.reward == 'learning3 day#1'), 
   'learning3 day#1') +
   labs(title='Last day habituation')
 ```
@@ -492,7 +499,7 @@ plot.field.locs(filter(pc.test.df, day_desc=='learning3 day#3'), 'learning3 day#
   labs(title='Test after third learning')
 
 plot.field.locs(
-  filter(habit.run.trials.pc, day_desc.activity =='habituation day#3', day_desc.reward == 'learning3 day#3'), 
+  filter(run.trials.pc2rew.dist, day_desc.activity =='habituation day#3', day_desc.reward == 'learning3 day#3'), 
   'learning3 day#3') +
   labs(title='Last day habituation')
 ```
@@ -502,11 +509,11 @@ plot.field.locs(
 trial.learning.day = 'learning2 day#2'
 reward.learning.day = 'learning3 day#1'
 plot.field.locs(
-  filter(habit.run.trials.pc, day_desc.activity==trial.learning.day, day_desc.reward==reward.learning.day), 
+  filter(run.trials.pc2rew.dist, day_desc.activity==trial.learning.day, day_desc.reward==reward.learning.day), 
   reward.learning.day) + labs(title='Trials at the end of first learning')
 
 plot.field.locs(
-  filter(habit.run.trials.pc, day_desc.activity =='habituation day#3', day_desc.reward == reward.learning.day), 
+  filter(run.trials.pc2rew.dist, day_desc.activity =='habituation day#3', day_desc.reward == reward.learning.day), 
   reward.learning.day) +
   labs(title='Third day habituation')
 ```
@@ -514,7 +521,7 @@ plot.field.locs(
 
 Pct of place cells at reward: compared test day with habituation day
 ```{r}
-summary.habit.trials.pc = habit.run.trials.pc %>%
+summary.habit.trials.pc = run.trials.pc2rew.dist %>%
   group_by(date.reward, date.activity, day_desc.activity, day_desc.reward, animal, implant) %>%
   dplyr::summarise(pct.reward=sum(min.rew.dist <= goal.cell.max.dist) / n() * 100)
 
@@ -523,7 +530,7 @@ summary.pc.test.df = pc.test.df %>%
   dplyr::summarise(at.reward=sum(min.rew.dist <= goal.cell.max.dist),
                    pct.reward=at.reward / n() * 100)
 
-summary.lastday.df = habit.run.trials.pc %>%
+summary.lastday.df = run.trials.pc2rew.dist %>%
   filter(date.activity == format(as.Date(date.reward) - 1)) %>%
   dplyr::rename(date=date.reward,
                 day_desc=day_desc.reward) %>%
@@ -672,54 +679,54 @@ for (animal_name in unique(pc.rew.dist.df$animal)) {
 Shuffle cell identities to see if the remapping different than random
 - but this will not be informative: cells accumulate at reward location, so there will a close by field.
 ```{r}
-pc.change.df = data.table(pc.change.df)
-setkey(pc.change.df, animal, date.fst, date.snd, cell_id)
-nshuffles=100
-field.xy.dist.thr.df = data.frame()
-for (animal_name in unique(pc.rew.dist.df$animal)) {
-  all.days = unique(subset(pc.rew.dist.df, animal==animal_name)$date) %>% as.Date
-  for (i in 1:(length(all.days)-1)) {
-    day.fst = all.days[i]
-    day.snd = all.days[i+1]
-    animal.fstday.df = pc.rew.dist.df[animal == animal_name & date == day.fst,]
-    setorder(animal.fstday.df, cell_id)
-    animal.sndday.df = pc.rew.dist.df[animal == animal_name & date == day.snd,]
-    days = c(day.fst, day.snd)
-    shuffled.field.cor = data.frame()
-    shuffled.field.xy.dist = data.frame()
-    for (j in 1:nshuffles) {
-      animal.sndday.df$cell_id = shuffle(animal.sndday.df$cell_id)
-      shuffled.change = daypair.diff(bind_rows(animal.fstday.df, animal.sndday.df), days, include.cors=FALSE) %>%
-          arrange(cell_id)
-      #shuffled.field.cor = bind_rows(shuffled.field.cor, select(shuffled.change, animal, cell_id, field.cor))
-      shuffled.field.xy.dist = bind_rows(shuffled.field.xy.dist, 
-                                         select(shuffled.change, implant, animal, cell_id, field.xy.dist))
-    }
-    
-    dist.thrs = ddply(shuffled.field.xy.dist, .(cell_id), summarise, 
-          field.xy.dist.thr = quantile(field.xy.dist, 0.05)[[1]] %>% unname)
-    dist.thrs$date.fst = format(day.fst)
-    dist.thrs$date.snd = format(day.snd)
-    dist.thrs$animal = animal_name
-    field.xy.dist.thr.df = bind_rows(field.xy.dist.thr.df, dist.thrs)
-                                     
-    
-    #ddply(shuffled.field.cor, cell_id, summarise, 
-    #      field.cor.thr = quantile(field.cor, 0.95)[[1]] %>% unname)
-  }
-}
+# pc.change.df = data.table(pc.change.df)
+# setkey(pc.change.df, animal, date.fst, date.snd, cell_id)
+# nshuffles=100
+# field.xy.dist.thr.df = data.frame()
+# for (animal_name in unique(pc.rew.dist.df$animal)) {
+#   all.days = unique(subset(pc.rew.dist.df, animal==animal_name)$date) %>% as.Date
+#   for (i in 1:(length(all.days)-1)) {
+#     day.fst = all.days[i]
+#     day.snd = all.days[i+1]
+#     animal.fstday.df = pc.rew.dist.df[animal == animal_name & date == day.fst,]
+#     setorder(animal.fstday.df, cell_id)
+#     animal.sndday.df = pc.rew.dist.df[animal == animal_name & date == day.snd,]
+#     days = c(day.fst, day.snd)
+#     shuffled.field.cor = data.frame()
+#     shuffled.field.xy.dist = data.frame()
+#     for (j in 1:nshuffles) {
+#       animal.sndday.df$cell_id = shuffle(animal.sndday.df$cell_id)
+#       shuffled.change = daypair.diff(bind_rows(animal.fstday.df, animal.sndday.df), days, include.cors=FALSE) %>%
+#           arrange(cell_id)
+#       #shuffled.field.cor = bind_rows(shuffled.field.cor, select(shuffled.change, animal, cell_id, field.cor))
+#       shuffled.field.xy.dist = bind_rows(shuffled.field.xy.dist, 
+#                                          select(shuffled.change, implant, animal, cell_id, field.xy.dist))
+#     }
+#     
+#     dist.thrs = ddply(shuffled.field.xy.dist, .(cell_id), summarise, 
+#           field.xy.dist.thr = quantile(field.xy.dist, 0.05)[[1]] %>% unname)
+#     dist.thrs$date.fst = format(day.fst)
+#     dist.thrs$date.snd = format(day.snd)
+#     dist.thrs$animal = animal_name
+#     field.xy.dist.thr.df = bind_rows(field.xy.dist.thr.df, dist.thrs)
+#                                      
+#     
+#     #ddply(shuffled.field.cor, cell_id, summarise, 
+#     #      field.cor.thr = quantile(field.cor, 0.95)[[1]] %>% unname)
+#   }
+# }
 ```
 
 Distance between place field centre on consecutive days
 ```{r}
-pc.change.df2 = pc.change.df %>% left_join(field.xy.dist.thr.df, by=c('animal', 'date.fst', 'date.snd', 'cell_id'))
-pc.change.df2 %>%
-  filter(n>1) %>%
-  filter(days.diff == 1) %>%
-  sample.by.animal() %>%
-  mutate(signif.xy.dist = field.xy.dist <= field.xy.dist.thr) %>%
-  group_by(date.fst) %>%
-  dplyr::summarise(pct.field.signif.dist=sum(signif.xy.dist, na.rm = TRUE)/sum(!is.na(signif.xy.dist))*100)
+# pc.change.df2 = pc.change.df %>% left_join(field.xy.dist.thr.df, by=c('animal', 'date.fst', 'date.snd', 'cell_id'))
+# pc.change.df2 %>%
+#   filter(n>1) %>%
+#   filter(days.diff == 1) %>%
+#   sample.by.animal() %>%
+#   mutate(signif.xy.dist = field.xy.dist <= field.xy.dist.thr) %>%
+#   group_by(date.fst) %>%
+#   dplyr::summarise(pct.field.signif.dist=sum(signif.xy.dist, na.rm = TRUE)/sum(!is.na(signif.xy.dist))*100)
 ```
 
 ```{r}
@@ -776,6 +783,8 @@ g.pf.day2day.cor
 How many place cells kept their place field during the same reward location set.
 Includes cells that were detected on both days
 ```{r}
+field.cor.min = 0.3
+
 g.kept.pf = pc.change.df %>%
   filter(pc.fst, n==2) %>%
   filter(same.rew.loc) %>%
@@ -854,7 +863,7 @@ day.cors.df = place.cell.db %>%
 ```{r}
 day.cors.df %>%
   filter(!is.na(aftertest2trial.cor)) %>%
-  group_by(date, animal, is.pc) %>%
+  group_by(date, animal, signif.si) %>%
   dplyr::summarise(med.cor=median(aftertest2trial.cor)) %>%
   group_by(is.pc) %>%
   dplyr::summarise(median(med.cor))
@@ -1121,6 +1130,7 @@ pc.prev.rew %>%
 
 For each place field calculate the count of its peaks, and how many of them are in the rew or prev rew zone
 ```{r warning=FALSE}
+source('place_field_utils.R')
 
 calc.field.peaks.info = function(day, 
                                  animal_name, 
@@ -1406,7 +1416,7 @@ transloc.rew.pf.change %>%
 Check what happened with the place fields which were at the reward from during habituation
 ```{r}
 filter(habituation.peaks.at.fst.moved, day_desc=='habituation day#3') %>%
-  left_join(filter(field.peaks.beforetest, day_desc=='learning2 day#1'),
+  left_join(filter(beforetest.peaks.at.rew, day_desc=='learning2 day#1'),
             by=c('animal', 'cell_id'),
             suffix=c('.habit', '.test')) %>% 
   dplyr::mutate(loc.present.test=(rew.peaks.count.test - current.rew.peaks.count.test) > 0,
