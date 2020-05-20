@@ -10,11 +10,13 @@ library(tictoc)
 library(pryr) # for memory checks
 library(datatrace)
 
+setwd("~/mnt_code/cheeseboard_analysis/R")
+
 # Plotting
 library(ggplot2)
 library(cowplot)
 gtheme = theme_minimal() + theme_cowplot() +
-  theme(text = element_text(size=18), axis.text = element_text(size=15))
+  theme(text = element_text(size=10), axis.text = element_text(size=8))
 
 summarise = dplyr::summarise
 summarize = dplyr::summarize
@@ -59,15 +61,17 @@ calc.spatial.info = function(binned.traces, plot.dir='/tmp/pf_stability/',
 
   for (cell_name in cells) {
     cell.df = binned.traces[cell_id == cell_name ,]
-    pf = cell.spatial.info(cell.df, nbins, nbins, generate.plots, nshuffles, trace.var='trace', 
+    pf = cell.spatial.info(cell.df, nbins, nbins, generate.plots, nshuffles, trace.var='trace',
                            bin.hz=1000/timebin.dur.msec,
-                           shuffle.shift.sec=20,
-                           min.occupancy.sec=1)
-      if (length(pf$cell_info) > 0) {
+                           shuffle.shift.sec=5,
+                           min.occupancy.sec=1.5,
+                           kernel.size = 9,
+                           gaussian.var = 2)
+    if (length(pf$cell_info) > 0) {
       fields[[format(cell_name)]] = pf$field
       occupancies[[format(cell_name)]] = pf$occupancy
       pci.df = bind_rows(pci.df, pf$cell_info)
-  
+
       if (!is.na(plot.dir) && generate.plots && !is.na(pf$g)) {
         if (!file.exists(plot.dir)) {
           dir.create(plot.dir, recursive=TRUE)
@@ -121,15 +125,15 @@ for (caimg_result_dir in caimg_result_dirs) {
   data.traces = read.data.trace(caimg_result_dir)
   date = data.traces$date[1]
   animal = data.traces$animal[1]
-  
+
   data.traces = data.traces[exp_title != 'homecage',]
   detect.events(data.traces, deconv.threshold=0.2)
-  
+
   setorder(data.traces, trial_id, cell_id, timestamp)
   running.index = isRunning(data.traces, 2, 4, 500)
   data.traces.run = data.traces[which(running.index), ]
-  
-  response.bin.quantiles = c(0.9, 1.0)
+
+  response.bin.quantiles = c(0.95, 1.0)
   # binned.traces = bin.time.space(data.traces[x >= 0 & y >= 0, ],
   #                                nbins.x = nbins,
   #                                nbins.y = nbins,
@@ -142,8 +146,8 @@ for (caimg_result_dir in caimg_result_dirs) {
                                      get.bin.thresholds.fun = get.quantiles.fun(response.bin.quantiles),
                                      binned.var='trace',
                                      timebin.dur.msec=timebin.dur.msec)
-  toc()
-  
+  # toc()
+
   plot.dir.prefix = paste(gen_imgs_dir, animal, format(date), sep='/')
 
   # tic("spatial info on all trials")
@@ -167,7 +171,7 @@ for (caimg_result_dir in caimg_result_dirs) {
   toc()
 
   # Test trials
-  max_test_trial_dur_msec = 180 * 1000
+  max_test_trial_dur_msec = 240 * 1000
   beforetest.traces = binned.traces.run[exp_title == 'beforetest' & timestamp <= max_test_trial_dur_msec]
   if (nrow(beforetest.traces) > 0) {
     tic("spatial info on beforetest run")
@@ -180,7 +184,7 @@ for (caimg_result_dir in caimg_result_dirs) {
     beforetest.occupancies[[animal]][[format(date)]] = test.spatial$occupancy
     toc()
   }
-  
+
   aftertest.traces = binned.traces.run[exp_title == 'aftertest' & timestamp <= max_test_trial_dur_msec]
   if (nrow(aftertest.traces) > 0) {
     tic("spatial info on aftertest run")
@@ -239,5 +243,5 @@ for (caimg_result_dir in caimg_result_dirs) {
 
 
 print("Saving env variables")
-save.image(file="data/merged_place_field_dfs_shifted_percentile_90_20sec.RData")
+save.image(file="data/pf_smoothed_percentile_95_shuffle5sec_occupancy1_5sec.RData")
 

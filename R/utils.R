@@ -83,7 +83,8 @@ create.partial.df = function(fieldList, occupancyList, animal_name, day, cell_na
     return(data.frame())
   }
   df = create.pf.df(field,
-                    occupancyList[[animal_name]][[day]][[paste(cell_name)]])
+                    occupancyList[[animal_name]][[day]][[paste(cell_name)]],
+                    min.occupancy.sec=0)
   if (nrow(df) > 0) {
     df$group = group_name
   }
