@@ -9,7 +9,7 @@ test_that('Returns empty df when no rewards', {
 
 test_that('Sets location set when both rewards changed on the same day', {
   d1=as.Date('2019-01-01')
-  loc.df = data.frame(Animal=rep('A1', 6),
+  loc.df = data.frame(animal=rep('A1', 6),
                       Well_row=c(1,2,1,2,3,4),
                       Well_col=c(1,2,1,2,3,4),
                       date=c(d1,d1,d1+1,d1+1,d1+2,d1+2),
@@ -24,7 +24,7 @@ test_that('Sets location set when both rewards changed on the same day', {
 
 test_that('Sets location set when the test trial is present', {
   d1=as.Date('2019-01-01')
-  loc.df = data.frame(Animal=rep('A1', 6),
+  loc.df = data.frame(animal=rep('A1', 6),
                       Well_row=c(1,2,1,2,3,4),
                       Well_col=c(1,2,1,2,3,4),
                       date=c(d1,d1,d1+1,d1+1,d1+1,d1+1),
@@ -39,7 +39,7 @@ test_that('Sets location set when the test trial is present', {
 
 test_that('Sets location set when only one reward changes on a day', {
   d1 = as.Date('2019-01-01')
-  loc.df = data.frame(Animal='A1',
+  loc.df = data.frame(animal='A1',
                       Well_row=c(1,2,1,2,1,3,1,3,4,3,4,3),
                       Well_col=c(1,2,1,2,1,3,1,3,4,3,4,3),
                       date=c(d1,d1,d1+1,d1+1,d1+1,d1+1,d1+1,d1+1,d1+2,d1+2,d1+3,d1+3),
@@ -89,8 +89,8 @@ test_that('Adds correct previous rewards when one reward moved', {
   prev.loc.df = add_prev_locations(loc.df)
   expect_equal(4, nrow(subset(prev.loc.df, current_loc)))
   expect_equal(1, nrow(subset(prev.loc.df, !current_loc)))
-  expect_equal(prev.loc.df$location_set, c(1, 1, 2, 2, 2, 2))
-  expect_equal(prev.loc.df$location_ordinal, c(1, 2, 3, 4, 1, 2))
+  expect_equal(prev.loc.df$location_set, c(1, 1, 2, 2, 2))
+  expect_equal(prev.loc.df$location_ordinal, c(1, 2, 3, 2, 1))
 })
 
 test_that('Adds correct two previous rewards after moving rewards twice', {

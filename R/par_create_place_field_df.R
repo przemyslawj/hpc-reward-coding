@@ -65,7 +65,7 @@ calc.spatial.info = function(binned.traces, plot.dir='/tmp/pf_stability/',
     pf = cell.spatial.info(cell.df, nbins, nbins, generate.plots, nshuffles, trace.var='trace',
                            bin.hz=1000/timebin.dur.msec,
                            shuffle.shift.sec=5,
-                           min.occupancy.sec=1.7,
+                           min.occupancy.sec=1.5,
                            kernel.size = 9,
                            gaussian.var = 2)
     if (length(pf$cell_info) > 0) {
@@ -226,5 +226,5 @@ beforetest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$beforetest$df)
 aftertest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$aftertest$df)
 
 print("Saving env variables")
-save.image(file="data/par_place_field_dfs_smoothed_percentile_95_shuffle5sec_occupancy1_7sec.RData")
+save.image(file="data/par_place_field_dfs_smoothed_percentile_95_shuffle5sec_occupancy1_5sec.RData")
 

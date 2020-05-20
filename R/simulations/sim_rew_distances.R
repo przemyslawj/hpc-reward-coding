@@ -17,12 +17,12 @@ sim.xy.coord = function(nplace.fields=100, max.val=100, fixed.seed=FALSE) {
 }
 
 # Restricts the simulated fields to occupied bins
-sim.xy.coord.occupancy_mat = function(occupancy_mat, min.occupancy, nplace.fields, search.multiplier=4) {
-  nbins = dim(occupancy_mat)[1]
+sim.xy.coord.occupancy_mat = function(is_occupancied_mat, nplace.fields, search.multiplier=4) {
+  nbins = dim(is_occupancied_mat)[1]
   random.coors = sim.xy.coord(nplace.fields = search.multiplier * nplace.fields, max.val = nbins)
   field.scalar = 100 / nbins
   kept.random.coors.index = Filter(
-    function(i) { occupancy_mat[random.coors$field.x[i], random.coors$field.y[i]] >= min.occupancy },
+    function(i) { is_occupancied_mat[random.coors$field.x[i], random.coors$field.y[i]]},
     1:length(random.coors$field.x))
   if (length(kept.random.coors.index) >= nplace.fields) {
     kept.random.coors = list(field.x=random.coors$field.x[kept.random.coors.index],
@@ -31,17 +31,17 @@ sim.xy.coord.occupancy_mat = function(occupancy_mat, min.occupancy, nplace.field
                 field.y=kept.random.coors$field.y[1:nplace.fields] * field.scalar))
   }
   
-  sim.xy.coord.occupancy_mat(occupancy_mat, min.occupancy, nplace.fields, search.multiplier * 4)
+  sim.xy.coord.occupancy_mat(is_occupancied_mat, nplace.fields, search.multiplier * 4)
 }
 
 # Create DF with simulated coordinates of fields per animal per day using day occupancy matrices to
 # restrict the field coordinates to occupied bins
-sim.fields.from.occupied = function(occupanices.list, min.occupancy=1, nplace.fields=100) {
+sim.fields.from.occupied = function(fields.list, nplace.fields=100) {
   result = data.frame()
-  for (animal in names(occupanices.list)) {
-    for (date_str in names(occupanices.list[[animal]])) {
-      occupancy_mat = occupanices.list[[animal]][[date_str]][[1]]
-      random.coors = sim.xy.coord.occupancy_mat(occupancy_mat, min.occupancy, nplace.fields)
+  for (animal in names(fields.list)) {
+    for (date_str in names(fields.list[[animal]])) {
+      is_occupancied_mat = !is.na(fields.list[[animal]][[date_str]][[1]])
+      random.coors = sim.xy.coord.occupancy_mat(is_occupancied_mat, nplace.fields)
       
       ncoords = length(random.coors$field.x)
       result = bind_rows(result, 

@@ -462,7 +462,7 @@ dplyr::mutate(habituation.peaks.fst.moved, is.at.rew = peak2rew.mindist <= rew.d
   arrange(implant) ->
   habituation.fields.at.fst.moved.pct
 
-print('Binomial test on dCA1 cells')
+print('Binomial test on dCA1 cells - higher number of cells moves to reward than expected by chance')
 binom.test(x=learning2test.rew.following.summary$implant.active[1], 
            n=learning2test.rew.following.summary$n[1], 
            p=habituation.fields.at.fst.moved.pct$mean.at.rew.pct[1])
@@ -471,7 +471,7 @@ binom.test(x=learning2test.rew.following.summary$implant.active[2],
            n=learning2test.rew.following.summary$n[2], 
            p=habituation.fields.at.fst.moved.pct$mean.at.rew.pct[2])
 
-print('The count of reward following cells higher in vCA1 than in the vCA1')
+print('The count of reward following cells higher in dCA1 than in the vCA1')
 reward.cells.comparison = 
   matrix(c(learning2test.rew.following.summary$implant.active[1],
            learning2test.rew.following.summary$implant.active[2],

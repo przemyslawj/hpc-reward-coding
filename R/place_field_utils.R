@@ -1,6 +1,7 @@
 library(raster)
 library(smoothie)
 
+
 fieldPeaks = function(M, minpeaksize=3, minpeakdistance=4, min.peakheight = 0.33) {
   sigma = 1.4
   M1 = gauss2dsmooth(M, lambda=sigma, nx=11, ny=11)
