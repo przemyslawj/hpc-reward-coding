@@ -518,7 +518,8 @@ summarize.rew.pc.pct = function(df, group.name, dist.var=min.rew.dist, dist.thre
   df %>%
     group_by(date, day_desc, animal, implant) %>%
     dplyr::summarise(at.reward=sum(!!dist.var <= dist.threshold),
-                     pct.reward=at.reward / n() * 100)
+                     ncells = n(),
+                     pct.reward=at.reward / ncells * 100)
 }
 
 # Binds two DFs, resulting in a DF with paired rows for each implant, animal, day_desc. Inserts value.var=0 
@@ -563,17 +564,32 @@ plot.pc.change.pct = function(pc.change.pct.df) {
 summary.pc.test.df = summarize.rew.pc.pct(filter(pc.test.df, signif.si), 'test')
 
 compared.habit.trials.df = run.trials.pc2rew.dist %>%
-  filter(day_desc.activity=='habituation day#3', signif.si) %>%
+  filter(exp.activity=='habituation', signif.si) %>%
   dplyr::select(-ends_with('.activity')) %>%
   dplyr::rename(date=date.reward,
                 day_desc=day_desc.reward)
 
-test.pc.change.pct = create.df.with.paired.values(
-  summarize.rew.pc.pct(compared.habit.trials.df), habituation, 
-  summary.pc.test.df, test) %>% filter(animal != 'A-BL') # No test trials for the animal
+merged.summary.df = bind_rows(
+  summarize.rew.pc.pct(compared.habit.trials.df) %>% mutate(exp='habituation'),
+  summary.pc.test.df %>% mutate(exp='test'))
+dca1.rew.pc.pct = subset(merged.summary.df, implant == 'dCA1')
+vca1.rew.pc.pct = subset(merged.summary.df, implant == 'vCA1')
+fem.dca1 = lmerTest::lmer(pct.reward ~  exp + (1 + exp | animal), data=dca1.rew.pc.pct)
+print('Fraction of dCA1 place cells at reward increased')
+summary(fem.dca1)
+plot.model.diagnostics(fem.dca1, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp)
 
-g.pc.change.pct.test = plot.pc.change.pct(test.pc.change.pct)
-g.pc.change.pct.test + ggtitle('Fraction of place cells at reward increased at test trial')
+fem.vca1 = lmerTest::lmer(pct.reward ~  exp + (1 + exp | animal), data=vca1.rew.pc.pct)
+print('Fraction of vCA1 place cells did not increase')
+summary(fem.vca1)
+plot.model.diagnostics(fem.dca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp)
+
+g.pc.change.pct.test = 
+  plot.val.change.between.exp(merged.summary.df, pct.reward) +
+  ylab('Place cells at reward (%)') +
+  ggtitle('Fraction of place cells at reward increased at test trial')
+g.pc.change.pct.test
+
 g.pf.shift.fig = plot_grid(g.test.pf.shift,
                            g.pc.change.pct.test + theme(legend.position = 'top'),
                            nrow=1, rel_widths = c(0.6, 1.0))
@@ -1146,58 +1162,61 @@ source('place_field_utils.R')
 
 calc.field.peaks.info = function(day,
                                  animal_name,
-                                 fields.list=run.fields,
-                                 rews.df=fst.moved.location.df,
+                                 field.list,
+                                 rew.df,
                                  max.rew.dist.thr=20) {
-  rew.df = filter.rews.df(rews.df, day, animal_name)
-
   if (nrow(rew.df) == 0) {
+    #print(paste0('No rewards to compare for animal=', animal_name, ' date=', day))
     return(data.frame())
   }
   bin.size = 100 / nbins
-
-  cell_names = fields.list[[animal_name]][[day]] %>% names
-
+  cell_names = names(field.list[[animal_name]][[day]])
+  if (length(cell_names) == 0) {
+    #print(paste0('Empty list of fields for animal=', animal_name, ' date=', day))
+    return(data.frame())
+  }
+  
   map_dfr(cell_names, ~ {
-    cell_name = .x
-    field = fields.list[[animal_name]][[day]][[paste(cell_name)]]
-    peaks.rowcol = fieldPeaks(field)
-    #rew.df = rew.df[, `:=`(x=ceil(trans_x/bin.size), y=ceil(trans_y/bin.size))]
-    #peaks.rowcol = findPeaksAtRewards(field, rew.df, max.rewdistance = max.rew.dist.thr / bin.size)
-    peaks.rowcol = peaks.rowcol * bin.size
-
-    if (nrow(peaks.rowcol) > 0) {
-      min.rew.dist.res = calc.min.rew.dist(rew.df, peaks.rowcol[,'row'], peaks.rowcol[,'col'])
-    } else {
-      min.rew.dist.res = list(rew.dist=100, location.ordinal=-1)
-    }
-    peak.atrew.index = which(min.rew.dist.res$rew.dist <= max.rew.dist.thr)
-
-    loc.ordinals.with.peaks = unique(min.rew.dist.res$location.ordinal[peak.atrew.index])
-
-    return(list(
-      animal = animal_name,
-      date = day,
-      cell_id = as.integer(cell_name),
-      maxpeakval = max(field, na.rm=TRUE),
-      npeaks = nrow(peaks.rowcol),
-      npeaks.at.rew = length(peak.atrew.index),
-      rew.peaks.count = length(loc.ordinals.with.peaks),
-      current.rew.peaks.count = sum(rew.df[location_ordinal %in% loc.ordinals.with.peaks, current_loc], na.rm = TRUE),
-      peak2rew.mindist = min(min.rew.dist.res$rew.dist)
-    ))
+      field.info = cell.field.peaks.info(field.list[[animal_name]][[day]][[.x]], rew.df, bin.size, max.rew.dist.thr)
+      meta = list(animal=animal_name, date=day, cell_id=as.integer(.x))
+      return(append(meta, field.info))
   })
-
 }
 
-trial.days = trials.meta.df %>%
-  dplyr::select(date, animal) %>%
+cell.field.peaks.info = function(field,
+                                 day.rew.df,
+                                 bin.size=5,
+                                 max.rew.dist.thr=20) {
+  peaks.rowcol = fieldPeaks(field)
+  peaks.rowcol = peaks.rowcol * bin.size
+
+  if (nrow(peaks.rowcol) > 0) {
+    min.rew.dist.res = calc.min.rew.dist(day.rew.df, peaks.rowcol[,'row'], peaks.rowcol[,'col'])
+  } else {
+    min.rew.dist.res = list(rew.dist=100, location.ordinal=-1)
+  }
+  peak.atrew.index = which(min.rew.dist.res$rew.dist <= max.rew.dist.thr)
+
+  loc.ordinals.with.peaks = unique(min.rew.dist.res$location.ordinal[peak.atrew.index])
+
+  return(list(
+    maxpeakval = max(field, na.rm=TRUE),
+    npeaks = nrow(peaks.rowcol),
+    npeaks.at.rew = length(peak.atrew.index),
+    rew.peaks.count = length(loc.ordinals.with.peaks),
+    current.rew.peaks.count = sum(day.rew.df[location_ordinal %in% loc.ordinals.with.peaks, current_loc], na.rm = TRUE),
+    peak2rew.mindist = min(min.rew.dist.res$rew.dist)
+  ))
+}
+
+trial.days.df = trials.meta.df %>%
+  dplyr::select(date, animal, exp) %>%
   dplyr::distinct()
 
-create.peaks.df.at.locs = function(fields, locs.df) {
+create.peaks.df.at.locs = function(fields, locs.df, trial.days=trial.days.df) {
   res = map2_dfr(trial.days$date,
                  trial.days$animal,
-                 ~ calc.field.peaks.info(.x, .y, fields, rews.df=locs.df))
+                 ~ calc.field.peaks.info(.x, .y, fields, rew.df=filter.rews.df(locs.df, .x, .y)))
   res %>%
     left_join(trials.meta.df, by=c('animal', 'date')) %>%
     left_join(place.cell.db, by=c('animal', 'date', 'cell_id', 'day_desc', 'exp'))
@@ -1211,6 +1230,7 @@ trial.peaks.at.current.rew = create.peaks.df.at.locs(run.fields, prev.locations.
 
 beforetest.peaks.at.rew = create.peaks.df.at.locs(beforetest.fields, prev.locations.df)
 beforetest.peaks.fst.moved = create.peaks.df.at.locs(beforetest.fields, fst.moved.location.df)
+beforetest.peaks.at.current.rew = create.peaks.df.at.locs(beforetest.fields, beforetest.rewards.df)
 
 aftertest.peaks.at.rew = create.peaks.df.at.locs(aftertest.fields, prev.locations.df)
 aftertest.peaks.fst.moved = create.peaks.df.at.locs(aftertest.fields, fst.moved.location.df)
@@ -1218,14 +1238,29 @@ aftertest.peaks.fst.moved = create.peaks.df.at.locs(aftertest.fields, fst.moved.
 
 Peaks in place fields from habituation with regards to first reward locations
 ```{r warning=FALSE}
-habit.future.rewards.df = trials.meta.df %>%
-  filter(exp=='habituation') %>%
-  dplyr::mutate(location_set=2) %>%
-  left_join(filter(prev.locations.df, !is_test, !current_loc) %>% dplyr::select(-date),
-            by=c('location_set', 'animal'))
-
-habituation.peaks.at.fst.moved = create.peaks.df.at.locs(run.fields, habit.future.rewards.df)
-  #left_join(mouse.meta.df)
+habittest.daypair = filter(trials.meta.df, exp == 'habituation', animal != 'A-BL') %>%
+  left_join(dplyr::select(beforetest.rewards.df, date, animal, location_set), 
+            by=c('animal'), suffix=c('.habitday', '.testday'))
+beforetest.rewards.df$current_loc = FALSE
+habit.fields.at.test.rews = map_dfr(1:nrow(habittest.daypair), ~ {
+  animal_name = habittest.daypair$animal[.x]
+  activity_date = habittest.daypair$date.habitday[.x]
+  test_date = habittest.daypair$date.testday[.x]
+  rew.df = beforetest.rewards.df[animal==animal_name & date == test_date,]
+  calc.field.peaks.info(activity_date,
+                        animal_name,
+                        run.fields, 
+                        rew.df=rew.df) %>%
+    dplyr::mutate(date.activity = activity_date,
+                  day_desc.activity = habittest.daypair$day_desc[.x],
+                  date.reward = test_date)
+})
+habit.fields.at.test.rews = habit.fields.at.test.rews %>%
+  dplyr::select(-date) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'date.reward'='date'), suffix=c('', '.reward')) %>%
+  dplyr::select(-day_ordinal, -exp, -location_set, -current.rew.peaks.count) %>%
+  dplyr::rename(day_desc.reward = day_desc) %>%
+  left_join(place.cell.db, by=c('animal'='animal', 'date.activity'='date', 'cell_id'='cell_id', 'day_desc.activity'='day_desc'))
 ```
 
 ## Summary on multiple fields per cell
@@ -1246,6 +1281,71 @@ bind_rows(
   facet_grid(implant ~ npeaks) +
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+TODO:
+[x] Show fraction of cells with fields at reward for all days.
+[x] distribution of distances to the closest reward during test
+[] distribution of distances to the closest reward during learning
+Distribution of ditances to the rewards
+```{r}
+compared.habit.fields.at.test.rews = habit.fields.at.test.rews %>%
+  filter(signif.si, exp == 'habituation', day_desc.active == 'habituation day#3') %>%
+  dplyr::select(-ends_with('.activity')) %>%
+  dplyr::rename(date=date.reward,
+                day_desc=day_desc.reward)
+
+bind_rows(
+  mutate(compared.habit.fields.at.test.rews, group.name='2_habituation'),
+  filter(beforetest.peaks.at.current.rew, signif.si) %>% mutate(group.name='1_test')
+) %>%
+  ggplot(aes(x=peak2rew.mindist, group=group.name)) +
+  geom_density(aes(linetype=group.name)) +
+  #facet_grid(animal ~ day_desc, scales='free') +
+  facet_grid(. ~ implant) +
+  geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
+  coord_flip() +
+  gtheme +
+  xlim(c(0,100)) +
+  xlab('Field distance from closer reward (%)') + ylab('Density')
+```
+
+
+Multifield distance to the closest reward
+```{r}
+habit.summary.fields.pct.df = summarize.rew.pc.pct(
+  compared.habit.fields.at.test.rews,
+  dist.var=peak2rew.mindist, 
+  dist.threshold=15) %>% dplyr::ungroup()
+
+beforetest.summary.fields.pct.df = summarize.rew.pc.pct(
+  filter(beforetest.peaks.at.current.rew, signif.si),
+  dist.var=peak2rew.mindist, 
+  dist.threshold=15)
+
+merged.summary.df = bind_rows(
+  habit.summary.fields.pct.df %>% mutate(exp='habituation'),
+  beforetest.summary.fields.pct.df %>% mutate(exp='test')) %>%
+  filter(animal != 'L-TL') # remove animal with few cells during test
+
+dca1.rew.pc.pct = subset(merged.summary.df, implant == 'dCA1')
+vca1.rew.pc.pct = subset(merged.summary.df, implant == 'vCA1')
+fem.dca1 = lmerTest::lmer(pct.reward ~  exp + (1 + exp | animal), data=dca1.rew.pc.pct)
+print('Fraction of dCA1 place cells at reward increased')
+summary(fem.dca1)
+plot.model.diagnostics(fem.dca1, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp)
+
+fem.vca1 = lmerTest::lmer(pct.reward ~  exp + (1 + exp | animal), data=vca1.rew.pc.pct)
+print('Fraction of vCA1 place cells did not increase')
+summary(fem.vca1)
+plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp)
+
+g.fields.change.pct.test = 
+  plot.val.change.between.exp(merged.summary.df, pct.reward) +
+  ylab('Fields at reward (%)')
+  ggtitle('Fraction of cells with one of the fields at reward during test')
+g.fields.change.pct.test
 ```
 
 # vCA1 has higher count of multi fields, not different between of habituation vs learning trials
