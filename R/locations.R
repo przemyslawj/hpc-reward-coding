@@ -1,5 +1,6 @@
 library(dplyr)
 library(purrr)
+library(stringr)
 
 is.date <- function(x) !is.na(as.Date(x, '%Y-%m-%d'))
 
@@ -17,10 +18,11 @@ add_location_set = function(merged.df) {
   
   # Add location_set column 
   merged.df$location_set = rep(0, nrow(merged.df))
+  merged.df$exp_title = stringr::str_replace(merged.df$exp_title, '^test$', 'beforetest')
   merged.df$exp_title = factor(merged.df$exp_title,
                                levels=c('beforetest', 'trial', 'aftertest'))
-  for (animal in levels(merged.df$animal)) {
-    animal.locations = filter(merged.df, animal == animal) %>% 
+  for (animal_name in levels(merged.df$animal)) {
+    animal.locations = filter(merged.df, .data$animal == animal_name) %>% 
       arrange(date, exp_title)
     location_set = 0
     animal_locs = c()
@@ -154,6 +156,7 @@ read_locations = function(root.data.dir) {
   if (nrow(merged.df) == 0) {
     return(merged.df)
   }
+  
   merged.df = dplyr::rename(merged.df, animal=Animal)
   merged.df$animal = as.factor(merged.df$animal)
   result = add_location_set(merged.df)

@@ -303,12 +303,11 @@ setkey(locations.df, date, animal)
 test.rewards.df = all.locations.df %>%
   filter(is_test) %>%
   left_join(mouse.meta.df, by='animal') %>%
-  left_join(dplyr::select(trials.meta.df, -location_set), by=c('date', 'animal')) %>%
-  replace_na(list(exp_title = 'beforetest'))
+  left_join(dplyr::select(trials.meta.df, -location_set), by=c('date', 'animal'))
 ```
 Distance of place fields to goal
 ```{r}
-merged.run.trials.pc = left_join(run.trials.pc, locations.df, by=c('animal', 'date'))
+merged.run.trials.pc = left_join(run.trials.pc, locations.df, by=c('animal', 'date', 'location_set'))
 
 goal.cell.max.dist = 15
 pc.rew.dist.df = merged.run.trials.pc %>%
@@ -322,8 +321,8 @@ pc.rew.dist.df = merged.run.trials.pc %>%
   replace_na(is.goal.cell=FALSE)
 
 pc.rew.dist.df %>%
-  filter(exp != 'habituation', signif.si) %>%
-  sample.by.animal(nsamples=25, other.cols=c('day_desc')) %>%
+  filter(exp != 'habituation', signif.si) %>% 
+  sample.by.animal(nsamples=25, other.cols=c('day_desc')) %>% 
   ggplot(aes(x=day_desc, y=min.rew.dist, fill=implant)) +
   geom_violin() +
   geom_hline(yintercept = goal.cell.max.dist, linetype='dashed') +
@@ -331,38 +330,8 @@ pc.rew.dist.df %>%
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   xlab('') + ylab('Place field distance\nto reward (%)')
-
 ```
 
-## Pct during the trials
-```{r}
-pc.rew.dist.df %>%
-  group_by(date, day_desc, implant, animal) %>%
-  dplyr::summarise(pct.goal = sum(is.goal.cell) / n() * 100,
-                   pct.pc = mean(is.pc) * 100,
-
-                   pct.signif = mean(signif.si) * 100) -> goal.cells.df
-
-goal.cell.db = pc.rew.dist.df %>%
-  dplyr::select(implant, animal, date, day_desc, cell_id, is.goal.cell, closest.location.ordinal) %>%
-  right_join(place.cell.db, by=c('animal', 'date', 'cell_id')) %>%
-  replace_na(list(is.goal.cell=FALSE, is.pc=FALSE))
-
-mean(goal.cells.df$pct.goal, na.rm=T)
-sem(goal.cells.df$pct.goal)
-
-learning15.goal.cells.df = subset(goal.cells.df, day_desc == 'learning1 day#5')
-tapply(learning15.goal.cells.df$pct.goal, learning15.goal.cells.df$implant, summary)
-tapply(learning15.goal.cells.df$pct.signif, learning15.goal.cells.df$implant, summary)
-
-goal.cells.df %>%
-  filter(startsWith(day_desc, 'learning')) %>%
-  ggplot() +
-  geom_point(aes(x=day_desc, y=pct.goal, color=implant)) +
-  gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  xlab('') + ylab('Goal cells (% of all cells)')
-```
 
 ##During the test trial vs during the habituation
 
@@ -398,17 +367,18 @@ pc.test.df = pc.test.df %>%
 
 # calc dist to rew
 pc.test.df = pc.test.df %>%
-  ddply(.(date, animal, cell_id), dplyr::mutate,
+  dplyr::group_by(date, day_desc, animal) %>%
+  dplyr::mutate(
         min.rew.dist=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
-                                       field.max.x[1], field.max.y[1])$rew.dist,
+                                       field.max.x, field.max.y)$rew.dist,
         closest.location.ordinal=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
-                                                   field.max.x[1], field.max.y[1])$location.ordinal)
+                                                   field.max.x, field.max.y)$location.ordinal)
 
 ```
 
 Compare with the test trials with habituation trials
 ```{r warning=FALSE}
-baseline.trials.pc = filter(run.trials.pc2rew.dist, day_desc.activity=='habituation day#3')
+baseline.trials.pc = filter(run.trials.pc2rew.dist, signif.si, day_desc.activity=='habituation day#3')
 compared.test.trials.pc = filter(pc.test.df, signif.si) %>% dplyr::rename(day_desc.reward = day_desc)
 uniform.fields.df = sim.fields.from.occupied(beforetest.fields)
 uniform.pc.dist = calc.rew.distances.for.fields(filter(test.rewards.df, exp_title=='beforetest'),
@@ -440,8 +410,8 @@ Idea: Check the distribution against the scaled by occupation probability.
 Compare the last day trials with habituation trials:
 Higher peak of number of cells in proximity around 25 % of cheeseboard
 ```{r}
-baseline.trials.pc = filter(run.trials.pc2rew.dist, day_desc.activity=='habituation day#3', animal!='A-BL')
-compared.trials.pc = filter(run.trials.pc2rew.dist, date.activity == format(as.Date(date.reward) - 1), animal!='A-BL')
+baseline.trials.pc = filter(run.trials.pc2rew.dist, signif.si, day_desc.activity=='habituation day#3', animal!='A-BL')
+compared.trials.pc = filter(run.trials.pc2rew.dist, signif.si, date.activity == format(as.Date(date.reward) - 1), animal!='A-BL')
 
 beforetest.days = c('learning2 day#1', 'learning3 day#1', 'learning3 day#3')
 ggplot() +
@@ -487,40 +457,40 @@ plot.field.locs = function(pc.df, rewards.day_desc, fields.list=run.fields, date
     labs(size='Mutual info', colour='Goal cell', x='X position (a.u.)', y='Y position (a.u.)')
 }
 
-plot.field.locs(filter(pc.test.df, is.pc, day_desc=='learning2 day#1'), 
+plot.field.locs(filter(pc.test.df, signif.si, day_desc=='learning2 day#1'), 
                 'learning2 day#1',
                 fields.list=beforetest.fields,
                 date.activity.var=date) +
   labs(title='Test after first learning')
 
 plot.field.locs(
-  filter(run.trials.pc2rew.dist, day_desc.activity =='habituation day#3', day_desc.reward == 'learning2 day#1'),
+  filter(run.trials.pc2rew.dist, signif.si, day_desc.activity =='habituation day#3', day_desc.reward == 'learning2 day#1'),
   'learning2 day#1') +
   labs(title='Last day habituation')
 ```
 
 ```{r}
-plot.field.locs(filter(pc.test.df, day_desc=='learning3 day#1'), 
+plot.field.locs(filter(pc.test.df, signif.si, day_desc=='learning3 day#1'), 
                 'learning3 day#1',
                 fields.list=beforetest.fields,
                 date.activity.var=date) +
   labs(title='Test after second learning')
 
 plot.field.locs(
-  filter(run.trials.pc2rew.dist, day_desc.activity =='habituation day#3', day_desc.reward == 'learning3 day#1'),
+  filter(run.trials.pc2rew.dist, signif.si, day_desc.activity =='habituation day#3', day_desc.reward == 'learning3 day#1'),
   'learning3 day#1') +
   labs(title='Last day habituation')
 ```
 
 ```{r}
-plot.field.locs(filter(pc.test.df, day_desc=='learning3 day#3'), 
+plot.field.locs(filter(pc.test.df, signif.si, day_desc=='learning3 day#3'), 
                 'learning3 day#3',
                 fields.list=beforetest.fields,
                 date.activity.var=date) +
   labs(title='Test after third learning')
 
 plot.field.locs(
-  filter(run.trials.pc2rew.dist, day_desc.activity =='habituation day#3', day_desc.reward == 'learning3 day#3'),
+  filter(run.trials.pc2rew.dist, signif.si, day_desc.activity =='habituation day#3', day_desc.reward == 'learning3 day#3'),
   'learning3 day#3') +
   labs(title='Last day habituation')
 ```
@@ -530,11 +500,11 @@ plot.field.locs(
 trial.learning.day = 'learning1 day#5'
 reward.learning.day = 'learning2 day#1'
 plot.field.locs(
-  filter(run.trials.pc2rew.dist, day_desc.activity==trial.learning.day, day_desc.reward==reward.learning.day),
+  filter(run.trials.pc2rew.dist, signif.si, day_desc.activity==trial.learning.day, day_desc.reward==reward.learning.day),
   reward.learning.day) + labs(title='Trials at the end of first learning')
 
 plot.field.locs(
-  filter(run.trials.pc2rew.dist, day_desc.activity =='habituation day#3', day_desc.reward == reward.learning.day),
+  filter(run.trials.pc2rew.dist, signif.si, day_desc.activity =='habituation day#3', day_desc.reward == reward.learning.day),
   reward.learning.day) +
   labs(title='Third day habituation')
 ```
@@ -542,76 +512,97 @@ plot.field.locs(
 
 Pct of place cells at reward: compared test day with habituation day
 ```{r}
-summary.habit.trials.pc = run.trials.pc2rew.dist %>%
-  group_by(date.reward, date.activity, day_desc.activity, day_desc.reward, animal, implant) %>%
-  dplyr::summarise(pct.reward=sum(min.rew.dist <= goal.cell.max.dist) / n() * 100)
+# Summarizes percent of cells within the threshold distance
+summarize.rew.pc.pct = function(df, group.name, dist.var=min.rew.dist, dist.threshold=goal.cell.max.dist) {
+  dist.var = enquo(dist.var)
+  df %>%
+    group_by(date, day_desc, animal, implant) %>%
+    dplyr::summarise(at.reward=sum(!!dist.var <= dist.threshold),
+                     pct.reward=at.reward / n() * 100)
+}
 
-summary.pc.test.df = pc.test.df %>%
-  group_by(date, day_desc, animal, implant) %>%
-  dplyr::summarise(at.reward=sum(min.rew.dist <= goal.cell.max.dist),
-                   pct.reward=at.reward / n() * 100)
+# Binds two DFs, resulting in a DF with paired rows for each implant, animal, day_desc. Inserts value.var=0 
+# where the pair row is absent.
+create.df.with.paired.values = function(fst.df, fst.group.name, 
+                                        snd.df, snd.group.name, 
+                                        value.var=pct.reward) {
+  fst.group.name = enquo(fst.group.name)
+  snd.group.name = enquo(snd.group.name)
+  value.var = enquo(value.var)
+  value.varname = quo_name(value.var)
+  
+  combined.dfs = bind_rows(
+    mutate(fst.df, group=quo_name(fst.group.name)),
+    mutate(snd.df, group=quo_name(snd.group.name)))  
+  
+  # Map to wide representation to find grouping rows with missing vals
+  wide.df.wo.missing.vals = reshape2::dcast(combined.dfs,
+                                            implant + animal + day_desc ~ group,
+                                            value.var=value.varname)
+    #replace_na(list(!!fst.group.name := 0, !!snd.group.name := 0))
+  
+  # Map back to narrow representation
+  reshape2::melt(wide.df.wo.missing.vals,
+                 id.vars=c('implant', 'animal', 'day_desc'),
+                 measue_vars=c(quo_name(fst.group.name), quo_name(snd.group.name)),
+                 variable.name='group', value.name=value.varname) %>%
+    dplyr::mutate(!!value.var:=ifelse(is.na(!!value.var), 0, !!value.var))
+}
 
-summary.lastday.df = run.trials.pc2rew.dist %>%
-  filter(date.activity == format(as.Date(date.reward) - 1)) %>%
+plot.pc.change.pct = function(pc.change.pct.df) {
+  pc.change.pct.df %>%
+    ggplot() +
+    #geom_point(aes(y=pct.reward, x=group), position = position_dodge(width=0.2)) +
+    geom_line(aes(x=group, y=pct.reward, group=animal, color=implant)) +
+    gtheme +
+    facet_grid(implant ~ day_desc) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position='right') +
+    xlab('') + ylab('Place cells at reward (%)') + labs(color='')
+}
+
+summary.pc.test.df = summarize.rew.pc.pct(filter(pc.test.df, signif.si), 'test')
+
+compared.habit.trials.df = run.trials.pc2rew.dist %>%
+  filter(day_desc.activity=='habituation day#3', signif.si) %>%
+  dplyr::select(-ends_with('.activity')) %>%
   dplyr::rename(date=date.reward,
-                day_desc=day_desc.reward) %>%
-  group_by(date, animal) %>%
-  dplyr::summarise(at.reward=sum(min.rew.dist <= goal.cell.max.dist),
-                   pct.reward=at.reward / n() * 100)
+                day_desc=day_desc.reward)
 
-compared.habit.trials.df = summary.habit.trials.pc %>%
-  filter(day_desc.activity=='habituation day#3') %>%
-  dplyr::rename(date=date.reward,
-                day_desc=day_desc.reward) %>%
-  mutate(group='habituation')
+test.pc.change.pct = create.df.with.paired.values(
+  summarize.rew.pc.pct(compared.habit.trials.df), habituation, 
+  summary.pc.test.df, test) %>% filter(animal != 'A-BL') # No test trials for the animal
 
-combined.place.cell.pct =
-  #mutate(compared.habit.trials.df, compared.with='lastday') %>%
-  #bind_rows(mutate(summary.lastday.df, group='lastday', compared.with='lastday')) %>%
-  bind_rows(mutate(compared.habit.trials.df, compared.with='test')) %>%
-  bind_rows(mutate(summary.pc.test.df, group='test', compared.with='test'))
-
-# Insert 0 % where place cells on days when 0 place cells found
-paired.place.cell.pct = reshape2::dcast(combined.place.cell.pct,
-                                        implant + animal + day_desc ~ group,
-                                        value.var='pct.reward') %>%
-  filter(animal != 'A-BL') %>% # No test trials for that animal
-  replace_na(list(habituation=0, test=0))
-
-place.cell.change.pct = reshape2::melt(paired.place.cell.pct,
-               id.vars=c('implant', 'animal', 'day_desc'),
-               measue_vars=c('test', 'habituation'),
-               variable.name='group', value.name='pct.reward')
-
-g.pf.change.pct = place.cell.change.pct %>%
-  filter(animal != 'A-BL') %>%
-  ggplot() +
-  geom_point(aes(y=pct.reward, x=group), position = position_dodge(width=0.2)) +
-  geom_line(aes(x=group, y=pct.reward, group=animal, color=implant)) +
-  gtheme +
-  facet_grid(implant ~ day_desc) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position='right') +
-  xlab('') + ylab('Place cells at reward (%)') + labs(color='')
-g.pf.change.pct
-
+g.pc.change.pct.test = plot.pc.change.pct(test.pc.change.pct)
+g.pc.change.pct.test + ggtitle('Fraction of place cells at reward increased at test trial')
 g.pf.shift.fig = plot_grid(g.test.pf.shift,
-                           g.pf.change.pct + theme(legend.position = 'top'),
+                           g.pc.change.pct.test + theme(legend.position = 'top'),
                            nrow=1, rel_widths = c(0.6, 1.0))
 
 ggsave('/tmp/test_pf_shift.svg', g.pf.shift.fig,
        width=26, height=11, units='cm')
 ```
 
-Statistical tests for number of goal cells vs number of cells at those locations during habituation
+### Statistical tests for number of place cells at reward
+When habituation compared to test
 ```{r}
-wilcox.test(pct.reward ~ group, subset(place.cell.change.pct, implant=='vCA1'), paired=TRUE)
-wilcox.test(pct.reward ~ group, subset(place.cell.change.pct, implant=='dCA1'), paired=TRUE)
+wilcox.test(pct.reward ~ group, subset(test.pc.change.pct, implant=='vCA1'), paired=TRUE)
+wilcox.test(pct.reward ~ group, subset(test.pc.change.pct, implant=='dCA1'), paired=TRUE)
 ```
-
-
-Goal cells per day
+When habituation compared to learning - using theshold of 25 where distribution of distances peak
 ```{r}
-DT::datatable(summary.pc.test.df)
+summary.lastday.df = run.trials.pc2rew.dist %>%
+  filter(signif.si, date.activity == format(as.Date(date.reward) - 1)) %>%
+  dplyr::rename(date=date.reward,
+                day_desc=day_desc.reward) %>%
+  summarize.rew.pc.pct(dist.threshold=25)
+
+learning.pc.change.pct = create.df.with.paired.values(
+  summarize.rew.pc.pct(compared.habit.trials.df, dist.threshold=25), habituation, 
+  summary.lastday.df, learning) %>% filter(animal != 'A-BL') # No test trials for the animal
+
+plot.pc.change.pct(learning.pc.change.pct) + ggtitle('Fraction of place cells at reward did not change on last day learning')
+wilcox.test(pct.reward ~ group, subset(learning.pc.change.pct, implant=='vCA1'), paired=TRUE)
+wilcox.test(pct.reward ~ group, subset(learning.pc.change.pct, implant=='dCA1'), paired=TRUE)
 ```
 
 # Change of place fields and statistics across days
