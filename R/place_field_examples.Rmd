@@ -29,7 +29,7 @@ summarize = dplyr::summarize
 
 Setup example variables
 ```{r}
-nbins = 20
+nbins = 30
 animal_name = 'E-TR'
 exp_title='learning'
 day = '2019-08-31'
@@ -57,7 +57,7 @@ geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20) {
   #rew.shape = 0
   rew.shape = 2
   rew.size = 2
-  bin.size = ceil(100 / nbins)
+  bin.size = 100 / nbins
   list(geom_point(data=dayreward.df, 
                   aes(x=trans_x / bin.size, y=(100 - trans_y) / bin.size, color=rew_name), 
                   shape=rew.shape,
@@ -106,7 +106,7 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
   g.placefield = bind_rows(odd.pf, even.pf, early.pf, late.pf) %>%
     plot.pf(max.x=nbins, max.y=nbins) +
     facet_wrap(. ~ group, ncol = 2) +
-    geom_rewards(rewards.df, animal_name, day) +
+    geom_rewards(rewards.df, animal_name, day, nbins) +
     labs(title=paste0(animal_name,
                       ', ', day,
                       ', cell ', cell_name, 
@@ -123,12 +123,12 @@ plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
   oddeven.cor = field.cor(odd.pf, even.pf, make.cor.plot=TRUE, max.xy=nbins)
   cor.title = paste0('cor=', format(oddeven.cor$cor, digits=2))
   g.oddeven.cor = oddeven.cor$g + labs(title=cor.title, fill='') + 
-    geom_rewards(rewards.df, animal_name, day) + text.theme
+    geom_rewards(rewards.df, animal_name, day, nbins) + text.theme
   
   earlylate.cor = field.cor(early.pf, late.pf, make.cor.plot=TRUE, max.xy=nbins)
   cor.title = paste0('cor=', format(earlylate.cor$cor, digits=2))
   g.earlylate.cor = earlylate.cor$g + labs(title=cor.title, fill='') + 
-    geom_rewards(rewards.df, animal_name, day) + text.theme +
+    geom_rewards(rewards.df, animal_name, day, nbins) + text.theme +
     theme(legend.position='none')
   
   g.cors = plot_grid(g.earlylate.cor, g.oddeven.cor, ncol=2, rel_widths=c(1, 1.7))
@@ -407,7 +407,7 @@ day.normalize.fields = function(pf.df) {
                   value.field = value.field / max(value.field, na.rm=TRUE))
 }
 
-goal.cell.db = data.table(goal.cell.db)
+place.cell.db = data.table(place.cell.db)
 
 create.all.day.pf = function(selected.cells.df, 
                              fields.list=run.fields, 
@@ -444,10 +444,10 @@ rowwise.cell.desc = function(row) {
   animal_name = as.character(row$animal)
   cell_name = format(row$cell_id)
   day = format(row$day)
-  goal.db.row = goal.cell.db[animal==animal_name & cell_id==cell_name & date==day,]
+  place.db.row = place.cell.db[animal==animal_name & cell_id==cell_name & date==day,]
   row$desc = ''
-  if (nrow(goal.db.row) > 0) {
-    row$desc = paste0(ifelse(goal.db.row$signif.si, 'PC ', ''), ifelse(goal.db.row$is.goal.cell, ' & GC', ''))
+  if (nrow(place.db.row) > 0) {
+    row$desc = ifelse(place.db.row$signif.si, 'PC ', '')
   }
   row
 }
@@ -465,7 +465,7 @@ plot.all.day.fields = function(animal_name, cell_id) {
   plot.pf(pf, max.x=nbins, max.y=nbins) +
     facet_wrap(. ~ day_desc, ncol=3) +
     geom_text(data=cell.desc.df, mapping=aes(x=1, y=nbins - 2, label=desc), size=3, hjust=0) +
-    geom_rewards(rewards.df, animal_name) 
+    geom_rewards(rewards.df, animal_name, nbins=nbins) 
 }
 
 plot.all.day.fields('E-BL', 50)
@@ -486,7 +486,7 @@ g.etr = bind_rows(
   day.normalize.fields() %>% 
   plot.pf(max.x=nbins, max.y=nbins) +
     facet_grid(cell_id ~ day_desc) +
-    geom_rewards(rewards.df[day_desc != 'learning3 day#3',], animal_name) +
+    geom_rewards(rewards.df[day_desc != 'learning3 day#3',], animal_name, nbins=nbins) +
   theme(legend.position = 'top')
   
 g.etr
@@ -498,7 +498,7 @@ Multicell plot of several day activity for selected cells
 ```{r}
 rewards.df = as.data.table(rewards.df)
 place.cell.db = data.table(place.cell.db)
-plot.rootdir = "/mnt/DATA/Prez/pf-animal-occupancy1_5s/"
+plot.rootdir = "/mnt/DATA/Prez/pf-animal-30bins-occupancy05s-deconv/"
 
 for (animal_name in names(run.fields)) {
   plot.dir = file.path(plot.rootdir, animal_name)
@@ -510,7 +510,7 @@ for (animal_name in names(run.fields)) {
   cell_ids = place.cell.db[animal==animal_name, cell_id] %>% unique
   cell_chunks = split(sort(cell_ids), ceiling(seq_along(cell_ids)/chunk_size))
   merged.results.df = bind_rows(filter(rewards.df, animal == animal_name), 
-                                filter(test.rewards.df, animal == animal_name) %>% 
+                                filter(test.rewards.df, animal == animal_name, exp_title == 'beforetest') %>% 
                                   mutate(day_desc = paste0(day_desc, 't')))
   for (chunk_i in seq_along(cell_chunks)) {
     cell_chunk = cell_chunks[[chunk_i]]
@@ -529,18 +529,18 @@ for (animal_name in names(run.fields)) {
     
     merged.pf.data = bind_rows(trials.pf, beforetest.pf) %>%
       day.normalize.fields()
-    
+      
     g.chunk = ggplot() +
       geom_rect(data=beforetest.pf, xmin=0, xmax=100, ymin=0, ymax=100, fill='#bfbfbf', alpha=0.1) +
       geom_pf(merged.pf.data, max.x=nbins, max.y=nbins) + 
       facet_grid(cell_id ~ day_desc) +
       geom_text(data=cell.desc.df, mapping=aes(x=1, y=nbins - 2, label=desc), size=3, hjust=0) +
-      geom_rewards(merged.results.df, animal_name) +
+      geom_rewards(merged.results.df, animal_name, nbins=nbins) +
       theme(legend.position = 'top')
     
     filename = paste0('cells_', as.integer(min(cell_chunk)), '-', as.integer(max(cell_chunk)), '.png')
     ggsave(file.path(plot.dir, filename), plot=g.chunk, 
-           width = 52, height = 60, units = 'cm')
+           width = 48, height = 60, units = 'cm')
   }
 }
 ```
