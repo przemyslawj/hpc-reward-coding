@@ -22,12 +22,17 @@ get.trial.meta.from.path = function(caimg_result_dir) {
 }
 
 find.caimg.dir = function(caimg_result_dirs, subject, date) {
-  Filter(
+  dirs = Filter(
     function(caimg_dir) {
       grepl(paste0(.Platform$file.sep, subject, .Platform$file.sep), caimg_dir) &&
         grepl(paste0(.Platform$file.sep, date, .Platform$file.sep), caimg_dir)
     },
     caimg_result_dirs)  
+  
+  if (length(dirs) == 0) {
+    return(NA)
+  }
+  return(dirs[[1]])
 }
 
 max.consecutive.days = function(dates) {

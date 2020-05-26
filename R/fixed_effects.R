@@ -25,21 +25,22 @@ plot.model.diagnostics = function(m, animals, exp_names) {
   plot_grid(g1,g2)
 }
 
-create.animal.summary = function(df, var) {
+create.animal.summary = function(df, var, ...) {
   var = enquo(var)
-  group_by(df, implant, animal, exp) %>% 
+  group.vars = enquos(...)
+  group_by(df, implant, animal, !!!group.vars) %>% 
     dplyr::summarise(var.mean=mean(!!var, na.rm=TRUE),
                      var.sem=sem(!!var))
 }
 
-plot.val.change.between.exp = function(df, var) {
+plot.val.change.between.groups = function(summary.df, var, group.var) {
   var = enquo(var)
-  summary.df = create.animal.summary(df, !!var)
+  group.var = enquo(group.var)
   summary.df %>%
     ggplot() +
-    #geom_point(aes(x=exp, y=var.mean, color=animal)) +
-    geom_line(aes(x=exp, y=var.mean, group=animal)) +
-    geom_ribbon(aes(x=exp, 
+    #geom_point(aes(x=!!group.var, y=var.mean, color=animal)) +
+    geom_line(aes(x=!!group.var, y=var.mean, group=animal)) +
+    geom_ribbon(aes(x=!!group.var, 
                     ymin=var.mean - var.sem, 
                     ymax=var.mean + var.sem,
                     group=animal), 

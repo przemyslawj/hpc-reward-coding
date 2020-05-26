@@ -1,5 +1,47 @@
+library(data.table)
+library(datatrace)
 library(raster)
 library(smoothie)
+
+
+calc.spatial.info = function(binned.traces, 
+                             plot.dir='/tmp/pf_stability/',
+                             generate.plots=FALSE,
+                             nshuffles=0,
+                             trace.var='trace',
+                             timebin.dur.msec=100) {
+  binned.traces = data.table(binned.traces)
+  cells = unique(binned.traces$cell_id) %>% sort
+  pci.df = data.frame()
+  fields = list()
+  occupancies = list()
+  
+  for (cell_name in cells) {
+    cell.df = binned.traces[cell_id == cell_name ,]
+    pf = cell.spatial.info(cell.df, nbins, nbins, generate.plots, nshuffles, 
+                           trace.var=trace.var,
+                           bin.hz=1000/timebin.dur.msec,
+                           shuffle.shift.sec=5,
+                           min.occupancy.sec=0.5,
+                           kernel.size = 9,
+                           gaussian.var = 3)
+    if (length(pf$cell_info) > 0) {
+      fields[[format(cell_name)]] = pf$field
+      occupancies[[format(cell_name)]] = pf$occupancy
+      pci.df = bind_rows(pci.df, pf$cell_info)
+      
+      if (!is.na(plot.dir) && generate.plots && !is.na(pf$g)) {
+        if (!file.exists(plot.dir)) {
+          dir.create(plot.dir, recursive=TRUE)
+        }
+        ggsave(paste0(plot.dir, 'place_field_cell_', cell_name, '.jpg'), pf$g,
+               width=3.5, height=3.0, units='cm', dpi=300)
+      }
+    }
+  }
+  
+  return(list(df=pci.df, field=fields, occupancy=occupancies))
+}
 
 
 fieldPeaks = function(M, minpeaksize=3, minpeakdistance=4, min.peakheight = 0.33) {

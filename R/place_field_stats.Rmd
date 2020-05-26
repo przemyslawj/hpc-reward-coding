@@ -514,7 +514,7 @@ plot.field.locs(
 Pct of place cells at reward: compared test day with habituation day
 ```{r}
 # Summarizes percent of cells within the threshold distance
-summarize.rew.pc.pct = function(df, group.name, dist.var=min.rew.dist, dist.threshold=goal.cell.max.dist) {
+summarize.rew.pc.pct = function(df, dist.var=min.rew.dist, dist.threshold=goal.cell.max.dist) {
   dist.var = enquo(dist.var)
   df %>%
     group_by(date, day_desc, animal, implant) %>%
@@ -523,7 +523,7 @@ summarize.rew.pc.pct = function(df, group.name, dist.var=min.rew.dist, dist.thre
                      pct.reward=at.reward / ncells * 100)
 }
 
-summary.pc.test.df = summarize.rew.pc.pct(filter(pc.test.df, signif.si), 'test')
+summary.pc.test.df = summarize.rew.pc.pct(filter(pc.test.df, signif.si))
 
 compared.habit.trials.df = run.trials.pc2rew.dist %>%
   filter(exp.activity=='habituation', signif.si) %>%
@@ -547,8 +547,9 @@ print('Fraction of vCA1 place cells did not increase')
 summary(fem.vca1)
 plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp)
 
-g.pc.change.pct.test = 
-  plot.val.change.between.exp(merged.summary.df, pct.reward) +
+g.pc.change.pct.test = plot.val.change.between.groups(
+    create.animal.summary(merged.summary.df, pct.reward, exp),
+    pct.reward, exp) +
   ylab('Place cells at reward (%)') +
   ggtitle('Fraction of place cells at reward increased at test trial')
 g.pc.change.pct.test
@@ -1299,8 +1300,9 @@ print('Fraction of vCA1 place cells did not increase')
 summary(fem.vca1)
 plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp)
 
-g.fields.change.pct.test = 
-  plot.val.change.between.exp(merged.summary.df, pct.reward) +
+g.fields.change.pct.test = plot.val.change.between.groups(
+    create.animal.summary(merged.summary.df, pct.reward, exp), 
+    pct.reward, exp) +
   ylab('Fields at reward (%)')
   ggtitle('Fraction of cells with one of the fields at reward during test')
 g.fields.change.pct.test
