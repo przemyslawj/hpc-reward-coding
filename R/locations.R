@@ -53,8 +53,9 @@ add_location_set = function(merged.df) {
   
   # Make location set consistent in one day: if one reward changed then update
   # the location set for all rewards
-  result.df = ddply(result.df, .(animal, date, exp_title, is_test), mutate,
-                    location_set = max(location_set)) %>%
+  result.df = group_by(result.df, animal, date, exp_title, is_test) %>%
+    dplyr::mutate(location_set = max(location_set)) %>%
+    ungroup() %>%
     arrange(animal, date, exp_title)
   return(result.df)
 }
@@ -72,18 +73,18 @@ add_prev_locations = function(locations.df, prev.loc.set.diff=1) {
   }
   
   set.locations.df = filter(locations.df, current_loc) %>%
-    group_by(animal, is_test, location_set, Valence, position_no) %>%
-    slice(1) %>%
+    group_by(animal, is_test, exp_title, location_set, Valence, position_no) %>%
     dplyr::select(-date, -prev_loc_set) %>%
-    #dplyr::select(location_set, animal, is_test, Valence, position_no, -prev_loc_set) %>%
+    dplyr::distinct() %>%
     dplyr::mutate(current_loc = FALSE, previous_loc = TRUE)
   
   previous.locations.df = filter(locations.df, current_loc) %>%
-    dplyr::select(date, location_set, prev_loc_set, animal, is_test, Valence, position_no) %>%
+    ungroup() %>%
+    dplyr::select(date, location_set, prev_loc_set, animal, exp_title, Valence, position_no) %>%
     left_join(set.locations.df, by=c('prev_loc_set'='location_set',
-                                     'animal'='animal', 'is_test'='is_test',
+                                     'animal'='animal', 'exp_title'='exp_title',
                                      'Valence'='Valence', 'position_no'='position_no')) %>%
-    filter(prev_loc_set > 0)
+    filter(prev_loc_set > 0, !is.na(Well_row)) 
   
   joined.locations.df = bind_rows(locations.df, previous.locations.df) %>%
     dplyr::distinct(animal, date, is_test, Valence, location_set, location_ordinal, .keep_all=TRUE)

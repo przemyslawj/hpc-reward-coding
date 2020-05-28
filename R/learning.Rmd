@@ -12,42 +12,44 @@ library(ggplot2)
 library(cowplot)
 library(readr)
 library(tidyr)
+library(purrr)
+
+library(datatrace)
 
 source('crossings.R')
 source('distances.R')
 source('locations.R')
 source('tracking_files.R')
+source('plotting_params.R')
 ```
 
 ```{r}
-dir = '/mnt/DATA/Prez/cheeseboard/2019-02-learning'
-hab_dir = '/mnt/DATA/Prez/cheeseboard/2019-02-habituation'
+dir = '/mnt/DATA/Prez/cheeseboard/'
+hab_dirs = map_chr(tracking_rootdirs, ~ paste(.x, 'habituation', sep='/'))
+gen_imgs_dir = '~/tmp/cheeseboard/learning/'
+
 df = read_csv(paste0(dir, '/trial_stats.csv'))
-locations.df = read_locations(dir)
+locations.df = map_dfr(rootdirs, read_locations)
 
 frame.hz = 24
 ```
 
-```{r}
-library(cowplot)
-gtheme = theme_minimal() + theme_cowplot() + 
-  theme(text = element_text(size=18), axis.text = element_text(size=15)) 
-```
 
 Filter invalid trials (e.g. no reward on the maze..)
 ```{r}
-invalid_df = read_csv(paste0(dir, '/invalid_trials.csv'))
-df = left_join(df, invalid_df, by = c('date', 'animal_id', 'trial_n', 'is_test'), suffix=c('', '.y')) %>%
-  filter(is.na(invalid) || invalid == FALSE)
+#invalid_df = read_csv(paste0(dir, '/invalid_trials.csv'))
+#df = left_join(df, invalid_df, by = c('date', 'animal', 'trial_n', 'is_test'), suffix=c('', '.y')) %>%
+#  filter(is.na(invalid) || invalid == FALSE)
 ```
+
 ```{r}
 df = df %>%
-  mutate(total_trial_n=6*(learning_day1 - 1) + trial_n) 
+  dplyr::mutate(total_trial_n=6*(learning_day1 - 1) + trial_n) 
 ```
 
 
 ```{r}
-notest.df = filter(df, !is_test)
+notest.df = filter(df, exp_title == 'trial')
 ```
 
 Total distance travelled
@@ -59,8 +61,8 @@ gdist = d %>%
   filter(time_finished > 0) %>%
   ggplot() +
   geom_boxplot(aes(x=learning_day1, y=total_dist/100)) +
-  #geom_jitter(aes(x=learning_day1, y=mdist/100, color=animal_id),height=0, width=0.1, size=1) +
-  geom_point(aes(x=learning_day1, y=total_dist/100, color=animal_id), size=2) +
+  #geom_jitter(aes(x=learning_day1, y=mdist/100, color=animal),height=0, width=0.1, size=1) +
+  geom_point(aes(x=learning_day1, y=total_dist/100, color=animal), size=2) +
   gtheme +
   xlab('Training day') +
   ylim(c(0,20)) +
@@ -77,24 +79,20 @@ gdist
 ggsave(paste0(gen_imgs_dir, 'learning_dist.svg'), width=7, height=4)
 ```
 
-In day learning based on total distance
-```{r}
-
-```
-
 
 Duration of the trials
 ```{r}
 gdur = d %>%
   filter(time_finished > 0) %>%
-  #group_by(animal_id,learning_day1) %>%
+  #group_by(animal,learning_day1) %>%
   #summarise(mdur=mean(total_frames/frame.hz)) %>%
   ggplot() +
   geom_boxplot(aes(x=learning_day1, y=time_finished)) +
-  #geom_jitter(aes(x=learning_day1, y=mdur, color=animal_id),height=0, width=0.1, size=1) +
-  geom_point(aes(x=learning_day1, y=time_finished, color=animal_id),height=0, width=0.1, size=1) +
+  #geom_jitter(aes(x=learning_day1, y=mdur, color=animal),height=0, width=0.1, size=1) +
+  geom_point(aes(x=learning_day1, y=time_finished, color=animal),height=0, width=0.1, size=1) +
   gtheme +
-  geom_vline(xintercept=8.5, linetype='dashed', color='red') +
+  geom_vline(xintercept=5.5, linetype='dashed', color='red') +
+  geom_vline(xintercept=7.5, linetype='dashed', color='red') +
   geom_vline(xintercept=11.5, linetype='dashed', color='blue') +
   xlab('Training day') +
   ylab('Trial time (sec)') +
@@ -115,11 +113,11 @@ Total distance travelled per mouse
 ```{r}
 d %>% 
   filter(time_finished > 0) %>%
-  group_by(animal_id, learning_day1) %>%
-  summarise(mdist=mean(total_dist), sddist=sd(total_dist), mdur=mean(total_frames/frame.hz), sddur=sd(total_frames/frame.hz)) %>%
+  group_by(animal, learning_day1) %>%
+  dplyr::summarise(mdist=mean(total_dist), sddist=sd(total_dist), mdur=mean(total_frames/frame.hz), sddur=sd(total_frames/frame.hz)) %>%
   ggplot() +
-  geom_line(aes(x=learning_day1, y=mdist, group=animal_id, color=animal_id)) 
-  #geom_ribbon(aes(x=learning_day1, ymin=mdist-sddist, ymax=mdist+sddist, group=animal_id, fill=animal_id), alpha=0.1)
+  geom_line(aes(x=learning_day1, y=mdist, group=animal, color=animal)) 
+  #geom_ribbon(aes(x=learning_day1, ymin=mdist-sddist, ymax=mdist+sddist, group=animal, fill=animal), alpha=0.1)
 
 ```
 
@@ -141,21 +139,22 @@ as.percent = function(x, y) {
 
 d2 = d %>% 
   rowwise() %>%
-  mutate(min_path1=path_len(list(x=c(start_x, rew1_x, rew2_x), y=c(start_y, rew1_y, rew2_y))),
-         min_path2=path_len(list(x=c(start_x, rew2_x, rew1_x), y=c(start_y, rew2_y, rew1_y))),
-         min_path=ifelse(min_path1<min_path2, min_path1, min_path2),
-         norm_dist=total_dist / min_path * 100)
+  dplyr::mutate(min_path1=path_len(list(x=c(start_x, rew1_x, rew2_x), y=c(start_y, rew1_y, rew2_y))),
+                min_path2=path_len(list(x=c(start_x, rew2_x, rew1_x), y=c(start_y, rew2_y, rew1_y))),
+                min_path=ifelse(min_path1<min_path2, min_path1, min_path2),
+                norm_dist=total_dist / min_path * 100)
          
 gdist = d2 %>%
   ggplot() +
-  geom_boxplot(aes(x=learning_day1, y=norm_dist/100)) +
-  #geom_jitter(aes(x=learning_day1, y=mdist/100, color=animal_id),height=0, width=0.1, size=1) +
-  geom_point(aes(x=learning_day1, y=norm_dist/100, color=animal_id), size=2) +
+  geom_boxplot(aes(x=learning_day1, y=norm_dist)) +
+  #geom_jitter(aes(x=learning_day1, y=mdist/100, color=animal),height=0, width=0.1, size=1) +
+  geom_point(aes(x=learning_day1, y=norm_dist, color=animal)) +
   gtheme +
   xlab('Training day') +
   ylab('Norm. distance') +
-  ylim(c(0,20))+
-  geom_hline(yintercept=1, linetype="dashed", color = "black") +
+  #ylim(c(0,20))+
+  geom_hline(yintercept=100, linetype="dashed", color = "black") +
+  geom_vline(xintercept=5.5, linetype="dashed", color = "red") +
   geom_vline(xintercept=7.5, linetype="dashed", color = "red") +
   geom_vline(xintercept=11.5, linetype='dashed', color='blue') +
   geom_vline(xintercept=15.5, linetype='dashed', color='red') 
@@ -173,26 +172,25 @@ Is running to the closer reward first? Would confirm model-based learning
 ```{r}
 which.rew.df = d %>%
   filter(time_finished > 0) %>%
-  rowwise() %>%
-  mutate(dist_rew1=path_len(list(x=c(start_x, rew1_x), y=c(start_y, rew1_y))),
-         dist_rew2=path_len(list(x=c(start_x, rew2_x), y=c(start_y, rew2_y))),
-         closer_rew=which.min(c(dist_rew1, dist_rew2)),
-         run_closer=(closer_rew == which.min(c(passed_rew0, passed_rew1))))
+  dplyr::rowwise() %>%
+  dplyr::mutate(dist_rew1=path_len(list(x=c(start_x, rew1_x), y=c(start_y, rew1_y))),
+                dist_rew2=path_len(list(x=c(start_x, rew2_x), y=c(start_y, rew2_y))),
+                closer_rew=which.min(c(dist_rew1, dist_rew2)),
+                run_closer=(closer_rew == which.min(c(passed_rew0, passed_rew1))))
 
 which.rew.df %>%
-  group_by(learning_day1, animal_id) %>%
+  group_by(learning_day1, animal) %>%
   summarise(shorter_run_pct = sum(run_closer) / n()) %>%
   ggplot() +
-  geom_point(aes(x=learning_day1, y=shorter_run_pct, colour=animal_id))
+  geom_jitter(aes(x=learning_day1, y=shorter_run_pct, colour=animal), width=0.1, height=0)
          
 ```
 
 
 Time at reward
 ```{r}
-
 d2 %>% 
-  group_by(animal_id, learning_day1) %>%
+  group_by(animal, learning_day1) %>%
   summarise(mdist=mean(norm_dist), 
             sddist=sd(norm_dist),
             mrew_dwell_pct=mean(rew_dwell_pct),
@@ -200,15 +198,16 @@ d2 %>%
             mdur=mean(total_frames/frame.hz), 
             sddur=sd(total_frames/frame.hz)) %>%
   ggplot() +
-  geom_line(aes(x=learning_day1, y=mrew_dwell_pct, group=animal_id, color=animal_id)) 
+  geom_line(aes(x=learning_day1, y=mrew_dwell_pct, group=animal, color=animal)) 
 
 gdwell = d2 %>%
-  group_by(learning_day1, animal_id) %>%
+  group_by(learning_day1, animal) %>%
   summarise(mrew_dwell_pct=mean(rew_dwell_pct),
             sdrew_dwell_pct=sd(rew_dwell_pct)) %>%
   ggplot() +
   geom_boxplot(aes(x=learning_day1, y=mrew_dwell_pct)) +
   geom_point(aes(x=learning_day1, y=mrew_dwell_pct), size=1) +
+  geom_vline(xintercept=5.5, linetype="dashed", color = "blue") +
   geom_vline(xintercept=7.5, linetype="dashed", color = "blue") +
   xlab('Training day') + ylab('Time at reward (%)') +
   gtheme
@@ -228,7 +227,7 @@ gdwell = d2 %>%
   ggplot() +
   geom_boxplot(aes(x=learning_day1, y=rew_dwell_pct)) +
   geom_point(aes(x=learning_day1, y=rew_dwell_pct)) +
-  #geom_jitter(aes(x=learning_day1, y=rew_dwell_pct, color=animal_id),height=0, width=0.1, size=3) +
+  #geom_jitter(aes(x=learning_day1, y=rew_dwell_pct, color=animal),height=0, width=0.1, size=3) +
   xlab('Training day') +
   ylab('Time at reward (%)') +
   geom_vline(xintercept=11.5, linetype="dashed", color = "blue") +
@@ -240,12 +239,12 @@ Dwell Time in trial tests
 ```{r}
 df %>%
   mutate(learning_day1_f = as.factor(learning_day1)) %>%
-  filter(is_test) %>%
+  filter(exp_title == 'beforetest') %>%
   ggplot() +
   geom_boxplot(aes(x=learning_day1_f, y=rew_dwell_pct))
 
 df %>%
-  filter(is_test) %>%
+  filter(exp_title == 'beforetest') %>%
   group_by(learning_day1) %>%
   summarise(mdwell=mean(rew_dwell_pct),sddwell=sd(rew_dwell_pct))
 ```
@@ -257,12 +256,12 @@ test.trial.df = df %>%
   mutate(crossings_0_60s=crossings_0_30s+crossings_30_60s) %>%
   mutate(crossings_per_min=crossings_n/(total_frames/frame.hz) * 60) %>%
   mutate(norm_crossings=crossings_0_30s * 100.0 / dist_30s) %>%
-  filter(is_test) 
+  filter(exp_title == 'beforetest') 
 
 gcross = test.trial.df %>%
   ggplot() +
   geom_boxplot(aes(x=learning_day1_f, y=crossings_0_60s)) +
-  geom_jitter(aes(x=learning_day1_f, y=crossings_0_60s, color=animal_id), height=0, width=0.1, size=3) +
+  geom_jitter(aes(x=learning_day1_f, y=crossings_0_60s, color=animal), height=0, width=0.1, size=3) +
   xlab('Test day') +
   ylab('# Crossings during 60s') + 
   gtheme +
@@ -273,9 +272,9 @@ ggsave(filename='gcross.svg', plot=gcross, width=3)
 gcross.ratio = test.trial.df %>%
   ggplot() +
   geom_boxplot(aes(x=learning_day1_f, y=crossings_0_60s/(dist_60s/20.0/25)), outlier.size=0) +
-  geom_jitter(aes(x=learning_day1_f, y=crossings_0_60s/(dist_60s/20.0/25), color=animal_id),height=0, width=0.1, size=3) +
+  geom_jitter(aes(x=learning_day1_f, y=crossings_0_60s/(dist_60s/20.0/25), color=animal),height=0, width=0.1, size=3) +
   xlab('Test day') +
-  ylab('# Crossings / \n# Crossings in random \nexploration') +
+  ylab('# Crossings / \n# Crossings per some norm distance') +
   gtheme +
   theme(legend.position='None') 
   
@@ -286,15 +285,17 @@ ggsave(filename='gcross_ratio.svg', plot=gcross.ratio, width=3)
 
 Calculate number of crossings during habituation for each location set
 ```{r, warning=FALSE}
-hab.files = get_tracking_files(hab_dir)
+hab.files = map_dfr(hab_dirs, get_tracking_files) %>%
+  filter(exp_title != 'homecage')
 animal.locations = locations.df %>%
-  mutate(rowxcol=paste0(as.character(Well_row), 'x', as.character(Well_col))) %>%
+  dplyr::mutate(rowxcol=paste0(as.character(Well_row), 'x', as.character(Well_col))) %>%
   filter(Valence == 'Positive') %>%
   filter(is_test == FALSE) %>%
-  group_by(Animal, rowxcol, location_set) %>%
-  select(Animal, rowxcol, Well_row, Well_col, trans_x, trans_y, location_set)
+  group_by(animal, rowxcol, location_set) %>%
+  dplyr::select(animal, rowxcol, Well_row, Well_col, trans_x, trans_y, location_set) %>%
+  dplyr::distinct()
 
-hab_loc=full_join(hab.files, animal.locations, by=c("animal"="Animal"))
+hab_loc = full_join(hab.files, animal.locations, by=c("animal"))
 hab_loc$crossings = rep(0, nrow(hab_loc))
 hab_loc$total_dist = rep(0, nrow(hab_loc))
 hab_loc$total_frames = rep(0, nrow(hab_loc))
@@ -320,21 +321,21 @@ Average across different trials
 hab_loc = mutate(hab_loc, norm_crossings = crossings * 100.0 / total_dist)
 mhab_loc = hab_loc %>%
   group_by(animal, location_set) %>%
-  summarise(mnorm_crossings = mean(norm_crossings) * 2,
+  dplyr::summarise(mnorm_crossings = mean(norm_crossings) * 2,
             mcrossings_0_60s = mean(crossings_0_60s) * 2) %>%
-  rename(norm_crossings=mnorm_crossings, crossings_0_60s=mcrossings_0_60s, animal_id=animal) %>%
-  mutate(type="habituation")
+  dplyr::rename(norm_crossings=mnorm_crossings, crossings_0_60s=mcrossings_0_60s, animal=animal) %>%
+  dplyr::mutate(type="habituation")
 ```
 
 Compare crossings in probe tests vs habituation
 ```{r}
-mhab_loc.filtered = mhab_loc %>% filter(animal_id %in% unique(test.trial.df$animal_id))
+mhab_loc.filtered = mhab_loc %>% filter(animal %in% unique(test.trial.df$animal))
 mhab_loc.perdate = test.trial.df %>%
-  dplyr::select(animal_id, location_set, date) %>%
-  left_join(mhab_loc.filtered, by=c('animal_id', 'location_set'))
+  dplyr::select(animal, location_set, date) %>%
+  left_join(mhab_loc.filtered, by=c('animal', 'location_set'))
 
 test.trial.df.joined = test.trial.df %>%
-  select(animal_id, location_set, date, norm_crossings, crossings_0_60s) %>%
+  select(animal, location_set, date, norm_crossings, crossings_0_60s) %>%
   mutate(type="test")  %>%
   bind_rows(mhab_loc.perdate)
 
@@ -343,7 +344,7 @@ test.trial.df.joined$location_set = as.factor(test.trial.df.joined$location_set)
 
 test.trial.df.joined = test.trial.df.joined %>%
   mutate(paired_group=interaction(date, type, lex.order=TRUE),
-         group_id=interaction(date, animal_id))
+         group_id=interaction(date, animal))
 test.trial.df.joined$paired_group = as.factor(test.trial.df.joined$paired_group)
 test.trial.df.joined$paired_group_num=as.integer(test.trial.df.joined$paired_group)
 ```
@@ -352,7 +353,7 @@ test.trial.df.joined$paired_group_num=as.integer(test.trial.df.joined$paired_gro
 ntests = length(unique(test.trial.df$date))
 gcross.compare = ggplot(test.trial.df.joined, aes(x=paired_group_num, y=norm_crossings)) +
   #geom_boxplot(aes(x=paired_group_num, group=paired_group_num, fill=type), notch=FALSE) +
-  geom_point(size=3, aes(color=type)) +
+  geom_point(size=1, aes(color=animal)) +
   geom_line(aes(group=group_id), size=0.3, alpha=0.4) + 
   xlab('Test date') +
   ylab('# Crossings / distance') +
@@ -366,8 +367,8 @@ ggsave(paste0(gen_imgs_dir, 'crossings.svg'), width=4, height=4)
 Statistically significant difference
 ```{r}
 wilcox.test(norm_crossings ~ type, data=test.trial.df.joined, subset=location_set==1, paired=TRUE)
-animal.ids2 = subset(test.trial.df.joined, type=='test' & location_set==2, select=animal_id)
-df=filter(test.trial.df.joined, location_set==2) %>% filter(animal_id %in% animal.ids2$animal_id)
+animal.ids2 = subset(test.trial.df.joined, type=='test' & location_set==2, select=animal)
+df=filter(test.trial.df.joined, location_set==2) %>% filter(animal %in% animal.ids2$animal)
 wilcox.test(norm_crossings ~ type, data=df, paired=TRUE)
 ```
 
@@ -376,12 +377,12 @@ wilcox.test(norm_crossings ~ type, data=df, paired=TRUE)
 
 # Paired comparisons of crossings counts
 gcross.paired.absolute = test.trial.df.joined %>%
-  select(animal_id, date, location_set, crossings_0_60s, type) %>%
+  select(animal, date, location_set, crossings_0_60s, type) %>%
   spread(type, crossings_0_60s) %>%
   mutate(cross_diff = test-habituation) %>%
   ggplot() +
   #geom_boxplot(aes(x=location_set, y=cross_diff)) +
-  geom_dotplot(aes(x=location_set, y=cross_diff, fill=animal_id), binaxis='y', dotsize=2) +
+  geom_dotplot(aes(x=location_set, y=cross_diff, fill=animal), binaxis='y', dotsize=2) +
   xlab('Reward location set') +
   ylab('Increase in #crossings (60s)\nafter learning vs habituation') +
   ylim(c(0,8)) +
@@ -408,9 +409,9 @@ Within day improvement -- early trials on a given day have more crossings of the
 prev.reward.d = filter(d, !is.na(ncross_prev_rew))
 
 ggplot(prev.reward.d)%>% +
-  #geom_jitter(aes(x=learning_day1, y=ncross_prev_rew, color=animal_id), width=0.2)
-  #geom_jitter(aes(x=trial_id, y=ncross_prev_rew, color=animal_id), width = 0, height=0.3, size=2)
-  geom_point(aes(x=trial_id, y=ncross_prev_rew, color=animal_id), size=2)
+  #geom_jitter(aes(x=learning_day1, y=ncross_prev_rew, color=animal), width=0.2)
+  #geom_jitter(aes(x=trial_id, y=ncross_prev_rew, color=animal), width = 0, height=0.3, size=2)
+  geom_point(aes(x=trial_id, y=ncross_prev_rew, color=animal), size=2)
 ```
 
 # Aversive zone learning
@@ -429,7 +430,7 @@ library(Hmisc)
 puff.d %>%
   filter(learning_day < 17) %>%
   ggplot(aes(x=learning_day1, y=nroi_crossings)) +
-  geom_boxplot(aes(color=animal_id)) +
+  geom_boxplot(aes(color=animal)) +
   gtheme +
   theme(legend.position = 'none') +
   ylim(c(0,3)) +
@@ -438,9 +439,9 @@ puff.d %>%
 ```
 Future crossings
 ```{r}
-future.crossings.df = filter(d, is_test==FALSE, !is.na(ncross_future_roi))
+future.crossings.df = filter(d, exp_title=='beforetest', !is.na(ncross_future_roi))
 future.crossings.df %>%
-  group_by(learning_day1, animal_id) %>%
+  group_by(learning_day1, animal) %>%
   summarise(mcross_roi = mean(ncross_future_roi))
 ```
 
@@ -450,7 +451,7 @@ Duration in ROI
 puff.d %>%
   filter(learning_day < 17) %>%
   ggplot(aes(x=learning_day1, y=roi_duration/1000)) +
-  geom_boxplot(aes(color=animal_id)) +
+  geom_boxplot(aes(color=animal)) +
   gtheme +
   theme(legend.position='none')  +
   ylab('Air puff duration (sec)') + xlab('Learning Day') 
@@ -464,8 +465,8 @@ Velocity through ROI
 puff.d %>%
   filter(!is.na(mroi_velocity)) %>%
   ggplot(aes(x=learning_day1, y=mroi_velocity/mvelocity)) +
-  #geom_jitter(aes(color=animal_id),height=0, width=0.1)
-  stat_summary(fun.data = "mean_cl_boot", geom='point', mapping=aes(group=animal_id, color=animal_id))
+  #geom_jitter(aes(color=animal),height=0, width=0.1)
+  stat_summary(fun.data = "mean_cl_boot", geom='point', mapping=aes(group=animal, color=animal))
 
 ```
 
