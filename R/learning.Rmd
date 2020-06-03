@@ -318,11 +318,17 @@ for (i in 1:nrow(hab_loc)) {
 ```
 Average across different trials
 ```{r}
-hab_loc = mutate(hab_loc, norm_crossings = crossings * 100.0 / total_dist)
-mhab_loc = hab_loc %>%
+hab.loc.set.crossings = group_by(hab_loc, filepath, filename, date, animal, trial, exp_title, location_set) %>%
+  dplyr::summarize(crossings = sum(crossings),
+                   crossings_0_60s = sum(crossings_0_60s),
+                   total_dist = mean(total_dist),
+                   total_frames = mean(total_frames)) %>%
+  dplyr::mutate(norm_crossings = crossings * 100.0/ total_dist)
+
+mhab_loc = hab.loc.set.crossings %>%
   group_by(animal, location_set) %>%
-  dplyr::summarise(mnorm_crossings = mean(norm_crossings) * 2,
-            mcrossings_0_60s = mean(crossings_0_60s) * 2) %>%
+  dplyr::summarise(mnorm_crossings = mean(norm_crossings),
+                   mcrossings_0_60s = mean(crossings_0_60s)) %>%
   dplyr::rename(norm_crossings=mnorm_crossings, crossings_0_60s=mcrossings_0_60s, animal=animal) %>%
   dplyr::mutate(type="habituation")
 ```
@@ -334,35 +340,41 @@ mhab_loc.perdate = test.trial.df %>%
   dplyr::select(animal, location_set, date) %>%
   left_join(mhab_loc.filtered, by=c('animal', 'location_set'))
 
+trials.meta.df$date = as.Date(trials.meta.df$date)
 test.trial.df.joined = test.trial.df %>%
-  select(animal, location_set, date, norm_crossings, crossings_0_60s) %>%
-  mutate(type="test")  %>%
-  bind_rows(mhab_loc.perdate)
+  dplyr::select(animal, location_set, date, norm_crossings, crossings_0_60s) %>%
+  dplyr::mutate(type="test")  %>%
+  bind_rows(mhab_loc.perdate) %>%
+  left_join(dplyr::select(trials.meta.df, -location_set), by=c('animal', 'date')) %>%
+  left_join(mouse.meta.df, by=c('animal'))
 
 test.trial.df.joined$type = as.factor(test.trial.df.joined$type)
 test.trial.df.joined$location_set = as.factor(test.trial.df.joined$location_set)
-
-test.trial.df.joined = test.trial.df.joined %>%
-  mutate(paired_group=interaction(date, type, lex.order=TRUE),
-         group_id=interaction(date, animal))
-test.trial.df.joined$paired_group = as.factor(test.trial.df.joined$paired_group)
-test.trial.df.joined$paired_group_num=as.integer(test.trial.df.joined$paired_group)
 ```
 
 ```{r}
-ntests = length(unique(test.trial.df$date))
-gcross.compare = ggplot(test.trial.df.joined, aes(x=paired_group_num, y=norm_crossings)) +
-  #geom_boxplot(aes(x=paired_group_num, group=paired_group_num, fill=type), notch=FALSE) +
-  geom_point(size=1, aes(color=animal)) +
-  geom_line(aes(group=group_id), size=0.3, alpha=0.4) + 
-  xlab('Test date') +
-  ylab('# Crossings / distance') +
-  labs(fill='') + 
-  scale_x_continuous(breaks=seq(1,ntests*2,2)+0.5, labels=1:ntests) +
-  gtheme + theme(legend.position="top")
-gcross.compare
-ggsave(paste0(gen_imgs_dir, 'crossings.svg'), width=4, height=4)
+test.trial.df.joined %>%
+  ggplot(aes(x=type, y=norm_crossings, group=animal)) +
+  geom_line() +
+  geom_point(aes(color=animal)) +
+  facet_grid(implant ~ day_desc, scales='free') +
+  gtheme
 ```
+Animals and trials when mice did not learn
+```{r}
+library(reshape2)
+crossings.change.df = reshape2::dcast(test.trial.df.joined,
+                  animal + location_set + date + day_desc + implant ~ type, 
+                  value.var = 'norm_crossings') %>% 
+    dplyr::mutate(norm_crossings_change = test - habituation) 
+  
+tests.passed = filter(crossings.change.df, norm_crossings_change >= 0.1) %>%
+  dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_'))
+
+print('Percent test trials with performance test passed')
+nrow(tests.passed) / nrow(crossings.change.df) * 100
+```
+
 
 Statistically significant difference
 ```{r}
@@ -392,9 +404,9 @@ gcross.paired.absolute
 ```
 
 ```{r}
-cg.stats=plot_grid(gdist, gdwell, gcross.compare, 
-                   labels=c('B', 'C', 'D'), 
-                   ncol=3,
+cg.stats=plot_grid(gdist, gdwell, 
+                   labels=c('A', 'B'), 
+                   ncol=2,
                    label_size=25,
                    label_fontface='bold')
 cg.stats
@@ -414,59 +426,4 @@ ggplot(prev.reward.d)%>% +
   geom_point(aes(x=trial_id, y=ncross_prev_rew, color=animal), size=2)
 ```
 
-# Aversive zone learning
-
-```{r}
-airpuff.dates = filter(locations.df, Valence == 'Negative', is_test==FALSE) %>%
-  select(date) 
-airpuff.dates = unique(airpuff.dates$date) %>% as.Date
-puff.d = filter(d, date %in% airpuff.dates)
-```
-
-
-Crossings
-```{r}
-library(Hmisc)
-puff.d %>%
-  filter(learning_day < 17) %>%
-  ggplot(aes(x=learning_day1, y=nroi_crossings)) +
-  geom_boxplot(aes(color=animal)) +
-  gtheme +
-  theme(legend.position = 'none') +
-  ylim(c(0,3)) +
-  xlab('Learning Day') +
-  ylab('# Air puff zone crossings')
-```
-Future crossings
-```{r}
-future.crossings.df = filter(d, exp_title=='beforetest', !is.na(ncross_future_roi))
-future.crossings.df %>%
-  group_by(learning_day1, animal) %>%
-  summarise(mcross_roi = mean(ncross_future_roi))
-```
-
-
-Duration in ROI
-```{r}
-puff.d %>%
-  filter(learning_day < 17) %>%
-  ggplot(aes(x=learning_day1, y=roi_duration/1000)) +
-  geom_boxplot(aes(color=animal)) +
-  gtheme +
-  theme(legend.position='none')  +
-  ylab('Air puff duration (sec)') + xlab('Learning Day') 
-ggsave(paste0(gen_imgs_dir, 'air_puff_dur.png'), width=5, height=4)
-  
-```
-
-
-Velocity through ROI
-```{r}
-puff.d %>%
-  filter(!is.na(mroi_velocity)) %>%
-  ggplot(aes(x=learning_day1, y=mroi_velocity/mvelocity)) +
-  #geom_jitter(aes(color=animal),height=0, width=0.1)
-  stat_summary(fun.data = "mean_cl_boot", geom='point', mapping=aes(group=animal, color=animal))
-
-```
 

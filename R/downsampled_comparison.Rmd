@@ -31,19 +31,19 @@ source('distances.R')
 source('fixed_effects.R')
 source('locations.R')
 source('plotting_params.R')
+source('place_field_utils.R')
 source('utils.R')
 source('traces_input.R')
 ```
 
 ```{r}
-timebin.dur.msec = 100
-
 mouse.meta.df = read.mouse.meta(rootdirs)
 trials.meta.df = read.trials.meta(rootdirs)
 test.locations.df = map_dfr(rootdirs, read_locations) %>%
   filter(exp_title == 'beforetest')
 test.days.df = dplyr::select(test.locations.df, animal, date) %>%
   filter(animal != 'A-BL') %>%
+  #filter(animal %in% c('C-1R', 'E-BL', 'E-TR', 'F-BL', 'F-TL')) %>%
   dplyr::distinct()
 
 test_caimg_dirs = map2(test.days.df$animal, test.days.df$date, ~ find.caimg.dir(caimg_result_dirs, .x, .y))
@@ -53,6 +53,7 @@ habit3.days.df = filter(trials.meta.df, day_desc == 'habituation day#3') %>%
   dplyr::distinct() %>% 
   mutate(caimg_dir = map2(animal, date, ~ find.caimg.dir(caimg_result_dirs, .x, .y)))
 ```
+
 ```{r}
 prepare.timebinned.run.traces = function(data.traces, timebin.dur.msec) {
   data.traces = data.traces[exp_title != 'homecage',]
@@ -60,7 +61,7 @@ prepare.timebinned.run.traces = function(data.traces, timebin.dur.msec) {
   
   setorder(data.traces, trial_id, cell_id, timestamp)
   running.index = isRunning(data.traces, 2, 4, 500)
-  timebinned.run = timebin.traces(data.traces[which(running.index) & x >= 0 & y >= 0, ], 
+  timebinned.run = timebin.traces(data.traces[running.index & x >= 0 & y >= 0, ], 
                                   timebin.dur.msec = timebin.dur.msec)
   return(timebinned.run)
 }
@@ -78,12 +79,6 @@ stimbin.traces.xy = function(traces, nbins) {
 pseudo code:
 draw timestamps count to match occupancy
 ```{r}
-nbins = 30
-ndownsample_shuffles = 10
-habit3.days.df = as.data.table(habit3.days.df)
-down.test.si = data.frame()
-down.habit.si = data.frame()
-
 # Returns DFs with one row per each timestamp, specyfing its spatial bin and count of timestamps 
 # that matches occupancy in that bin between the two traces. Returns one DF per the 
 # input trace.
@@ -118,13 +113,25 @@ next.down.timestamps = function(shuffle.timestamps) {
   down.timestamps = shuffle.timestamps[timestamp_id <= down.ntimestamp, timestamp]
   return(down.timestamps)
 }
+```
 
+```{r}
+nbins = 20
+ndownsample_shuffles = 50
+min.occupancy.sec = 0.7
+timebin.dur.msec = 200
+habit3.days.df = as.data.table(habit3.days.df)
+down.test.si = data.frame()
+down.habit.si = data.frame()
+
+#test_caimg_dirs = test_caimg_dirs[19]
 for (caimg_result_dir in test_caimg_dirs) {
   data.traces = read.data.trace(caimg_result_dir)
   
   # Beforetest trace
-  max_test_trial_dur_msec = 240 * 1000
-  test.traces = data.traces[exp_title == 'beforetest' & timestamp <= max_test_trial_dur_msec]
+  #max_test_trial_dur_msec = 240 * 1000
+  #test.traces = data.traces[exp_title == 'beforetest' & timestamp <= max_test_trial_dur_msec]
+  test.traces = data.traces[exp_title == 'beforetest']
   timebinned.test.traces.run = prepare.timebinned.run.traces(test.traces, timebin.dur.msec)
 
   # Habit trace
@@ -148,10 +155,16 @@ for (caimg_result_dir in test_caimg_dirs) {
   binned.test.traces.run = bin.responses(binned.test.traces.run, get.bin.thresholds.fun, binned.var='trace')
   setkey(binned.test.traces.run, timestamp, cell_id)
   
-  sample.spatial.info = function(timestamps.df, binned.traces, shuffle_i, nshuffles=100) {
+  sample.spatial.info = function(timestamps.df, binned.traces, shuffle_i, nshuffles=200) {
     down.timestamps = next.down.timestamps(timestamps.df)
     down.binned.traces = binned.traces[timestamp %in% down.timestamps,]
-    spatial.res = calc.spatial.info(down.binned.traces, nshuffles=nshuffles)
+    spatial.res = calc.spatial.info(down.binned.traces, 
+                                    nshuffles=nshuffles, 
+                                    timebin.dur.msec = timebin.dur.msec,
+                                    trace.var = 'deconv_trace',
+                                    min.occupancy.sec=min.occupancy.sec,
+                                    nbins=nbins, 
+                                    gaussian.var=2)
     spatial.res$df$shuffle_i = shuffle_i
     return(spatial.res$df)
   }
@@ -163,8 +176,16 @@ for (caimg_result_dir in test_caimg_dirs) {
   habit.trials.si$date.test = test.traces$date[1]
   down.habit.si = bind_rows(down.habit.si, habit.trials.si)
   
-  test.trials.si =  map_dfr(1:ndownsample_shuffles, 
+  test.trials.si = map_dfr(1:ndownsample_shuffles, 
                             ~ sample.spatial.info(shuffle.test.timestamps, binned.test.traces.run, .x))
+  # test.trials.si = calc.spatial.info(binned.test.traces.run, 
+  #                                    nshuffles=1000, 
+  #                                    timebin.dur.msec=timebin.dur.msec,
+  #                                    trace.var = 'deconv_trace',
+  #                                    min.occupancy.sec=min.occupancy.sec,
+  #                                    nbins=nbins,
+  #                                    gaussian.var=2)$df
+  #test.trials.si = filter(beforetest.trials.si, animal == animal_name, date == test.traces$date[1])
   test.trials.si$date = test.traces$date[1]
   test.trials.si$animal = animal_name
   down.test.si = bind_rows(down.test.si, test.trials.si)
@@ -172,6 +193,10 @@ for (caimg_result_dir in test_caimg_dirs) {
 ```
 
 
+```{r}
+print("Saving env variables")
+save.image(file="data/downsampled_deconv_bin200msec_nbins20_occupancy07sec_gaussvar2.RData")
+```
 
 
 ```{r}
@@ -184,8 +209,9 @@ beforetest.rewards.df = data.table(beforetest.rewards.df)
 
 Calculate distance to closer reward
 ```{r}
-down.test.rewdist = down.test.si %>%
-  filter(signif.si) %>%
+down.test.rewdist = 
+  down.test.si %>%
+  #test.trials.si %>%
   dplyr::group_by(date, animal) %>%
   dplyr::mutate(
         min.rew.dist=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
@@ -193,8 +219,9 @@ down.test.rewdist = down.test.si %>%
         closest.location.ordinal=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
                                                    field.max.x, field.max.y)$location.ordinal)
 
-down.habit.rewdist = down.habit.si %>%
-  filter(signif.si) %>%
+down.habit.rewdist = 
+  down.habit.si %>%
+  #habit.trials.si %>%
   dplyr::group_by(date, date.test, animal) %>%
   dplyr::mutate(
         min.rew.dist=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date.test[1], animal[1]),
@@ -202,6 +229,7 @@ down.habit.rewdist = down.habit.si %>%
         closest.location.ordinal=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date.test[1], animal[1]),
                                                    field.max.x, field.max.y)$location.ordinal)
 
+trials.meta.df = read.trials.meta(rootdirs)
 down.rewdist = bind_rows(
   mutate(down.habit.rewdist, exp_title = '1_habituation')  %>% dplyr::select(-date) %>% dplyr::rename(date=date.test),
   mutate(down.test.rewdist, exp_title = '2_test')
@@ -213,10 +241,12 @@ down.rewdist = bind_rows(
 
 Plot distribution of distance to reward 
 ```{r}
-ggplot() +
-  geom_density(data=down.rewdist, aes(x=min.rew.dist, linetype=exp_title)) +
-  facet_grid(implant ~ day_desc) +
-  #facet_grid(. ~ implant) +
+down.rewdist %>%
+  filter(signif.si) %>%
+  ggplot() +
+  geom_density(aes(x=min.rew.dist, linetype=exp_title), adjust=1/2) +
+  #facet_grid(implant ~ day_desc) +
+  facet_wrap(animal ~ day_desc, scales='free') +
   geom_vline(xintercept = 15, linetype='dotted') +
   coord_flip() +
   scale_linetype_manual(values=c("dashed", "solid"))+
@@ -224,38 +254,93 @@ ggplot() +
   xlim(c(0,100)) +
   xlab('Place field distance from closer reward (%)') + ylab('Density') +
   ggtitle('Downsampled trials')
+
+ggsave('/tmp/downsampled_dist.svg', units='cm', width=22, height=22)
 ```
 
 
 ```{r}
-summarize.downrew.pc.pct = function(df, dist.var=min.rew.dist, dist.threshold=goal.cell.max.dist) {
+summarize.downrew.pc.pct = function(df, dist.var=min.rew.dist, dist.threshold) {
   dist.var = enquo(dist.var)
   df %>%
-    group_by(date, day_desc, animal, implant, exp_title, shuffle_i) %>%
-    dplyr::summarise(at.reward=sum(!!dist.var <= dist.threshold),
-                     ncells = n(),
-                     pct.reward=at.reward / ncells * 100)
+    group_by(date, day_desc, animal, implant, exp_title) %>%
+    dplyr::summarise(at.reward=sum(!!dist.var <= dist.threshold & signif.si),
+                     mean.cells = n() / max(shuffle_i),
+                     npcs = sum(signif.si),
+                     mean.pcs = npcs / max(shuffle_i),
+                     pct.reward=at.reward / npcs * 100,
+                     pct.pcs=npcs / n() * 100) %>%
+    dplyr::select(-npcs)
 }
 
-summary.df = summarize.downrew.pc.pct(down.rewdist, dist.threshold= 15)
-dca1.rew.pc.pct = subset(summary.df, implant == 'dCA1')
-vca1.rew.pc.pct = subset(summary.df, implant == 'vCA1')
-fem.dca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + exp_title | animal), data=dca1.rew.pc.pct)
-print('Fraction of dCA1 place cells at reward increased')
+summary.df = summarize.downrew.pc.pct(down.rewdist, dist.threshold=15) %>%
+  dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_'))
+  #filter(animal_beforetest_day %in% tests.passed$animal_beforetest_day) 
+
+library(reshape2)
+summary.wide.df = reshape2::dcast(summary.df, day_desc + animal + implant ~ exp_title, value.var = 'pct.reward') %>%
+  dplyr::mutate(pc.pct.change = `2_test` - `1_habituation`) %>%
+  left_join(dplyr::select(crossings.change.df, -date, -location_set, -habituation, -test), 
+            by=c('animal', 'day_desc', 'implant'))
+  
+summary.wide.df %>%
+  mutate_if(is.double, round, 1) %>%
+  DT::datatable()
+
+kept.testtrials = summary.wide.df %>% 
+  dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_')) %>%
+  filter(norm_crossings_change > 0.1) 
+
+dca1.rew.pc.pct = subset(summary.df, implant == 'dCA1' & animal_beforetest_day %in% kept.testtrials$animal_beforetest_day & animal != 'C-1R')
+vca1.rew.pc.pct = subset(summary.df, implant == 'vCA1' & animal_beforetest_day %in% kept.testtrials$animal_beforetest_day)
+fem.dca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + day_desc | animal), data=dca1.rew.pc.pct)
+print('Fraction of dCA1 place cells at reward')
+t.test(pct.reward ~ exp_title, dca1.rew.pc.pct, paired=T)
 summary(fem.dca1)
 plot.model.diagnostics(fem.dca1, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp_title)
 
-fem.vca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + exp_title | animal), data=vca1.rew.pc.pct)
+fem.vca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + day_desc | animal), data=vca1.rew.pc.pct)
 print('Fraction of vCA1 place cells did not increase')
 summary(fem.vca1)
 plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp_title)
 
-plot.val.change.between.groups(create.animal.summary(summary.df, pct.reward, exp_title, shuffle_i), 
+plot.val.change.between.groups(create.animal.summary(summary.df, pct.reward, exp_title), 
                                pct.reward, exp_title) +
   ylab('Place cells at reward (%)') +
   ggtitle('Fraction of place cells at reward increased at test trial')
-```
 
+summary.df %>%
+  filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
+  filter(animal != 'C-1R') %>% 
+  ggplot(aes(x=exp_title, y=pct.reward, group=animal_beforetest_day)) +
+  #geom_point(aes(color=animal)) +
+  geom_line() +
+  facet_grid(. ~ implant, scales = 'free') +
+  xlab('') +
+  gtheme +
+  ylab('Place cells at reward (%)') +
+  ggtitle('Fraction of place cells at reward increased at test trial')
+```
+Change in the number pct of place cells not significant
+```{r}
+summary.df %>%
+  filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
+  filter(animal != 'C-1R') %>%
+  ggplot(aes(x=exp_title, y=pct.pcs, group=animal_beforetest_day)) +
+  #geom_point(aes(color=animal)) +
+  geom_line() +
+  facet_grid(. ~ implant, scales = 'free') +
+  xlab('') +
+  gtheme +
+  ylab('Place cells (%)') +
+  ggtitle('Fraction of place cells lower during test trial')
+
+fem.dca1.pcs = lmerTest::lmer(pct.pcs ~  exp_title + (1 + day_desc | animal), data=dca1.rew.pc.pct)
+print('Fraction of dCA1 place cells during test')
+t.test(pct.reward ~ exp_title, dca1.rew.pc.pct, paired=T)
+summary(fem.dca1.pcs)
+plot.model.diagnostics(fem.dca1.pcs, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp_title)
+```
 
 
 

@@ -256,7 +256,7 @@ stable.animal.cells = cell.activity.changes %>%
   #filter(nday.pairs >= 6) %>%
   #filter(nchanged.rew.activity <= 2) 
   
-perc2dist = 1.8
+perc2dist = 1.2
 
 joined.nextday.peaks %>%
   #filter(animal=='K-BR') %>%
@@ -305,7 +305,7 @@ get.stage.activity.pattern.desc = function(clust_char) {
 
 plot.cluster.assignments(filter(stage.peaks.filtered, 
                                 #cell_id %in% stable.animal.cells$cell_id,
-                                animal=='K-BR'),
+                                animal=='G-BR'),
                                 #implant=='vCA1'),
                          clust.distance = 100,
                          pattern.desc.fun = get.stage.activity.pattern.desc,
@@ -328,7 +328,8 @@ join.chars = function(animal, cell_id) {
 }
 
 cells.transloc.rew.active = trial.peaks.at.fst.moved %>%
-  filter(day_desc == 'learning1 day#5', rew.peaks.count > 0, signif.si) %>%
+  filter(day_desc == 'learning1 day#5', rew.peaks.count > 0) %>%
+  filter(signif.si) %>%
   dplyr::mutate(animal_cell = join.chars(animal, cell_id)) %>%
   dplyr::pull(animal_cell)
 
@@ -380,11 +381,12 @@ left_join(bind_rows(peakatrew.mindist, peakat.prev.rew.mindist), mouse.meta.df) 
   xlab('') + ylab('Distance to reward (cm)') +
   scale_x_discrete(labels=c('habituation','learning1 day5','learning1 probe', 'learning 2', 'learning2 probe', 'learning 3', 'learning3 probe'))
 
-###
+###################################
 # Only probe tests
-#####
+###################################
 cells.transloc.rew.active = beforetest.peaks.fst.moved %>%
-  filter(day_desc == 'learning2 day#1 test', rew.peaks.count > 0, signif.si) %>%
+  filter(day_desc == 'learning2 day#1 test', rew.peaks.count > 0) %>%
+  filter(signif.si) %>%
   dplyr::mutate(animal_cell = join.chars(animal, cell_id)) %>%
   dplyr::pull(animal_cell)
 
@@ -440,38 +442,58 @@ left_join(bind_rows(peakatrew.mindist, peakat.prev.rew.mindist), mouse.meta.df) 
   scale_x_discrete(labels=c('habituation', 'learning1 probe', 'learning2 probe', 'learning3 probe'))
 
 
-dplyr::filter(peakatrew.mindist, exp %in% c('l3d1t')) %>%
+animal.learning2test.rew.following = dplyr::filter(peakatrew.mindist, exp %in% c('l3d1t')) %>%
   mutate(is.at.rew = peak2rew.mindist <= rew.dist.threshold) %>%
   group_by(animal, cell_id) %>%
   dplyr::summarise(npresent = sum(!is.na(peak2rew.mindist)), 
                    nactive = sum(is.at.rew)) %>% 
   filter(npresent == 1) %>%
-  left_join(mouse.meta.df, by='animal') %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  group_by(implant, animal) %>% 
+  dplyr::summarise(at.rew = sum(nactive), at.rew.pct = mean(nactive), n=n()) %>%
+  arrange(animal)
+
+animal.learning2test.rew.following %>%
+  dplyr::ungroup() %>%
   group_by(implant) %>%
-  dplyr::summarise(implant.active=sum(nactive), n=n(), implant.notactive=n-implant.active, mean(nactive)) %>%
+  dplyr::summarise(implant.active=sum(at.rew), n=sum(n), implant.notactive=n-implant.active, mean(at.rew.pct)) %>% 
+  #dplyr::summarise(implant.active=sum(nactive), n=n(), implant.notactive=n-implant.active, mean(nactive)) %>%
   arrange(implant) ->
   learning2test.rew.following.summary
 
-habituation.peaks.fst.moved = filter(trial.peaks.at.fst.moved, exp=='habituation', signif.si, animal!='A-BL') 
-dplyr::mutate(habituation.peaks.fst.moved, is.at.rew = peak2rew.mindist <= rew.dist.threshold) %>%
+habituation.peaks.fst.moved = filter(trial.peaks.at.fst.moved, exp=='habituation', signif.si, 
+                                     animal != 'A-BL', animal != 'L-TL') 
+animal.habituation.fields.at.fst.moved.pct = habituation.peaks.fst.moved %>%
+  dplyr::mutate(is.at.rew = peak2rew.mindist <= rew.dist.threshold) %>%
   dplyr::group_by(animal, implant) %>%
   dplyr::summarise(at.rew = sum(is.at.rew), at.rew.pct = mean(is.at.rew), n=n()) %>%
+  arrange(animal)
+
+animal.habituation.fields.at.fst.moved.pct %>%
   dplyr::ungroup() %>%
   dplyr::group_by(implant) %>%
-  dplyr::summarise(mean.at.rew.pct = mean(at.rew.pct)) %>%
+  dplyr::summarise(mean.at.rew.pct = mean(at.rew.pct),
+                   mean.ncells=mean(n)) %>%
   arrange(implant) ->
   habituation.fields.at.fst.moved.pct
 
-print('Binomial test on dCA1 cells - higher number of cells moves to reward than expected by chance')
-binom.test(x=learning2test.rew.following.summary$implant.active[1], 
-           n=learning2test.rew.following.summary$n[1], 
-           p=habituation.fields.at.fst.moved.pct$mean.at.rew.pct[1])
-print('Binomial test on vCA1 cells')
-binom.test(x=learning2test.rew.following.summary$implant.active[2], 
-           n=learning2test.rew.following.summary$n[2], 
-           p=habituation.fields.at.fst.moved.pct$mean.at.rew.pct[2])
+print('T test on reward cells percent - higher number of cells moves to reward than expected by chance')
+t.test(at.rew.pct ~ exp,
+       data=bind_rows(mutate(animal.learning2test.rew.following, exp='test'), 
+                      mutate(animal.habituation.fields.at.fst.moved.pct, exp='habituation')),
+       subset=implant=='dCA1',
+       paired=TRUE)
 
-print('The count of reward following cells higher in dCA1 than in the vCA1')
+# print('Binomial test on dCA1 cells - higher number of cells moves to reward than expected by chance')
+# binom.test(x=learning2test.rew.following.summary$implant.active[1], 
+#            n=learning2test.rew.following.summary$n[1], 
+#            p=habituation.fields.at.fst.moved.pct$mean.at.rew.pct[1])
+# print('Binomial test on vCA1 cells')
+# binom.test(x=learning2test.rew.following.summary$implant.active[2], 
+#            n=learning2test.rew.following.summary$n[2], 
+#            p=habituation.fields.at.fst.moved.pct$mean.at.rew.pct[2])
+
+print('The count of reward following cells not different in dCA1 than in the vCA1')
 reward.cells.comparison = 
   matrix(c(learning2test.rew.following.summary$implant.active[1],
            learning2test.rew.following.summary$implant.active[2],
@@ -486,16 +508,18 @@ fisher.test(reward.cells.comparison)
 #################
 
 get.reward.pattern.desc = function(clust_char) {
-  if (stringr::str_detect(clust_char, '^\\d211$')) {
+  if (stringr::str_detect(clust_char, '^\\d21$')) {
     return('2-place_cell')
   }
-  if (stringr::str_detect(clust_char, '^\\d222$')) {
+  if (stringr::str_detect(clust_char, '^\\d22$')) {
     return('1-reward_cell')
   }
   return('other')
 }
 
-filtered.cells.peaks.at.moved.rew.active = filter.cell.present.ntimes(filtered.cells.peaks.at.moved.rew, 4, exp, active)
+filtered.cells.peaks.at.moved.rew.active = filter.cell.present.ntimes(
+  filter(filtered.cells.peaks.at.moved.rew, day_desc != 'learning3 day#3 test'), 
+  3, exp, active)
 filtered.cells.peaks.at.moved.rew.active$my.clust = as.integer(filtered.cells.peaks.at.moved.rew.active$active) + 1
 filtered.cells.peaks.at.moved.rew.active = left_join(filtered.cells.peaks.at.moved.rew.active, mouse.meta.df, by=c('animal'))
 plot.cluster.assignments(filter(filtered.cells.peaks.at.moved.rew.active, 
@@ -509,9 +533,9 @@ plot.cluster.assignments(filter(filtered.cells.peaks.at.moved.rew.active,
                          #l1d5, 
                          l2d1t, 
                          #l2d1,
-                         l3d1t, 
-                         #l2d2
-                         l3d3t) +
+                         l3d1t
+                         #l3d3t
+                       ) +
   labs(title='Changes in translocated active cells location')
 
 # TODO: 

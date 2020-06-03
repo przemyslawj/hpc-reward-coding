@@ -38,7 +38,7 @@ plot.val.change.between.groups = function(summary.df, var, group.var) {
   group.var = enquo(group.var)
   summary.df %>%
     ggplot() +
-    #geom_point(aes(x=!!group.var, y=var.mean, color=animal)) +
+    geom_point(aes(x=!!group.var, y=var.mean, color=animal)) +
     geom_line(aes(x=!!group.var, y=var.mean, group=animal)) +
     geom_ribbon(aes(x=!!group.var, 
                     ymin=var.mean - var.sem, 

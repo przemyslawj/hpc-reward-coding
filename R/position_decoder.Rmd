@@ -27,7 +27,7 @@ trials.meta.df = read.trials.meta(rootdirs)
 
 ```{r}
 xybins = 20
-cheeseboard.bin.cm = 180 / xybins
+cheeseboard.bin.cm = 120 / xybins
 
 get.max.thr  = function(max.fraction=0.25) {
   function(vals) {  

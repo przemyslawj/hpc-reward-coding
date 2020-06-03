@@ -96,6 +96,7 @@ run.trials.si %>%
   geom_point(aes(x=sparsity, y=spatial.information, color=signif.si), alpha=0.2) +
   facet_grid(date ~ animal)
 ```
+
 ```{r calculate early vs late correlations}
 cell.cor = function(animal_name, day, cell_name) {
   early.pf = create.partial.df(early.fields, early.occupancies, animal_name, day, cell_name, 'Early')
@@ -357,7 +358,7 @@ pc.test.df %>%
                    pc.pct= mean(is.pc),
                    signif.pct = mean(signif.si)) %>%
   dplyr::ungroup() %>%
-  dplyr::group_by(implant) %>%
+  dplyr::group_by(implant, animal) %>%
   dplyr::summarise(mean(npc), mean(pc.pct), mean(signif.pct), sem(signif.pct))
 
 pc.test.df = pc.test.df %>%
@@ -392,8 +393,8 @@ g.test.pf.shift = ggplot() +
   geom_density(data=compared.test.trials.pc, aes(x=min.rew.dist)) +
   geom_density(data=uniform.pc.dist, aes(x=min.rew.dist), linetype='dotted') +
   #facet_wrap(animal ~ ., scales='free_x') +
-  facet_grid(implant ~ day_desc.reward) +
-  #facet_grid(. ~ implant) +
+  #facet_grid(implant ~ day_desc.reward) +
+  facet_grid(. ~ implant) +
   geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
   coord_flip() +
   gtheme +
@@ -448,7 +449,7 @@ plot.field.locs = function(pc.df, rewards.day_desc, fields.list=run.fields, date
   ggplot() +
     geom_raster(data=animals.occupancy.df, aes(x=Var1, y=100-Var2), fill='grey20', alpha=0.1) +
     geom_jitter(data=pc.df, aes(x=field.max.x, y=100-field.max.y, color=min.rew.dist <= goal.cell.max.dist),
-                alpha=0.35, width=0.5, height=0.5, size=2) +
+                alpha=0.35, width=0.5, height=0.5, size=1) +
     geom_point(data=filter(beforetest.rewards.df, day_desc==rewards.day_desc),
                mapping=aes(trans_x, 100-trans_y),
                color='black', shape=2) +
@@ -462,11 +463,13 @@ plot.field.locs(filter(pc.test.df, signif.si, day_desc=='learning2 day#1'),
                 fields.list=beforetest.fields,
                 date.activity.var=date) +
   labs(title='Test after first learning')
+ggsave('/home/prez/tmp/cheeseboard/place_fields_test1.svg', units = 'cm', width=12, height=20) 
 
 plot.field.locs(
   filter(run.trials.pc2rew.dist, signif.si, day_desc.activity =='habituation day#3', day_desc.reward == 'learning2 day#1'),
   'learning2 day#1') +
   labs(title='Last day habituation')
+ggsave('/home/prez/tmp/cheeseboard/place_fields_habit3.svg', units = 'cm', width=12, height=20) 
 ```
 
 ```{r}
@@ -527,6 +530,7 @@ summary.pc.test.df = summarize.rew.pc.pct(filter(pc.test.df, signif.si))
 
 compared.habit.trials.df = run.trials.pc2rew.dist %>%
   filter(exp.activity=='habituation', signif.si) %>%
+  #filter(day_desc.activity=='habituation day#3') %>%
   dplyr::select(-ends_with('.activity')) %>%
   dplyr::rename(date=date.reward,
                 day_desc=day_desc.reward)
@@ -534,24 +538,47 @@ compared.habit.trials.df = run.trials.pc2rew.dist %>%
 merged.summary.df = bind_rows(
   summarize.rew.pc.pct(compared.habit.trials.df) %>% mutate(exp='habituation'),
   summary.pc.test.df %>% mutate(exp='test')) %>%
-  filter(animal != 'L-TL') # remove animal with few cells during test
+  filter(animal != 'L-TL') %>% # remove animal with few cells during test 
+  #filter(animal != 'C-1R') %>%
+  dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_'))
+
+# Merge data about which test trials showed the animal learned
+library(reshape2)
+merged.summary.wide.df = reshape2::dcast(merged.summary.df, day_desc + animal + implant ~ exp, value.var = 'pct.reward') %>% 
+  dplyr::mutate(pc.pct.change = `test` - `habituation`) %>%
+  left_join(dplyr::select(crossings.change.df, -date, -location_set, -habituation, -test), 
+            by=c('animal', 'day_desc', 'implant'))
+
+learned.threshold = 0.1
+kept.testtrials = merged.summary.wide.df %>% 
+  dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_')) %>%
+  filter(norm_crossings_change > learned.threshold) 
+  
+merged.summary.df = filter(merged.summary.df, animal_beforetest_day %in% kept.testtrials$animal_beforetest_day)
 dca1.rew.pc.pct = subset(merged.summary.df, implant == 'dCA1')
 vca1.rew.pc.pct = subset(merged.summary.df, implant == 'vCA1')
-fem.dca1 = lmerTest::lmer(pct.reward ~  exp + (1 + exp | animal), data=dca1.rew.pc.pct)
+fem.dca1 = lmerTest::lmer(pct.reward ~  exp + (1 + day_desc | animal), data=dca1.rew.pc.pct)
 print('Fraction of dCA1 place cells at reward increased')
 summary(fem.dca1)
 plot.model.diagnostics(fem.dca1, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp)
 
-fem.vca1 = lmerTest::lmer(pct.reward ~  exp + (1 + exp | animal), data=vca1.rew.pc.pct)
+fem.vca1 = lmerTest::lmer(pct.reward ~  exp + (1 + day_desc | animal), data=vca1.rew.pc.pct)
 print('Fraction of vCA1 place cells did not increase')
 summary(fem.vca1)
 plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp)
 
-g.pc.change.pct.test = plot.val.change.between.groups(
-    create.animal.summary(merged.summary.df, pct.reward, exp),
-    pct.reward, exp) +
-  ylab('Place cells at reward (%)') +
-  ggtitle('Fraction of place cells at reward increased at test trial')
+#g.pc.change.pct.test = plot.val.change.between.groups(
+#    create.animal.summary(merged.summary.df, pct.reward, exp),
+#    pct.reward, exp) +
+g.pc.change.pct.test = merged.summary.df %>%
+ ggplot(aes(x=exp, y=pct.reward, group=animal_beforetest_day)) +
+  #geom_point(aes(color=animal)) +
+  geom_line() +
+  facet_grid(. ~ implant, scales = 'free') +
+  xlab('') +
+  gtheme +
+  ggtitle('Fraction of place cells at reward increased at test trial') +
+  ylab('Place cells at reward (%)')
 g.pc.change.pct.test
 
 g.pf.shift.fig = plot_grid(g.test.pf.shift,
@@ -559,7 +586,7 @@ g.pf.shift.fig = plot_grid(g.test.pf.shift,
                            nrow=1, rel_widths = c(0.6, 1.0))
 
 ggsave('/tmp/test_pf_shift.svg', g.pf.shift.fig,
-       width=26, height=11, units='cm')
+       width=15, height=8, units='cm')
 ```
 
 When habituation compared to learning - using theshold of 25 where distribution of distances peak
@@ -610,7 +637,7 @@ daypair.diff = function(animal.daypair.df, days, include.cors=TRUE) {
                      pc.fst = is.pc[1],
                      mean.goal.cells = mean(is.goal.cell, na.rm=TRUE),
                      goal.cell.fst = is.goal.cell[1],
-                     same.rew.loc = pairequal(location_set.x),
+                     same.rew.loc = pairequal(location_set),
                      same.closest.loc = pairequal(closest.location.ordinal),
                      days.diff = as.Date(days) %>% diff %>% as.integer,
                      date.diff=paste(format(days[2]), ' - ', format(days[1])),
@@ -1143,9 +1170,10 @@ calc.field.peaks.info = function(day,
 
 cell.field.peaks.info = function(field,
                                  day.rew.df,
-                                 bin.size=5,
+                                 bin.size=100/nbins,
                                  max.rew.dist.thr=20) {
-  peaks.rowcol = fieldPeaks(field)
+  #peaks.rowcol = fieldPeaks(field)
+  peaks.rowcol = fieldPeaks(field, min.peakheight=0.5, sigma=1.4)
   peaks.rowcol = peaks.rowcol * bin.size
 
   if (nrow(peaks.rowcol) > 0) {
@@ -1154,6 +1182,7 @@ cell.field.peaks.info = function(field,
     min.rew.dist.res = list(rew.dist=100, location.ordinal=-1)
   }
   peak.atrew.index = which(min.rew.dist.res$rew.dist <= max.rew.dist.thr)
+  closer.reward.index = which.min(min.rew.dist.res$rew.dist)
 
   loc.ordinals.with.peaks = unique(min.rew.dist.res$location.ordinal[peak.atrew.index])
   return(list(
@@ -1162,7 +1191,8 @@ cell.field.peaks.info = function(field,
     npeaks.at.rew = length(peak.atrew.index),
     rew.peaks.count = length(loc.ordinals.with.peaks),
     current.rew.peaks.count = sum(day.rew.df[location_ordinal %in% loc.ordinals.with.peaks, current_loc], na.rm = TRUE),
-    peak2rew.mindist = min(min.rew.dist.res$rew.dist)
+    peak2rew.mindist = min.rew.dist.res$rew.dist[closer.reward.index],
+    closer.rew.ordinal = min.rew.dist.res$location.ordinal[closer.reward.index]
   ))
 }
 
@@ -1193,6 +1223,8 @@ beforetest.peaks.at.current.rew = create.peaks.df.at.locs(beforetest.fields, bef
 
 aftertest.peaks.at.rew = create.peaks.df.at.locs(aftertest.fields, prev.locations.df)
 aftertest.peaks.fst.moved = create.peaks.df.at.locs(aftertest.fields, fst.moved.location.df)
+
+habituation.peaks.at.fst.moved = filter(trial.peaks.at.fst.moved, exp=='habituation')
 ```
 
 Peaks in place fields from habituation with regards to first reward locations
@@ -1286,56 +1318,75 @@ beforetest.summary.fields.pct.df = summarize.rew.pc.pct(
 merged.summary.df = bind_rows(
   habit.summary.fields.pct.df %>% mutate(exp='habituation'),
   beforetest.summary.fields.pct.df %>% mutate(exp='test')) %>%
-  filter(animal != 'L-TL') # remove animal with few cells during test
+  filter(animal != 'L-TL') %>% # remove animal with few cells during test
+  mutate(animal_beforetest_day = paste(animal, day_desc, sep='_')) %>%
+  filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day)
 
 dca1.rew.pc.pct = subset(merged.summary.df, implant == 'dCA1')
 vca1.rew.pc.pct = subset(merged.summary.df, implant == 'vCA1')
-fem.dca1 = lmerTest::lmer(pct.reward ~  exp + (1 + exp | animal), data=dca1.rew.pc.pct)
+fem.dca1 = lmerTest::lmer(pct.reward ~  exp + (1 + day_desc | animal), data=dca1.rew.pc.pct)
 print('Fraction of dCA1 place cells at reward increased')
 summary(fem.dca1)
 plot.model.diagnostics(fem.dca1, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp)
 
-fem.vca1 = lmerTest::lmer(pct.reward ~  exp + (1 + exp | animal), data=vca1.rew.pc.pct)
+fem.vca1 = lmerTest::lmer(pct.reward ~  exp + (1 + day_desc | animal), data=vca1.rew.pc.pct)
 print('Fraction of vCA1 place cells did not increase')
 summary(fem.vca1)
 plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp)
 
-g.fields.change.pct.test = plot.val.change.between.groups(
-    create.animal.summary(merged.summary.df, pct.reward, exp), 
-    pct.reward, exp) +
-  ylab('Fields at reward (%)')
-  ggtitle('Fraction of cells with one of the fields at reward during test')
+#g.fields.change.pct.test = plot.val.change.between.groups(
+#    create.animal.summary(merged.summary.df, pct.reward, exp), 
+#    pct.reward, exp) +
+#  ylab('Fields at reward (%)')
+#  ggtitle('Fraction of cells with one of the fields at reward during test')
+g.fields.change.pct.test = merged.summary.df %>%
+  #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
+  ggplot(aes(x=exp, y=pct.reward, group=animal_beforetest_day)) +
+  geom_point(aes(color=animal)) +
+  geom_line() +
+  facet_grid(. ~ implant, scales = 'free') +
+  xlab('') +
+  gtheme +
+  ylab('Place cells at reward (%)') +
+  ggtitle('Fraction of place cells at reward increased at test trial')
+
 g.fields.change.pct.test
 ```
 
 # vCA1 has higher count of multi fields, not different between of habituation vs learning trials
 ```{r}
-bind_rows(
-  filter(beforetest.peaks.fst.moved, signif.si, npeaks>0),
+animal.fields.count = bind_rows(
+  mutate(filter(beforetest.peaks.fst.moved, signif.si, npeaks>0), exp='test'),
+  #filter(trial.peaks.at.fst.moved, signif.si, exp=='learning', npeaks>0),
   filter(trial.peaks.at.fst.moved, signif.si, exp=='habituation')) %>% 
-  dplyr::add_count(implant, animal, day_desc, exp, name='ncells') %>%
-  filter(ncells > 10) %>%
+  dplyr::add_count(implant, animal, day_desc, exp, name='day_ncells') %>%
+  filter(day_ncells > 10) %>% 
   dplyr::group_by(implant, animal, day_desc, exp, npeaks) %>%
-  dplyr::summarise(peak.pct=n() / mean(ncells) * 100) %>%
+  dplyr::summarise(ncells=n(), peak.pct=n() / mean(day_ncells) * 100, day_ncells = mean(day_ncells))
+
+animal.fields.count %>%
   ggplot(aes(x=npeaks, y=peak.pct)) +
   geom_jitter(width=0.1, height = 5) +
-  facet_grid(implant ~ day_desc + exp) +
+  facet_grid(exp ~ implant) +
   gtheme
 
-
-beforetest.multifields.count = bind_rows(
-  filter(beforetest.peaks.fst.moved, signif.si, npeaks>0),
-  filter(trial.peaks.at.fst.moved, signif.si, exp=='habituation', npeaks>0)) %>%
-  dplyr::add_count(implant, animal, day_desc, exp, name='ncells') %>%
-  filter(ncells > 10) %>%
+animal.multifields.count = animal.fields.count %>%
   dplyr::group_by(implant, animal, day_desc, exp, is.multi=npeaks > 1) %>%
-  dplyr::summarise(multi.pct=n() / mean(ncells) * 100) %>%
-  filter(is.multi)
-  
-#t.test(multi.pct ~ implant, beforetest.multifields.count)
+  dplyr::summarise(multi.pct = sum(ncells) / mean(day_ncells) * 100) 
+
 library(lmerTest)
-peak.count.model = lmerTest::lmer(multi.pct ~ implant + exp + (1 + implant + exp | animal), data=beforetest.multifields.count, REML=TRUE)
+peak.count.model = lmerTest::lmer(
+                                  multi.pct ~ implant + exp + (1 + exp | animal),
+                                  #multi.pct ~ implant + (1 | animal),
+                                  #multi.pct ~ exp + (1 + exp | animal),
+                                  data=animal.multifields.count, 
+                                  #subset=is.multi & exp == 'test', # & implant=='vCA1', 
+                                  subset = is.multi,
+                                  REML=TRUE)
 summary(peak.count.model)
+plot.model.diagnostics(peak.count.model, 
+                       subset(animal.multifields.count, is.multi)$animal, 
+                       subset(animal.multifields.count, is.multi)$implant)
 ```
 
 
@@ -1349,22 +1400,6 @@ trial.peaks.at.rew %>%
   facet_grid(implant ~ .) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
-Distribution of min distance to the first translocated peak
-```{r}
-baseline.peaks.fst.moved = filter(trial.peaks.at.fst.moved, day_desc=='habituation day#3', signif.si)
-
-ggplot() +
-  geom_density(data=baseline.peaks.fst.moved, aes(x=peak2rew.mindist), linetype='dashed') +
-  geom_density(data=filter(beforetest.peaks.fst.moved, signif.si, day_desc == 'learning2 day#1'), aes(x=peak2rew.mindist)) +
-  #geom_density(data=filter(trial.peaks.at.fst.moved, signif.si, day_desc == 'learning1 day#5'), aes(x=peak2rew.mindist)) +
-  #facet_wrap(animal ~ ., scales='free_x') +
-  facet_grid(. ~ implant) +
-  geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
-  coord_flip() +
-  gtheme +
-  xlab('Field distance from the first translocated reward (%)') + ylab('Density')
-```
-
 
 Summary about peaks at rewards for different trial days
 ```{r}
@@ -1406,8 +1441,9 @@ day.peak.summary %>%
   dplyr::mutate_if(is.numeric, round, 2) %>%
   DT::datatable()
 
-wilcox.test(current.multireward.pct ~ implant, day.peak.summary, subset=day_desc == 'learning1 day#5')
-wilcox.test(current.multireward.pct ~ implant, day.peak.summary, subset=day_desc == 'learning2 day#1')
+print('Stats on fraction of cells with fields at both rewards')
+t.test(current.multireward.pct ~ implant, day.peak.summary, subset=day_desc == 'learning1 day#5')
+t.test(current.multireward.pct ~ implant, day.peak.summary, subset=day_desc == 'learning2 day#1')
 
 ```
 

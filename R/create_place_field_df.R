@@ -22,8 +22,9 @@ source('plotting_params.R')
 source('traces_input.R')
 source('utils.R')
 
-nbins = 20
-timebin.dur.msec = 200
+nbins = 30
+timebin.dur.msec = 100
+min.occupancy.sec = 0.3
 gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
 
 #all.trials.si = data.frame()
@@ -64,9 +65,9 @@ for (caimg_result_dir in caimg_result_dirs) {
   data.traces = read.data.trace(caimg_result_dir)
   date = data.traces$date[1]
   animal = data.traces$animal[1]
-  
+
   binned.traces.run = prepare.run.dirtraces(data.traces, nbins)
-  # toc()
+  toc()
 
   plot.dir.prefix = paste(gen_imgs_dir, animal, format(date), sep='/')
 
@@ -75,7 +76,9 @@ for (caimg_result_dir in caimg_result_dirs) {
   #                                 plot.dir=paste0(plot.dir.prefix, '/all/'),
   #                                 generate.plots=FALSE,
   #                                 nshuffles=1000,
-  #                                 timebin.dur.msec=timebin.dur.msec)
+  #                                 timebin.dur.msec=timebin.dur.msec,
+  #                                 nbins=nbins,
+  #                                 min.occupancy.sec=min.occupancy.sec)
   # all.trials.si = bind_rows(all.trials.si, add.meta.cols(all.spatial$df, animal, date))
   # all.fields[[animal]][[format(date)]] = all.spatial$field
   # all.occupancies[[animal]][[format(date)]] = all.spatial$occupancy
@@ -86,7 +89,9 @@ for (caimg_result_dir in caimg_result_dirs) {
                                   plot.dir=paste0(plot.dir.prefix, '/run/'),
                                   generate.plots=FALSE,
                                   nshuffles=1000,
-                                  timebin.dur.msec=timebin.dur.msec)
+                                  timebin.dur.msec=timebin.dur.msec,
+                                  nbins=nbins,
+                                  min.occupancy.sec=min.occupancy.sec)
   run.trials.si = bind_rows(run.trials.si, add.meta.cols(run.spatial$df, animal, date))
   run.fields[[animal]][[format(date)]] = run.spatial$field
   run.occupancies[[animal]][[format(date)]] = run.spatial$occupancy
@@ -101,7 +106,9 @@ for (caimg_result_dir in caimg_result_dirs) {
                                      plot.dir=paste0(plot.dir.prefix, '/beforetest/'),
                                      generate.plots=FALSE,
                                      nshuffles=1000,
-                                     timebin.dur.msec=timebin.dur.msec)
+                                     timebin.dur.msec=timebin.dur.msec,
+                                     nbins=nbins,
+                                     min.occupancy.sec=min.occupancy.sec)
     beforetest.trials.si = bind_rows(beforetest.trials.si, add.meta.cols(test.spatial$df, animal, date))
     beforetest.fields[[animal]][[format(date)]] = test.spatial$field
     beforetest.occupancies[[animal]][[format(date)]] = test.spatial$occupancy
@@ -115,7 +122,9 @@ for (caimg_result_dir in caimg_result_dirs) {
                                      plot.dir=paste0(plot.dir.prefix, '/aftertest/'),
                                      generate.plots=FALSE,
                                      nshuffles=1000,
-                                     timebin.dur.msec=timebin.dur.msec)
+                                     timebin.dur.msec=timebin.dur.msec,
+                                     nbins=nbins,
+                                     min.occupancy.sec=min.occupancy.sec)
     aftertest.trials.si = bind_rows(aftertest.trials.si, add.meta.cols(test.spatial$df, animal, date))
     aftertest.fields[[animal]][[format(date)]] = test.spatial$field
     aftertest.occupancies[[animal]][[format(date)]] = test.spatial$occupancy
@@ -127,7 +136,9 @@ for (caimg_result_dir in caimg_result_dirs) {
   odd.spatial = calc.spatial.info(binned.traces.run[exp_title == 'trial' & trial %% 2 == 1,],
                                   paste0(plot.dir.prefix, '/odd/'),
                                   nshuffles=0,
-                                  timebin.dur.msec=timebin.dur.msec)
+                                  timebin.dur.msec=timebin.dur.msec,
+                                  nbins=nbins,
+                                  min.occupancy.sec=min.occupancy.sec)
   odd.trials.si = bind_rows(odd.trials.si, add.meta.cols(odd.spatial$df, animal, date))
   odd.fields[[animal]][[format(date)]] = odd.spatial$field
   odd.occupancies[[animal]][[format(date)]] = odd.spatial$occupancy
@@ -137,7 +148,9 @@ for (caimg_result_dir in caimg_result_dirs) {
   even.spatial = calc.spatial.info(binned.traces.run[exp_title == 'trial' & trial %% 2 == 0,],
                                    paste0(plot.dir.prefix, '/even/'),
                                    nshuffles=0,
-                                   timebin.dur.msec=timebin.dur.msec)
+                                   timebin.dur.msec=timebin.dur.msec,
+                                   nbins=nbins,
+                                   min.occupancy.sec=min.occupancy.sec)
   even.trials.si = bind_rows(even.trials.si, add.meta.cols(even.spatial$df, animal, date))
   even.fields[[animal]][[format(date)]] = even.spatial$field
   even.occupancies[[animal]][[format(date)]] = even.spatial$occupancy
@@ -148,8 +161,10 @@ for (caimg_result_dir in caimg_result_dirs) {
   tic("spatial info on early trials")
   early.spatial = calc.spatial.info(binned.traces.run[exp_title == 'trial' & trial <= half.trial,],
                                     paste0(plot.dir.prefix, '/early/'),
-                                    nshuffles=1000,
-                                    timebin.dur.msec=timebin.dur.msec)
+                                    nshuffles=0,
+                                    timebin.dur.msec=timebin.dur.msec,
+                                    nbins=nbins,
+                                    min.occupancy.sec=min.occupancy.sec)
   early.trials.si = bind_rows(early.trials.si, add.meta.cols(early.spatial$df, animal, date))
   early.fields[[animal]][[format(date)]] = early.spatial$field
   early.occupancies[[animal]][[format(date)]] = early.spatial$occupancy
@@ -158,8 +173,10 @@ for (caimg_result_dir in caimg_result_dirs) {
   tic("spatial info on late trials")
   late.spatial = calc.spatial.info(binned.traces.run[exp_title == 'trial' & trial > half.trial, ],
                                    paste0(plot.dir.prefix, '/late/'),
-                                   nshuffles=1000,
-                                   timebin.dur.msec=timebin.dur.msec)
+                                   nshuffles=0,
+                                   timebin.dur.msec=timebin.dur.msec,
+                                   nbins=nbins,
+                                   min.occupancy.sec=min.occupancy.sec)
   late.trials.si = bind_rows(late.trials.si, add.meta.cols(late.spatial$df, animal, date))
   late.fields[[animal]][[format(date)]] = late.spatial$field
   late.occupancies[[animal]][[format(date)]] = late.spatial$occupancy
@@ -171,5 +188,5 @@ for (caimg_result_dir in caimg_result_dirs) {
 
 
 print("Saving env variables")
-save.image(file="data/pf_smoothed_percentile_95_shuffle5sec_occupancy1_5sec.RData")
+save.image(file="data/pf_smoothed_percentile_95_shuffle5sec_occupancy03sec.RData")
 

@@ -181,6 +181,10 @@ for (i in 1:nrow(tmp.df)) {
 # Plots on example trace
 Load the traces
 ```{r}
+# animal_name = 'F-TL'
+# exp_title='learning'
+# day = '2019-09-04'
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
 animal_name = 'F-TL'
 exp_title='learning'
 day = '2019-09-04'
@@ -279,7 +283,7 @@ cell.df = data.traces.run[cell_id == cell_name & x >= 0 & y >= 0, ]
 binned.cell.df = bin.time.space(cell.df, 
                                 nbins.x = nbins,
                                 nbins.y = nbins,
-                                get.bin.thresholds.fun=get.quantiles.fun(c(0.2, 0.95, 1.0)),
+                                get.bin.thresholds.fun=get.quantiles.fun(c(0.95, 1.0)),
                                 binned.var='deconv_trace',
                                 timebin.dur.msec=200)
 binned.cell.df[,is_running:=as.logical(is_running)]

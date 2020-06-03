@@ -22,8 +22,8 @@ source('plotting_params.R')
 source('traces_input.R')
 source('utils.R')
 
-nbins = 30
-timebin.dur.msec = 100
+nbins = 20
+timebin.dur.msec = 200
 gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
 
 
@@ -53,7 +53,10 @@ traces2pf = function(binned.traces.run) {
                                       plot.dir=paste(plot.dir.prefix, subset.name, sep='/'),
                                       generate.plots=FALSE,
                                       nshuffles=1000,
-                                      timebin.dur.msec=timebin.dur.msec)
+									  trace.var='deconv_trace',
+                                      timebin.dur.msec=timebin.dur.msec,
+                                      nbins=nbins,
+                                      min.occupancy.sec=0.7)
     subset.result$df = add.meta.cols(subset.result$df, animal, date)
     toc()
     return(subset.result)
@@ -62,11 +65,11 @@ traces2pf = function(binned.traces.run) {
   run.pf = traces2pf.subset(binned.traces.run[exp_title == 'trial'], 'run')
 
   # Test trials
-  max_test_trial_dur_msec = 240 * 1000
-  beforetest.traces = binned.traces.run[exp_title == 'beforetest' & timestamp <= max_test_trial_dur_msec]
+  #max_test_trial_dur_msec = 240 * 1000
+  beforetest.traces = binned.traces.run[exp_title == 'beforetest']# & timestamp <= max_test_trial_dur_msec]
   beforetest.pf = traces2pf.subset(beforetest.traces, 'beforetest')
 
-  aftertest.traces = binned.traces.run[exp_title == 'aftertest' & timestamp <= max_test_trial_dur_msec]
+  aftertest.traces = binned.traces.run[exp_title == 'aftertest']# & timestamp <= max_test_trial_dur_msec]
   aftertest.pf = traces2pf.subset(aftertest.traces, 'aftertest')
 
   # # Odd vs Even
@@ -149,5 +152,5 @@ beforetest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$beforetest$df)
 aftertest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$aftertest$df)
 
 print("Saving env variables")
-save.image(file="data/deconv_place_field_dfs_smoothed_percentile_95_bin100msec_nbins30_shuffle5sec_occupancy05sec_gaussvar3.RData")
+save.image(file="data/deconv_place_field_dfs_smoothed_percentile_95_bin200msec_nbins20_shuffle5sec_occupancy07sec_gaussvar2.RData")
 
