@@ -350,16 +350,6 @@ run.trials.pc2rew.dist = merged.run.trials.pc %>%
 
 pc.test.df = beforetest.trials.si %>%
   mutate(is.pc = is.place.cell(signif.si, mutual.info - mutual.info.bias, field.size.50, field.size.25, field.max, field.mean, 1.0))
-# Pct of place cell during test runs
-pc.test.df %>%
-  left_join(mouse.meta.df, by='animal') %>%
-  group_by(date, animal, implant) %>%
-  dplyr::summarise(npc=sum(is.pc),
-                   pc.pct= mean(is.pc),
-                   signif.pct = mean(signif.si)) %>%
-  dplyr::ungroup() %>%
-  dplyr::group_by(implant, animal) %>%
-  dplyr::summarise(mean(npc), mean(pc.pct), mean(signif.pct), sem(signif.pct))
 
 pc.test.df = pc.test.df %>%
   left_join(mouse.meta.df, by='animal') %>%
@@ -375,6 +365,18 @@ pc.test.df = pc.test.df %>%
         closest.location.ordinal=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
                                                    field.max.x, field.max.y)$location.ordinal)
 
+
+# Pct of place cell during test runs
+pc.test.df %>%
+  group_by(date, implant) %>%
+  dplyr::summarise(nsignif=sum(signif.si),
+                   signif.pct = mean(signif.si) * 100,
+                   at.rew.n = sum(signif.si & min.rew.dist <= goal.cell.max.dist),
+                   at.rew.pct = at.rew.n / sum(signif.si) * 100) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(implant) %>%
+  dplyr::summarise(mean(nsignif), mean(signif.pct),  mean(at.rew.pct), mean(at.rew.n)) %>%
+  dplyr::mutate_if(is.double, round, 0)
 ```
 
 Compare with the test trials with habituation trials
@@ -1149,7 +1151,7 @@ calc.field.peaks.info = function(day,
                                  animal_name,
                                  field.list,
                                  rew.df,
-                                 max.rew.dist.thr=20) {
+                                 max.rew.dist.thr=goal.cell.max.dist) {
   if (nrow(rew.df) == 0) {
     #print(paste0('No rewards to compare for animal=', animal_name, ' date=', day))
     return(data.frame())
@@ -1171,7 +1173,7 @@ calc.field.peaks.info = function(day,
 cell.field.peaks.info = function(field,
                                  day.rew.df,
                                  bin.size=100/nbins,
-                                 max.rew.dist.thr=20) {
+                                 max.rew.dist.thr=goal.cell.max.dist) {
   #peaks.rowcol = fieldPeaks(field)
   peaks.rowcol = fieldPeaks(field, min.peakheight=0.5, sigma=1.4)
   peaks.rowcol = peaks.rowcol * bin.size
@@ -1308,12 +1310,12 @@ Multifield distance to the closest reward
 habit.summary.fields.pct.df = summarize.rew.pc.pct(
   compared.habit.fields.at.test.rews,
   dist.var=peak2rew.mindist, 
-  dist.threshold=15) %>% dplyr::ungroup()
+  dist.threshold=goal.cell.max.dist) %>% dplyr::ungroup()
 
 beforetest.summary.fields.pct.df = summarize.rew.pc.pct(
   filter(beforetest.peaks.at.current.rew, signif.si),
   dist.var=peak2rew.mindist, 
-  dist.threshold=15)
+  dist.threshold=goal.cell.max.dist)
 
 merged.summary.df = bind_rows(
   habit.summary.fields.pct.df %>% mutate(exp='habituation'),
