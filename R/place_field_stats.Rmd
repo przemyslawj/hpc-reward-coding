@@ -1144,87 +1144,37 @@ pc.prev.rew %>%
 ```
 
 For each place field calculate the count of its peaks, and how many of them are in the rew or prev rew zone
+
 ```{r warning=FALSE}
 source('place_field_utils.R')
-
-calc.field.peaks.info = function(day,
-                                 animal_name,
-                                 field.list,
-                                 rew.df,
-                                 max.rew.dist.thr=goal.cell.max.dist) {
-  if (nrow(rew.df) == 0) {
-    #print(paste0('No rewards to compare for animal=', animal_name, ' date=', day))
-    return(data.frame())
-  }
-  bin.size = 100 / nbins
-  cell_names = names(field.list[[animal_name]][[day]])
-  if (length(cell_names) == 0) {
-    #print(paste0('Empty list of fields for animal=', animal_name, ' date=', day))
-    return(data.frame())
-  }
-  
-  map_dfr(cell_names, ~ {
-      field.info = cell.field.peaks.info(field.list[[animal_name]][[day]][[.x]], rew.df, bin.size, max.rew.dist.thr)
-      meta = list(animal=animal_name, date=day, cell_id=as.integer(.x))
-      return(append(meta, field.info))
-  })
-}
-
-cell.field.peaks.info = function(field,
-                                 day.rew.df,
-                                 bin.size=100/nbins,
-                                 max.rew.dist.thr=goal.cell.max.dist) {
-  #peaks.rowcol = fieldPeaks(field)
-  peaks.rowcol = fieldPeaks(field, min.peakheight=0.5, sigma=1.4)
-  peaks.rowcol = peaks.rowcol * bin.size
-
-  if (nrow(peaks.rowcol) > 0) {
-    min.rew.dist.res = calc.min.rew.dist(day.rew.df, peaks.rowcol[,'row'], peaks.rowcol[,'col'])
-  } else {
-    min.rew.dist.res = list(rew.dist=100, location.ordinal=-1)
-  }
-  peak.atrew.index = which(min.rew.dist.res$rew.dist <= max.rew.dist.thr)
-  closer.reward.index = which.min(min.rew.dist.res$rew.dist)
-
-  loc.ordinals.with.peaks = unique(min.rew.dist.res$location.ordinal[peak.atrew.index])
-  return(list(
-    maxpeakval = max(field, na.rm=TRUE),
-    npeaks = nrow(peaks.rowcol),
-    npeaks.at.rew = length(peak.atrew.index),
-    rew.peaks.count = length(loc.ordinals.with.peaks),
-    current.rew.peaks.count = sum(day.rew.df[location_ordinal %in% loc.ordinals.with.peaks, current_loc], na.rm = TRUE),
-    peak2rew.mindist = min.rew.dist.res$rew.dist[closer.reward.index],
-    closer.rew.ordinal = min.rew.dist.res$location.ordinal[closer.reward.index]
-  ))
-}
 
 trial.days.df = trials.meta.df %>%
   dplyr::select(date, animal, exp) %>%
   dplyr::distinct()
 
-create.peaks.df.at.locs = function(fields, locs.df, trial.days=trial.days.df) {
+create.peaks.df.at.locs = function(fields, locs.df, trial.days, max.rew.dist.thr=goal.cell.max.dist) {
   res = map2_dfr(trial.days$date,
                  trial.days$animal,
-                 ~ calc.field.peaks.info(.x, .y, fields, rew.df=filter.rews.df(locs.df, .x, .y)))
+                 ~ calc.field.peaks.info(.x, .y, 
+                                         fields[[.y]][[.x]], 
+                                         rew.df=filter.rews.df(locs.df, .x, .y),
+                                         max.rew.dist.thr))
   res %>%
     left_join(trials.meta.df, by=c('animal', 'date')) %>%
     left_join(place.cell.db, by=c('animal', 'date', 'cell_id', 'day_desc', 'exp'))
 }
-```
 
+trial.peaks.at.rew = create.peaks.df.at.locs(run.fields, prev.locations.df, trial.days.df)
+trial.peaks.at.fst.moved = create.peaks.df.at.locs(run.fields, fst.moved.location.df, trial.days.df)
+trial.peaks.at.current.rew = create.peaks.df.at.locs(run.fields, prev.locations.df[current_loc==TRUE,], trial.days.df)
 
-```{r warning=FALSE}
-trial.peaks.at.rew = create.peaks.df.at.locs(run.fields, prev.locations.df)
-trial.peaks.at.fst.moved = create.peaks.df.at.locs(run.fields, fst.moved.location.df)
-trial.peaks.at.current.rew = create.peaks.df.at.locs(run.fields, prev.locations.df[current_loc==TRUE,])
-
-beforetest.peaks.at.rew = create.peaks.df.at.locs(beforetest.fields, prev.locations.df)
-beforetest.peaks.fst.moved = create.peaks.df.at.locs(beforetest.fields, fst.moved.location.df)
+beforetest.peaks.at.rew = create.peaks.df.at.locs(beforetest.fields, prev.locations.df, trial.days.df)
+beforetest.peaks.fst.moved = create.peaks.df.at.locs(beforetest.fields, fst.moved.location.df, trial.days.df)
 beforetest.rewards.df$current_loc = FALSE
-beforetest.peaks.at.current.rew = create.peaks.df.at.locs(beforetest.fields, beforetest.rewards.df)
+beforetest.peaks.at.current.rew = create.peaks.df.at.locs(beforetest.fields, beforetest.rewards.df, trial.days.df)
 
-aftertest.peaks.at.rew = create.peaks.df.at.locs(aftertest.fields, prev.locations.df)
-aftertest.peaks.fst.moved = create.peaks.df.at.locs(aftertest.fields, fst.moved.location.df)
+aftertest.peaks.at.rew = create.peaks.df.at.locs(aftertest.fields, prev.locations.df, trial.days.df)
+aftertest.peaks.fst.moved = create.peaks.df.at.locs(aftertest.fields, fst.moved.location.df, trial.days.df)
 
 habituation.peaks.at.fst.moved = filter(trial.peaks.at.fst.moved, exp=='habituation')
 ```
@@ -1234,7 +1184,6 @@ Peaks in place fields from habituation with regards to first reward locations
 habittest.daypair = filter(trials.meta.df, exp == 'habituation', animal != 'A-BL') %>%
   left_join(dplyr::select(beforetest.rewards.df, date, animal, location_set), 
             by=c('animal'), suffix=c('.habitday', '.testday'))
-beforetest.rewards.df$current_loc = FALSE
 habit.fields.at.test.rews = map_dfr(1:nrow(habittest.daypair), ~ {
   animal_name = habittest.daypair$animal[.x]
   activity_date = habittest.daypair$date.habitday[.x]
@@ -1242,8 +1191,9 @@ habit.fields.at.test.rews = map_dfr(1:nrow(habittest.daypair), ~ {
   rew.df = beforetest.rewards.df[animal==animal_name & date == test_date,]
   calc.field.peaks.info(activity_date,
                         animal_name,
-                        run.fields, 
-                        rew.df=rew.df) %>%
+                        run.fields[[animal_name]][[activity_date]], 
+                        rew.df=rew.df,
+                        max.rew.dist.thr=goal.cell.max.dist) %>%
     dplyr::mutate(date.active = activity_date,
                   day_desc.active = habittest.daypair$day_desc[.x],
                   date.reward = test_date)
@@ -1293,7 +1243,7 @@ bind_rows(
   mutate(compared.habit.fields.at.test.rews, group.name='2_habituation'),
   filter(beforetest.peaks.at.current.rew, signif.si) %>% mutate(group.name='1_test')
 ) %>%
-  ggplot(aes(x=peak2rew.mindist, group=group.name)) +
+  ggplot(aes(x=min.rew.dist, group=group.name)) +
   geom_density(aes(linetype=group.name)) +
   #facet_grid(animal ~ day_desc, scales='free') +
   facet_grid(. ~ implant) +
@@ -1309,12 +1259,12 @@ Multifield distance to the closest reward
 ```{r}
 habit.summary.fields.pct.df = summarize.rew.pc.pct(
   compared.habit.fields.at.test.rews,
-  dist.var=peak2rew.mindist, 
+  dist.var=min.rew.dist, 
   dist.threshold=goal.cell.max.dist) %>% dplyr::ungroup()
 
 beforetest.summary.fields.pct.df = summarize.rew.pc.pct(
   filter(beforetest.peaks.at.current.rew, signif.si),
-  dist.var=peak2rew.mindist, 
+  dist.var=min.rew.dist, 
   dist.threshold=goal.cell.max.dist)
 
 merged.summary.df = bind_rows(

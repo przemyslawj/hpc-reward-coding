@@ -389,7 +389,7 @@ wilcox.test(norm_crossings ~ type, data=df, paired=TRUE)
 
 # Paired comparisons of crossings counts
 gcross.paired.absolute = test.trial.df.joined %>%
-  select(animal, date, location_set, crossings_0_60s, type) %>%
+  dplyr::select(animal, date, location_set, crossings_0_60s, type) %>%
   spread(type, crossings_0_60s) %>%
   mutate(cross_diff = test-habituation) %>%
   ggplot() +

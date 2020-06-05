@@ -33,7 +33,7 @@ trial.field.dist2fst.moved = trial.peaks.at.fst.moved
 
 beforetest.field.dist2current.rew = beforetest.peaks.at.rew
 beforetest.field.dist2fst.moved = beforetest.peaks.fst.moved
-mindist.var = quo(peak2rew.mindist)
+mindist.var = quo(min.rew.dist)
 
 # trial.field.dist2current.rew2 = filter(run.trials.pc2rew.dist, location_set.activity == location_set.reward) %>%
 #   dplyr::rename(date=date.activity, day_desc=day_desc.activity)
@@ -43,7 +43,7 @@ mindist.var = quo(peak2rew.mindist)
 #     min.rew.dist=calc.min.rew.dist(filter.rews.df(fst.moved.location.df, date[1], animal[1]),
 #                                    field.max.x, field.max.y)$rew.dist) %>%
 #   ungroup()
-# 
+#
 # beforetest.field.dist2current.rew = pc.test.df %>% ungroup()
 # beforetest.field.dist2fst.moved = pc.test.df %>%
 #   dplyr::group_by(date, day_desc, animal) %>%
@@ -51,15 +51,14 @@ mindist.var = quo(peak2rew.mindist)
 #     min.rew.dist=calc.min.rew.dist(filter.rews.df(fst.moved.location.df, date[1], animal[1]),
 #                                    field.max.x, field.max.y)$rew.dist) %>%
 #   ungroup()
-# mindist.var = quo(min.rew.dist)
-
-beforetest.field.dist2fst.moved = dplyr::mutate(beforetest.field.dist2fst.moved, 
-                                                day_desc = ifelse(endsWith(day_desc, 'test'), day_desc, paste(day_desc, 'test')))
-beforetest.field.dist2current.rew = dplyr::mutate(beforetest.field.dist2current.rew,
-                                                  day_desc = ifelse(endsWith(day_desc, 'test'), day_desc, paste(day_desc, 'test')))
+# 
+# beforetest.field.dist2fst.moved = dplyr::mutate(beforetest.field.dist2fst.moved, 
+#                                                 day_desc = ifelse(endsWith(day_desc, 'test'), day_desc, paste(day_desc, 'test')))
+# beforetest.field.dist2current.rew = dplyr::mutate(beforetest.field.dist2current.rew,
+#                                                   day_desc = ifelse(endsWith(day_desc, 'test'), day_desc, paste(day_desc, 'test')))
 
 perc2dist = 1.2
-rew.dist.threshold = 15
+rew.dist.threshold = 20
 
 # Extracts first letters and numbers, e.g. learning1 day#1 -> l1d1
 get.shortname.from.day.desc = function(day_desc) {
@@ -409,7 +408,7 @@ cells.following.pct = bind_rows(
   replace_na(list('at.rew.pct'=0))
 t.test(at.rew.pct ~ exp,
        data=cells.following.pct,
-       subset=implant=='vCA1',
+       subset=implant=='dCA1' & animal != 'C-1R',
        paired=TRUE)
 
 # print('Binomial test on dCA1 cells - higher number of cells moves to reward than expected by chance')

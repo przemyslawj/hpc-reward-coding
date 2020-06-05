@@ -129,3 +129,54 @@ findPeaksAtRewards = function(M, rewLocXY, minpeaksize=3, min.peakheight=0.20, m
 
   return(maxRowCol)
 }
+
+
+cell.field.peaks.info = function(field,
+                                 day.rew.df,
+                                 bin.size=100/nbins,
+                                 max.rew.dist.thr) {
+  peaks.rowcol = fieldPeaks(field, min.peakheight=0.5, sigma=1.4)
+  peaks.rowcol = peaks.rowcol * bin.size
+  
+  if (nrow(peaks.rowcol) > 0) {
+    min.rew.dist.res = calc.min.rew.dist(day.rew.df, peaks.rowcol[,'row'], peaks.rowcol[,'col'])
+  } else {
+    min.rew.dist.res = list(rew.dist=100, location.ordinal=-1)
+  }
+  peak.atrew.index = which(min.rew.dist.res$rew.dist <= max.rew.dist.thr)
+  closer.reward.index = which.min(min.rew.dist.res$rew.dist)
+  
+  loc.ordinals.with.peaks = unique(min.rew.dist.res$location.ordinal[peak.atrew.index])
+  return(list(
+    maxpeakval = max(field, na.rm=TRUE),
+    npeaks = nrow(peaks.rowcol),
+    npeaks.at.rew = length(peak.atrew.index),
+    rew.peaks.count = length(loc.ordinals.with.peaks),
+    current.rew.peaks.count = sum(day.rew.df[location_ordinal %in% loc.ordinals.with.peaks, current_loc], na.rm = TRUE),
+    min.rew.dist = min.rew.dist.res$rew.dist[closer.reward.index],
+    closer.rew.ordinal = min.rew.dist.res$location.ordinal[closer.reward.index]
+  ))
+}
+
+calc.field.peaks.info = function(day,
+                                 animal_name,
+                                 field.list,
+                                 rew.df,
+                                 max.rew.dist.thr) {
+  if (nrow(rew.df) == 0) {
+    #print(paste0('No rewards to compare for animal=', animal_name, ' date=', day))
+    return(data.frame())
+  }
+  bin.size = 100 / nbins
+  cell_names = names(field.list)
+  if (length(cell_names) == 0) {
+    #print(paste0('Empty list of fields for animal=', animal_name, ' date=', day))
+    return(data.frame())
+  }
+  
+  map_dfr(cell_names, ~ {
+    field.info = cell.field.peaks.info(field.list[[.x]], rew.df, bin.size, max.rew.dist.thr)
+    meta = list(animal=animal_name, date=day, cell_id=as.integer(.x))
+    return(append(meta, field.info))
+  })
+}
