@@ -34,7 +34,8 @@ source('plotting_params.R')
 source('place_field_utils.R')
 source('utils.R')
 
-rew.dist.threshold = 15
+perc2dist = 1.2
+goal.cell.max.dist = 20 / perc2dist
 ```
 
 # Stats on place field
@@ -78,7 +79,7 @@ down.rewdist %>%
   geom_density(aes(x=min.rew.dist, linetype=exp_title), adjust=1/2) +
   #facet_grid(implant ~ day_desc) +
   facet_wrap(animal ~ day_desc, scales='free') +
-  geom_vline(xintercept = rew.dist.threshold, linetype='dotted') +
+  geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
   coord_flip() +
   scale_linetype_manual(values=c("dashed", "solid"))+
   gtheme +
@@ -104,7 +105,7 @@ summarize.downrew.pc.pct = function(df, dist.var=min.rew.dist, dist.threshold) {
     dplyr::select(-npcs, -at.reward)
 }
 
-summary.df = summarize.downrew.pc.pct(down.rewdist, dist.threshold=rew.dist.threshold) %>%
+summary.df = summarize.downrew.pc.pct(down.rewdist, dist.threshold=goal.cell.max.dist) %>%
   dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_'))
 
 library(reshape2)
@@ -190,7 +191,7 @@ down.peaks.dist %>%
   geom_density(aes(x=min.rew.dist, linetype=exp_title), adjust=1/2) +
   facet_grid(. ~ implant) +
   #facet_wrap(animal ~ day_desc, scales='free') +
-  geom_vline(xintercept = rew.dist.threshold, linetype='dotted') +
+  geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
   coord_flip() +
   scale_linetype_manual(values=c("dashed", "solid"))+
   gtheme +
@@ -202,7 +203,7 @@ ggsave('/tmp/downsampled_dist_multifield.svg', units='cm', width=22, height=22)
 ```
 
 ```{r}
-peaks.summary.df = summarize.downrew.pc.pct(down.peaks.dist, dist.threshold=rew.dist.threshold) %>%
+peaks.summary.df = summarize.downrew.pc.pct(down.peaks.dist, dist.threshold=goal.cell.max.dist) %>%
   dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_'))
 
 dca1.rew.pc.pct = subset(peaks.summary.df, implant == 'dCA1' & animal_beforetest_day %in% kept.testtrials$animal_beforetest_day & animal != 'C-1R')

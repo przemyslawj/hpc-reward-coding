@@ -310,7 +310,8 @@ Distance of place fields to goal
 ```{r}
 merged.run.trials.pc = left_join(run.trials.pc, locations.df, by=c('animal', 'date', 'location_set'))
 
-goal.cell.max.dist = 15
+perc2dist = 1.2
+goal.cell.max.dist = 20 / perc2dist
 pc.rew.dist.df = merged.run.trials.pc %>%
   dplyr::group_by(date, day_desc, animal) %>%
   dplyr::mutate(
@@ -349,12 +350,25 @@ run.trials.pc2rew.dist = merged.run.trials.pc %>%
   dplyr::rename(min.rew.dist=rew.dist)
 
 pc.test.df = beforetest.trials.si %>%
-  mutate(is.pc = is.place.cell(signif.si, mutual.info - mutual.info.bias, field.size.50, field.size.25, field.max, field.mean, 1.0))
-
-pc.test.df = pc.test.df %>%
+  mutate(is.pc = is.place.cell(signif.si, mutual.info - mutual.info.bias, field.size.50, field.size.25, field.max, field.mean, 1.0)) %>%
   left_join(mouse.meta.df, by='animal') %>%
   left_join(select(trials.meta.df, -location_set), by=c('date', 'animal'))
 
+beforetest.cell.db = pc.test.df %>%
+  dplyr::select(date, day_desc, exp, animal, cell_id, implant, is.pc,
+                spatial.information, mutual.info, mutual.info.bias,
+                sparsity, field.size.50, field.size.25,
+                signif.mi, signif.si)
+
+aftertest.cell.df = aftertest.trials.si %>%
+  mutate(is.pc = is.place.cell(signif.si, mutual.info - mutual.info.bias, field.size.50, field.size.25, field.max, field.mean, 1.0)) %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(select(trials.meta.df, -location_set), by=c('date', 'animal')) 
+aftertest.cell.db = aftertest.cell.df %>%
+    dplyr::select(date, day_desc, exp, animal, cell_id, implant, is.pc,
+                spatial.information, mutual.info, mutual.info.bias,
+                sparsity, field.size.50, field.size.25,
+                signif.mi, signif.si)
 
 # calc dist to rew
 pc.test.df = pc.test.df %>%
@@ -364,8 +378,7 @@ pc.test.df = pc.test.df %>%
                                        field.max.x, field.max.y)$rew.dist,
         closest.location.ordinal=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
                                                    field.max.x, field.max.y)$location.ordinal)
-
-
+  
 # Pct of place cell during test runs
 pc.test.df %>%
   group_by(date, implant) %>%
@@ -419,12 +432,12 @@ compared.trials.pc = filter(run.trials.pc2rew.dist, signif.si, date.activity == 
 beforetest.days = c('learning2 day#1', 'learning3 day#1', 'learning3 day#3')
 ggplot() +
   geom_density(data=filter(baseline.trials.pc, day_desc.reward %in% beforetest.days),
-               aes(x=min.rew.dist), linetype='dashed') +
+               aes(x=min.rew.dist * perc2dist), linetype='dashed') +
   geom_density(data=filter(compared.trials.pc, day_desc.reward %in% beforetest.days),
-               aes(x=min.rew.dist), alpha=0.2) +
+               aes(x=min.rew.dist * perc2dist), alpha=0.2) +
   geom_density(data=filter(uniform.pc.dist, day_desc.reward %in% beforetest.days),
-               aes(x=min.rew.dist), linetype='dotted') +
-  geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
+               aes(x=min.rew.dist * perc2dist), linetype='dotted') +
+  geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dotted') +
   facet_grid(implant ~ day_desc.reward) +
   #facet_wrap(animal ~ day_desc.reward, scales='free') +
   #facet_grid(implant ~ date.reward , scales = 'free') +
@@ -432,7 +445,7 @@ ggplot() +
   coord_flip() +
   gtheme +
   xlim(c(0,100)) +
-  xlab('Place field distance from reward (%)') + ylab('Density')
+  xlab('Place field distance from reward (cm)') + ylab('Density')
 ```
 
 Plot location of the place field centres with regards to the rewards
@@ -541,7 +554,7 @@ merged.summary.df = bind_rows(
   summarize.rew.pc.pct(compared.habit.trials.df) %>% mutate(exp='habituation'),
   summary.pc.test.df %>% mutate(exp='test')) %>%
   filter(animal != 'L-TL') %>% # remove animal with few cells during test 
-  #filter(animal != 'C-1R') %>%
+  filter(animal != 'C-1R') %>%
   dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_'))
 
 # Merge data about which test trials showed the animal learned
@@ -833,27 +846,6 @@ ggsave(
     nrow=1, rel_widths = c(1.0, 0.7)),
   width=21, height=10, units='cm')
 ```
-
-
-# How many goal cells active during the next beforetest trial
-
-There are few place cells during the beforetest (87), so few cells are matched between days.
-
-Amongst the cells matched: (but problem that the goal cell not necessairly moved)
-```{r}
-pc.test.df %>%
-  dplyr::select(implant, animal, day_desc, cell_id, signif.si, min.rew.dist) %>%
-  dplyr::mutate(is.reward.zone = min.rew.dist < goal.cell.max.dist,
-                is.goal.cell = signif.si & is.reward.zone) %>%
-  filter((day_desc == 'learning2 day#1' & is.goal.cell) | day_desc == 'learning3 day#1') %>%
-  reshape2::dcast(implant + animal + cell_id  ~ day_desc,
-                  value.var='is.reward.zone') %>%
-  filter(!is.na(`learning2 day#1`)) %>%
-  dplyr::group_by(implant) %>%
-  dplyr::summarise(both.goal.cells=mean(`learning3 day#1`, na.rm=TRUE), n=n(),
-                   matched.cells=n-sum(is.na(`learning3 day#1`)))
-```
-
 
 
 # Place field correlation between trials and test sessions
@@ -1152,7 +1144,7 @@ trial.days.df = trials.meta.df %>%
   dplyr::select(date, animal, exp) %>%
   dplyr::distinct()
 
-create.peaks.df.at.locs = function(fields, locs.df, trial.days, max.rew.dist.thr=goal.cell.max.dist) {
+create.peaks.df.at.locs = function(fields, locs.df, trial.days, max.rew.dist.thr=goal.cell.max.dist, cell.db=place.cell.db) {
   res = map2_dfr(trial.days$date,
                  trial.days$animal,
                  ~ calc.field.peaks.info(.x, .y, 
@@ -1161,20 +1153,25 @@ create.peaks.df.at.locs = function(fields, locs.df, trial.days, max.rew.dist.thr
                                          max.rew.dist.thr))
   res %>%
     left_join(trials.meta.df, by=c('animal', 'date')) %>%
-    left_join(place.cell.db, by=c('animal', 'date', 'cell_id', 'day_desc', 'exp'))
+    left_join(cell.db, by=c('animal', 'date', 'cell_id', 'day_desc', 'exp'))
 }
 
 trial.peaks.at.rew = create.peaks.df.at.locs(run.fields, prev.locations.df, trial.days.df)
 trial.peaks.at.fst.moved = create.peaks.df.at.locs(run.fields, fst.moved.location.df, trial.days.df)
 trial.peaks.at.current.rew = create.peaks.df.at.locs(run.fields, prev.locations.df[current_loc==TRUE,], trial.days.df)
 
-beforetest.peaks.at.rew = create.peaks.df.at.locs(beforetest.fields, prev.locations.df, trial.days.df)
-beforetest.peaks.fst.moved = create.peaks.df.at.locs(beforetest.fields, fst.moved.location.df, trial.days.df)
+beforetest.peaks.at.rew = create.peaks.df.at.locs(beforetest.fields, prev.locations.df, trial.days.df, 
+                                                  cell.db=beforetest.cell.db)
+beforetest.peaks.fst.moved = create.peaks.df.at.locs(beforetest.fields, fst.moved.location.df, trial.days.df,
+                                                     cell.db=beforetest.cell.db)
 beforetest.rewards.df$current_loc = FALSE
-beforetest.peaks.at.current.rew = create.peaks.df.at.locs(beforetest.fields, beforetest.rewards.df, trial.days.df)
+beforetest.peaks.at.current.rew = create.peaks.df.at.locs(beforetest.fields, beforetest.rewards.df, trial.days.df,
+                                                          cell.db=beforetest.cell.db)
 
-aftertest.peaks.at.rew = create.peaks.df.at.locs(aftertest.fields, prev.locations.df, trial.days.df)
-aftertest.peaks.fst.moved = create.peaks.df.at.locs(aftertest.fields, fst.moved.location.df, trial.days.df)
+aftertest.peaks.at.rew = create.peaks.df.at.locs(aftertest.fields, prev.locations.df, trial.days.df, 
+                                                 cell.db=aftertest.cell.db)
+aftertest.peaks.fst.moved = create.peaks.df.at.locs(aftertest.fields, fst.moved.location.df, trial.days.df,
+                                                    cell.db=aftertest.cell.db)
 
 habituation.peaks.at.fst.moved = filter(trial.peaks.at.fst.moved, exp=='habituation')
 ```
@@ -1271,6 +1268,7 @@ merged.summary.df = bind_rows(
   habit.summary.fields.pct.df %>% mutate(exp='habituation'),
   beforetest.summary.fields.pct.df %>% mutate(exp='test')) %>%
   filter(animal != 'L-TL') %>% # remove animal with few cells during test
+  filter(animal != 'C-1R') %>%
   mutate(animal_beforetest_day = paste(animal, day_desc, sep='_')) %>%
   filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day)
 

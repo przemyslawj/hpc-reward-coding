@@ -25,7 +25,18 @@ gtheme = theme_minimal() + theme_cowplot() +
 
 summarise = dplyr::summarise
 summarize = dplyr::summarize
+
+source('place_field_utils.R')
 ```
+
+```{r}
+all.locations.df = map_dfr(rootdirs, read_locations)
+rewards.df =  all.locations.df %>%
+  filter(!is_test) %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
+```
+
 
 Setup example variables
 ```{r}
@@ -37,44 +48,7 @@ cell_name = 51
 ```
 
 
-
-```{r}
-geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20) {
-  dayreward.df = rewards.df
-  if (!is.null(subject)) {
-    dayreward.df = filter(rewards.df, animal==subject)
-  }
-  if (!is.null(day)) {
-    dayreward.df = filter(dayreward.df, date==day)
-  }
-  if (!('current_loc' %in% names(dayreward.df))) {
-    dayreward.df$current_loc = TRUE
-  }
-  dayreward.df = dplyr::mutate(
-    dayreward.df,
-    rew_name = ifelse(current_loc, 'current_rew', 'prev_rew'))
-  rew.colours = c('prev_rew'='gray60', 'current_rew'='white', 'TRUE'='red', 'FALSE'='blue')
-  #rew.shape = 0
-  rew.shape = 2
-  rew.size = 2
-  bin.size = 100 / nbins
-  list(geom_point(data=dayreward.df, 
-                  aes(x=trans_x / bin.size, y=(100 - trans_y) / bin.size, color=rew_name), 
-                  shape=rew.shape,
-                  size=rew.size,
-                  stroke=2),
-       scale_color_manual(values=rew.colours))
-}
-
-all.locations.df = map_dfr(rootdirs, read_locations)
-rewards.df =  all.locations.df %>%
-  filter(!is_test) %>%
-  left_join(mouse.meta.df, by='animal') %>% 
-  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
-```
-
-```{r}
-
+```{r day_correlations}
 f1 = odd.fields[[animal_name]][[day]][[paste(cell_name)]]
 oc1 = odd.occupancies[[animal_name]][[day]][[paste(cell_name)]]
 
@@ -246,7 +220,7 @@ plot.cell.trials = function(cell.df, trace.var='trace', facet.ncols=3) {
   beforetest.df = cell.df[exp_title == 'beforetest', ]
   if (nrow(beforetest.df) > 0) {
     pf.df = calc.place.field(beforetest.df,
-                             min.occupancy.sec=0.1, 
+                             min.occupancy.sec=0.7, 
                              nshuffles=0)$df
     pf.df$trial = 'beforetest'
     merged.pf.df = bind_rows(merged.pf.df, pf.df)
@@ -256,7 +230,10 @@ plot.cell.trials = function(cell.df, trace.var='trace', facet.ncols=3) {
                                    min.occupancy.sec=1, 
                                    nshuffles=1000)
   all.trials.pf$df$trial = 'all_trials'
-  merged.pf.df = bind_rows(merged.pf.df, all.trials.pf$df)
+  merged.pf.df = bind_rows(merged.pf.df, all.trials.pf$df) %>%
+    group_by(trial) %>%
+    dplyr::mutate(value.field = value.field - min(value.field, na.rm=TRUE),
+                  value.field = value.field / max(value.field, na.rm=TRUE))
   
   
   cell_info = all.trials.pf$pf$cell_info
@@ -354,6 +331,7 @@ Plot place fields
 ```{r}
 all.pf.df = data.frame()
 cell.infos = data.frame()
+frame.rate = 5
 for (cell_name in selected.cell_ids) {
   pf = cell.spatial.info(binned.cells.df[is_running & cell_id == cell_name, ],
                          nbins, nbins,
@@ -394,24 +372,19 @@ ggsave('/tmp/pf_example.svg', plot = g.pf_example, width = 16, height = 6, units
 #selected.days = format(all.days)
 
 trials.meta.df = data.table(trials.meta.df)
-create.selected.pf.df = function(animal_name, cell_name) {
+create.animal.days.df = function(animal_name, cell_name) {
   selected.days = names(run.fields[[animal_name]])
   day_descs = map_chr(selected.days, ~ trials.meta.df[date==.x & animal == animal_name, day_desc][1])
   data.frame(animal=animal_name,
              cell_id=format(cell_name),
-             day=selected.days,
+             date=selected.days,
              day_desc = day_descs,
              stringsAsFactors = FALSE)  
 }
 
-day.normalize.fields = function(pf.df) {
-  pf.df %>%
-    group_by(animal, date, day_desc, cell_id) %>%
-    dplyr::mutate(value.field = value.field - min(value.field, na.rm=TRUE),
-                  value.field = value.field / max(value.field, na.rm=TRUE))
-}
 
 place.cell.db = data.table(place.cell.db)
+pc.test.df = data.table(pc.test.df)
 
 create.all.day.pf = function(selected.cells.df, 
                              fields.list=run.fields, 
@@ -421,7 +394,7 @@ create.all.day.pf = function(selected.cells.df,
   single.cell.pf = function(row, fields.list, occupancies.list) {
     animal_name = as.character(row$animal)
     cell_name = format(row$cell_id)
-    day = format(row$day)
+    day = format(row$date)
     
     field = fields.list[[animal_name]][[day]][[cell_name]]
     if (is.null(field)) {
@@ -438,33 +411,31 @@ create.all.day.pf = function(selected.cells.df,
   }
 
   pf = selected.cells.df %>%
-    adply(.margins=1, .fun=single.cell.pf, fields.list, occupancies.list) %>%
-    dplyr::rename(date=day)
+    adply(.margins=1, .fun=single.cell.pf, fields.list, occupancies.list)
 
   return(pf)
 }
   
-rowwise.cell.desc = function(row) {
+rowwise.cell.desc = function(row, info.db=place.cell.db) {
   animal_name = as.character(row$animal)
   cell_name = format(row$cell_id)
-  day = format(row$day)
-  place.db.row = place.cell.db[animal==animal_name & cell_id==cell_name & date==day,]
+  day = format(row$date)
+  info.db.row = info.db[animal==animal_name & cell_id==cell_name & date==day,]
   row$desc = ''
-  if (nrow(place.db.row) > 0) {
-    row$desc = ifelse(place.db.row$signif.si, 'PC ', '')
+  if (nrow(info.db.row) > 0) {
+    row$desc = ifelse(info.db.row$signif.si, 'PC ', '')
   }
   row
 }
 
 plot.all.day.fields = function(animal_name, cell_id) {
-  selected.cells.df = create.selected.pf.df(animal_name, cell_id)
+  selected.cells.df = create.animal.days.df(animal_name, cell_id)
   
   pf = create.all.day.pf(selected.cells.df) %>%
     day.normalize.fields()
   
   cell.desc.df = selected.cells.df %>%
-    adply(.margins=1, .fun=rowwise.cell.desc) %>%
-    dplyr::rename(date=day)
+    adply(.margins=1, .fun=rowwise.cell.desc)
   
   plot.pf(pf, max.x=nbins, max.y=nbins) +
     facet_wrap(. ~ day_desc, ncol=3) +
@@ -479,13 +450,8 @@ Multicell plot of all day activity for selected cells
 rewards.df = as.data.table(rewards.df)
 animal_name = 'E-TR'
 
-g.etr = bind_rows(
-  create.all.day.pf(create.selected.pf.df(animal_name, 89)),
-  create.all.day.pf(create.selected.pf.df(animal_name, 90)),
-  create.all.day.pf(create.selected.pf.df(animal_name, 99)),
-  create.all.day.pf(create.selected.pf.df(animal_name, 122)),
-  create.all.day.pf(create.selected.pf.df(animal_name, 139)),
-  ) %>% 
+g.etr = map_dfr(c(89, 90, 99, 122, 139), ~ create.animal.days.df(animal_name, .x)) %>%
+  create.all.day.pf() %>%
   filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning3 day#3') %>% 
   day.normalize.fields() %>% 
   plot.pf(max.x=nbins, max.y=nbins) +
@@ -498,11 +464,24 @@ ggsave('/tmp/pf_getr.svg', plot = g.etr, width = 22, height = 12, units = 'cm')
 ```
 
 
-Multicell plot of several day activity for selected cells
+Multicell plot for all cells, one map per day / experiment
 ```{r}
 rewards.df = as.data.table(rewards.df)
 place.cell.db = data.table(place.cell.db)
-plot.rootdir = "/mnt/DATA/Prez/pf-animal-30bins-occupancy05s-deconv/"
+pc.test.df = data.table(pc.test.df)
+beforetest.cell.db = data.table(beforetest.cell.db)
+plot.rootdir = "/mnt/DATA/Prez/pf-animal-testdays_smooth-v3/"
+
+create.multifields.loc.df = function(...) {
+  input.row = tibble(...)
+  field = beforetest.fields[[input.row$animal]][[input.row$date]][[format(input.row$cell_id)]]
+  peaks.rowcol = as.data.frame(fieldPeaks(field, min.peakheight=0.5, sigma=1.4))
+  peaks.rowcol %>% 
+    dplyr::mutate(animal=input.row$animal,
+                  date=input.row$date,
+                  day_desc=input.row$day_desc,
+                  cell_id=input.row$cell_id)
+}
 
 for (animal_name in names(run.fields)) {
   plot.dir = file.path(plot.rootdir, animal_name)
@@ -511,53 +490,61 @@ for (animal_name in names(run.fields)) {
   }
     
   chunk_size = 25
-  cell_ids = place.cell.db[animal==animal_name, cell_id] %>% unique
+  cell_ids = union(
+    place.cell.db[animal==animal_name & day_desc == 'habituation day#3', cell_id] %>% unique,
+    pc.test.df[animal==animal_name, cell_id] %>% unique) %>% 
+    sort
   cell_chunks = split(sort(cell_ids), ceiling(seq_along(cell_ids)/chunk_size))
-  merged.results.df = bind_rows(filter(rewards.df, animal == animal_name), 
+  merged.rewards.df = bind_rows(filter(rewards.df, animal == animal_name, day_desc == 'habituation day#3'), 
                                 filter(test.rewards.df, animal == animal_name, exp_title == 'beforetest') %>% 
                                   mutate(day_desc = paste0(day_desc, 't')))
+  merged.rewards.df$current_loc = TRUE
   for (chunk_i in seq_along(cell_chunks)) {
     cell_chunk = cell_chunks[[chunk_i]]
-    trials.pf = map_dfr(cell_chunk, ~ 
-                          create.all.day.pf(create.selected.pf.df(animal_name, .x)))
-    
-    cell.desc.df = map_dfr(cell_chunk, ~ create.selected.pf.df(animal_name, .x)) %>%
-      adply(.margins=1, .fun=rowwise.cell.desc) %>%
-      dplyr::rename(date=day)
+    selected.cells.days.df = map_dfr(cell_chunk, ~ create.animal.days.df(animal_name, .x)) %>%
+      filter(day_desc == 'habituation day#3')
+    trials.pf = create.all.day.pf(selected.cells.days.df)
     
     beforetest.pf = map_dfr(cell_chunk, ~ 
-                            create.all.day.pf(create.selected.pf.df(animal_name, .x),
+                            create.all.day.pf(create.animal.days.df(animal_name, .x),
                                               fields.list=beforetest.fields,
                                               occupancies.list=beforetest.occupancies)) %>%
-      dplyr::mutate(day_desc = paste0(day_desc, 't'))
+      dplyr::mutate(trial_day_desc = day_desc,
+                    day_desc = paste0(day_desc, 't'))
+
+    beforetest.days.pf = dplyr::select(beforetest.pf, animal, cell_id, date, day_desc, trial_day_desc) %>%
+      dplyr::distinct()
+    
+    day.peaks.df = pmap_dfr(beforetest.days.pf, create.multifields.loc.df)
+      
+    cell.desc.df = bind_rows(
+      adply(selected.cells.days.df, .margins=1, .fun=rowwise.cell.desc, place.cell.db),
+      adply(beforetest.days.pf, .margins=1, .fun=rowwise.cell.desc, beforetest.cell.db))
     
     merged.pf.data = bind_rows(trials.pf, beforetest.pf) %>%
       day.normalize.fields()
       
     g.chunk = ggplot() +
-      geom_rect(data=beforetest.pf, xmin=0, xmax=100, ymin=0, ymax=100, fill='#bfbfbf', alpha=0.1) +
+      geom_rect(data=beforetest.days.pf, xmin=0, xmax=100, ymin=0, ymax=100, fill='#bfbfbf', alpha=0.1) +
       geom_pf(merged.pf.data, max.x=nbins, max.y=nbins) + 
       facet_grid(cell_id ~ day_desc) +
       geom_text(data=cell.desc.df, mapping=aes(x=1, y=nbins - 2, label=desc), size=3, hjust=0) +
-      geom_rewards(merged.results.df, animal_name, nbins=nbins) +
+      geom_rewards(merged.rewards.df, animal_name, nbins=nbins) +
+      geom_point(data=day.peaks.df, mapping=aes(x=row, y=nbins-col+0.7), color='black', size=2, alpha=0.5) +
       theme(legend.position = 'top')
     
     filename = paste0('cells_', as.integer(min(cell_chunk)), '-', as.integer(max(cell_chunk)), '.png')
     ggsave(file.path(plot.dir, filename), plot=g.chunk, 
-           width = 48, height = 60, units = 'cm')
+           #width = 48, height = 60, units = 'cm')
+           width = 13, height = 60, units = 'cm')
   }
 }
 ```
 
 ```{r}
 animal_name = 'G-BR'
-g.gbr = bind_rows(
-  create.all.day.pf(create.selected.pf.df(animal_name, 46)),
-  create.all.day.pf(create.selected.pf.df(animal_name, 47)),
-  create.all.day.pf(create.selected.pf.df(animal_name, 102)),
-  create.all.day.pf(create.selected.pf.df(animal_name, 107)),
-  create.all.day.pf(create.selected.pf.df(animal_name, 139)),
-  ) %>% 
+g.gbr = map_dfr(c(46, 47, 102, 107, 139), ~ create.animal.days.df(animal_name, .x)) %>%
+  create.all.day.pf() %>%
   filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning3 day#3') %>%
   day.normalize.fields() %>%
   plot.pf(max.x=nbins, max.y=nbins) +

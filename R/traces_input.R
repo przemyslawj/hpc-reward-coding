@@ -19,8 +19,8 @@ caimg_result_dirs = c(
   get.subject.result.dirs(root_dir07, 'C-1R'),
   get.subject.result.dirs(root_dir07, 'D-BR'),
   get.subject.result.dirs(root_dir01, 'G-BR'),
-  get.subject.result.dirs(root_dir01, 'K-BR'),
-  get.subject.result.dirs(root_dir01, 'L-TL')
+  get.subject.result.dirs(root_dir01, 'K-BR')
+  #get.subject.result.dirs(root_dir01, 'L-TL')
 )
 
 caimg_result_dirs = Filter(
@@ -31,10 +31,10 @@ caimg_result_dirs = Filter(
 prepare.run.dirtraces = function(data.traces, nbins) {
   data.traces = data.traces[exp_title != 'homecage',]
   detect.events(data.traces, deconv.threshold=0.2)
-  
+
   setorder(data.traces, trial_id, cell_id, timestamp)
   running.index = isRunning(data.traces, 2, 4, 500)
-  
+
   response.bin.quantiles = c(0.95, 1.0)
   binned.traces.run = bin.time.space(data.traces[running.index & x >= 0 & y >= 0, ],
                                      nbins.x = nbins,
@@ -44,3 +44,4 @@ prepare.run.dirtraces = function(data.traces, nbins) {
                                      timebin.dur.msec=timebin.dur.msec)
   return(binned.traces.run)
 }
+

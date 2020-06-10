@@ -54,7 +54,7 @@ trial.field.dist2moved.loc = bind_rows(
 beforetest.field.dist2current.rew = beforetest.peaks.at.rew %>%
   dplyr::mutate(animal_cell = join.chars(animal, cell_id))
 beforetest.field.dist2fst.moved = beforetest.peaks.fst.moved
-beforetest.field.dist2snd.moved = create.peaks.df.at.locs(beforetest.fields, snd.moved.location.df, trial.days.df)
+beforetest.field.dist2snd.moved = create.peaks.df.at.locs(beforetest.fields, snd.moved.location.df, trial.days.df, cell.db = beforetest.cell.db)
 beforetest.field.dist2moved.loc = bind_rows(
     mutate(beforetest.field.dist2fst.moved, moved_loc = 'fst'),
     mutate(beforetest.field.dist2snd.moved, moved_loc = 'snd')
@@ -100,7 +100,7 @@ beforetest.field.dist2current.rew = dplyr::mutate(beforetest.field.dist2current.
                                                   day_desc = ifelse(endsWith(day_desc, 'test'), day_desc, paste(day_desc, 'test')))
 
 perc2dist = 1.2
-rew.dist.threshold = 15
+goal.cell.max.dist = 20 / perc2dist
 
 # Extracts first letters and numbers, e.g. learning1 day#1 -> l1d1
 get.shortname.from.day.desc = function(day_desc) {
@@ -250,7 +250,7 @@ stage.peaks.df = trial.field.dist2fst.moved %>%
   group_by(animal, cell_id, exp) %>%
   dplyr::summarise(med.rew.dist=median(!!mindist.var, na.rm=TRUE),
                    ndays.stage=n()) %>%
-  dplyr::mutate(active = as.integer(med.rew.dist <= rew.dist.threshold))
+  dplyr::mutate(active = as.integer(med.rew.dist <= goal.cell.max.dist))
 stage.peaks.filtered = filter.cell.present.ntimes(stage.peaks.df, min.nstages, exp, active)
 
 stage.peaks.filtered$my.clust = as.integer(stage.peaks.filtered$active) + 1
@@ -285,7 +285,7 @@ plot.cluster.assignments(filter(stage.peaks.filtered,
 # For the cells active at the translocated reward, were they active at reward before or after?
 # View of how the peaks in the place field of reward-active cell followed the reward.
 
-get.rew.active.animal_cells = function(dist.df, dist.thr = rew.dist.threshold) {
+get.rew.active.animal_cells = function(dist.df, dist.thr = goal.cell.max.dist) {
   dist.df %>%
     filter(!!mindist.var <= dist.thr) %>%
     filter(signif.si) %>%
@@ -301,21 +301,19 @@ cells.transloc.rew.active.l15 = get.rew.active.animal_cells(
 
 selected.cells.peaks2current.rew.dist = bind_rows(
   dplyr::filter(trial.field.dist2current.rew, day_desc %in% c('learning2 day#2', 'learning3 day#2')),
-  dplyr::filter(trial.field.dist2fst.moved, day_desc %in% c('learning1 day#5', 'habituation day#3'))
+  dplyr::filter(trial.field.dist2moved.loc, moved_loc == 'fst', day_desc %in% c('learning1 day#5', 'habituation day#3'))
 ) %>% 
-  dplyr::mutate(active = !!mindist.var <= rew.dist.threshold) %>%
+  dplyr::mutate(active = !!mindist.var <= goal.cell.max.dist) %>%
   dplyr::filter(animal_cell %in% cells.transloc.rew.active.l15)
 
 filtered.cells.peaks2current.rew.dist = filter.cell.present.ntimes(selected.cells.peaks2current.rew.dist, 2, day_desc, !!mindist.var)
 filtered.cells.peaks2current.rew.dist$compared_location = 'current reward'
 
 filtered.cells.peaks2fst.rew.dist = 
-  dplyr::filter(trial.field.dist2fst.moved, day_desc %in% c('habituation day#3',
-                                                          'learning1 day#5',
-                                                          'learning2 day#2',
-                                                          'learning3 day#2'
-                                                          )) %>%
-  dplyr::mutate(active = !!mindist.var <= rew.dist.threshold) %>%
+  dplyr::filter(trial.field.dist2moved.loc, moved_loc == 'fst',
+                day_desc %in% c('habituation day#3', 'learning1 day#5',
+                                 'learning2 day#2', 'learning3 day#2')) %>%
+  dplyr::mutate(active = !!mindist.var <= goal.cell.max.dist) %>%
   dplyr::filter(animal_cell %in% cells.transloc.rew.active.l15) %>%
   filter.cell.present.ntimes(2, day_desc, !!mindist.var)
 filtered.cells.peaks2fst.rew.dist$compared_location = 'first reward location'
@@ -329,8 +327,8 @@ left_join(bind_rows(filtered.cells.peaks2current.rew.dist, filtered.cells.peaks2
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   facet_grid(implant ~ compared_location) +
-  geom_hline(yintercept = rew.dist.threshold * perc2dist, linetype = 'dashed') +
-  xlab('') + ylab('Distance to reward (cm)') +
+  geom_hline(yintercept = goal.cell.max.dist * perc2dist, linetype = 'dashed') +
+  xlab('') + ylab('Distance to location (cm)') +
   scale_x_discrete(labels=c('habituation','learning1 day5','learning 2', 'learning 3'))
 
 #############################################################################################
@@ -347,7 +345,7 @@ selected.cells.peaks2current.rew.dist = bind_rows(
   dplyr::filter(beforetest.field.dist2moved.loc, day_desc == 'learning2 day#1 test', moved_loc == 'fst'),
   dplyr::filter(beforetest.field.dist2current.rew, day_desc %in% c('learning3 day#1 test', 'learning3 day#3 test'))
 ) %>% 
-  dplyr::mutate(active = !!mindist.var <= rew.dist.threshold) %>%
+  dplyr::mutate(active = !!mindist.var <= goal.cell.max.dist) %>%
   dplyr::filter(animal_cell %in% cells.transloc.rew.active.l2d1t)
 
 filtered.cells.peaks2current.rew.dist = filter.cell.present.ntimes(selected.cells.peaks2current.rew.dist, 2, day_desc, !!mindist.var)
@@ -359,7 +357,7 @@ filtered.cells.peaks2fst.rew.dist = bind_rows(
                 day_desc %in% c('learning2 day#1 test', 'learning3 day#1 test', 'learning3 day#3 test'),
                 moved_loc == 'fst')) %>%
   dplyr::mutate(animal_cell = join.chars(animal, cell_id),
-                active =  !!mindist.var <= rew.dist.threshold) %>%
+                active =  !!mindist.var <= goal.cell.max.dist) %>%
   dplyr::filter(animal_cell %in% cells.transloc.rew.active.l2d1t) %>%
   filter.cell.present.ntimes(2, day_desc, !!mindist.var)
 filtered.cells.peaks2fst.rew.dist$compared_location = 'first reward location'
@@ -373,8 +371,8 @@ left_join(bind_rows(filtered.cells.peaks2current.rew.dist, filtered.cells.peaks2
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   facet_grid(implant ~ compared_location) +
-  geom_hline(yintercept = rew.dist.threshold * perc2dist, linetype = 'dashed') +
-  xlab('') + ylab('Distance to reward (cm)') +
+  geom_hline(yintercept = goal.cell.max.dist * perc2dist, linetype = 'dashed') +
+  xlab('') + ylab('Distance to location (cm)') +
   scale_x_discrete(labels=c('habituation', 'learning1 probe', 'learning2 probe', 'learning3 probe'))
 
 animal.learning2test.rew.following = bind_rows(
@@ -385,7 +383,7 @@ animal.learning2test.rew.following = bind_rows(
            day_desc == 'learning3 day#3 test',
            animal_cell %in% cells.transloc.rew.active.l3d1t)
   ) %>%
-  mutate(is.at.rew = !!mindist.var <= rew.dist.threshold) %>% 
+  mutate(is.at.rew = !!mindist.var <= goal.cell.max.dist) %>% 
   group_by(animal, day_desc, cell_id) %>%
   dplyr::summarise(npresent = sum(!is.na(!!mindist.var)), 
                    nactive = sum(is.at.rew)) %>% 
@@ -394,24 +392,13 @@ animal.learning2test.rew.following = bind_rows(
   group_by(implant, animal, day_desc) %>% 
   dplyr::summarise(at.rew = sum(nactive), at.rew.pct = mean(nactive), n=n()) %>%
   arrange(animal, day_desc)
-
 # TODO include only trials when learnt
-animal.learning2test.rew.following = filtered.cells.peaks2current.rew.dist %>%
-  dplyr::filter(day_desc == 'learning3 day#1 test') %>%
-  mutate(is.at.rew = !!mindist.var <= rew.dist.threshold) %>%
-  group_by(animal, cell_id) %>%
-  dplyr::summarise(npresent = sum(!is.na(!!mindist.var)), 
-                   nactive = sum(is.at.rew)) %>% 
-  filter(npresent == 1) %>% # include only cells found on both days
-  left_join(mouse.meta.df, by='animal') %>% 
-  group_by(implant, animal) %>% 
-  dplyr::summarise(at.rew = sum(nactive), at.rew.pct = mean(nactive), n=n()) %>%
-  arrange(animal)
 
 beforetest.animal.peaks.at.rew.pct = beforetest.field.dist2current.rew %>%
-  filter(signif.si, animal != 'A-BL', animal != 'L-TL', 
-         day_desc %in% c('learning3 day#1 test', 'learning3 day#3 test')) %>%
-  dplyr::mutate(is.at.rew = !!mindist.var <= rew.dist.threshold) %>%
+  filter(signif.si) %>%
+  filter(animal != 'A-BL', animal != 'L-TL') %>%
+  filter(day_desc %in% c('learning3 day#1 test', 'learning3 day#3 test')) %>%
+  dplyr::mutate(is.at.rew = !!mindist.var <= goal.cell.max.dist) %>%
   dplyr::group_by(animal, implant, day_desc) %>%
   dplyr::summarise(at.rew = sum(is.at.rew), at.rew.pct = mean(is.at.rew), n=n()) %>%
   arrange(animal, day_desc)
@@ -424,10 +411,10 @@ cells.following.pct = bind_rows(
   filter(!is.na(reward_cells)) %>%
   reshape2::melt(id.vars=c('implant', 'animal', 'day_desc'), value.name='at.rew.pct', variable.name='cell_group') 
   #replace_na(list('at.rew.pct'=0))
-t.test(at.rew.pct ~ cell_group,
-       data=cells.following.pct,
-       subset=implant=='dCA1' & animal != 'C-1R',
-       paired=TRUE)
+wilcox.test(at.rew.pct ~ cell_group,
+            data=cells.following.pct,
+            subset=implant=='dCA1' & animal != 'C-1R',
+            paired=TRUE)
 
 print('The count of reward following cells not different in dCA1 than in the vCA1')
 learning2test.rew.following.summary = animal.learning2test.rew.following %>%
@@ -460,7 +447,7 @@ get.reward.pattern.desc = function(clust_char) {
 
 selected.cells.peaks2current.rew.dist.active = filtered.cells.peaks2current.rew.dist %>%
   dplyr::filter(day_desc != 'learning3 day#3 test') %>% 
-  dplyr::mutate(active=!!mindist.var <= rew.dist.threshold,
+  dplyr::mutate(active=!!mindist.var <= goal.cell.max.dist,
                 exp=map_chr(day_desc, get.shortname.from.day.desc)) %>%
   filter.cell.present.ntimes(3, exp, active)
 selected.cells.peaks2current.rew.dist.active$my.clust = as.integer(selected.cells.peaks2current.rew.dist.active$active) + 1

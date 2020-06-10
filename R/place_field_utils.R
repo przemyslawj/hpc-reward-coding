@@ -180,3 +180,38 @@ calc.field.peaks.info = function(day,
     return(append(meta, field.info))
   })
 }
+
+
+day.normalize.fields = function(pf.df) {
+  pf.df %>%
+    group_by(animal, date, day_desc, cell_id) %>%
+    dplyr::mutate(value.field = value.field - min(value.field, na.rm=TRUE),
+                  value.field = value.field / max(value.field, na.rm=TRUE))
+}
+
+geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20) {
+  dayreward.df = rewards.df
+  if (!is.null(subject)) {
+    dayreward.df = filter(rewards.df, animal==subject)
+  }
+  if (!is.null(day)) {
+    dayreward.df = filter(dayreward.df, date==day)
+  }
+  if (!('current_loc' %in% names(dayreward.df))) {
+    dayreward.df$current_loc = TRUE
+  }
+  dayreward.df = dplyr::mutate(
+    dayreward.df,
+    rew_name = ifelse(current_loc, 'current_rew', 'prev_rew'))
+  rew.colours = c('prev_rew'='gray60', 'current_rew'='white', 'TRUE'='red', 'FALSE'='blue')
+  #rew.shape = 0
+  rew.shape = 2
+  rew.size = 2
+  bin.size = 100 / nbins
+  list(geom_point(data=dayreward.df, 
+                  aes(x=trans_x / bin.size, y=(100 - trans_y) / bin.size, color=rew_name), 
+                  shape=rew.shape,
+                  size=rew.size,
+                  stroke=2),
+       scale_color_manual(values=rew.colours))
+}
