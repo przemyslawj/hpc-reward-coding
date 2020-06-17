@@ -159,16 +159,18 @@ Load the traces
 # exp_title='learning'
 # day = '2019-09-04'
 # root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
-animal_name = 'F-TL'
+animal_name = 'E-BL'
 exp_title='learning'
-day = '2019-09-04'
+day = '2019-09-06'
 root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
 
 
 caimg_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered/')
 data.traces = read.data.trace(caimg_result_dir)
 setorder(data.traces, trial_id, cell_id, timestamp)
-data.traces$is_running = isRunning(data.traces, 2, 4, 500)
+#data.traces$is_running = isRunning(data.traces, 2, 4, 500)
+ # running speed min=2cm/s, avg min 4 cm/s                                     
+ data.traces$is_running = isRunning(data.traces, 1.6, 3.3, 500) 
 data.traces = as.data.table(data.traces)
 detect.events(data.traces, deconv.threshold=0.2)
 data.traces.run = data.traces[(is_running), ]
@@ -263,7 +265,7 @@ binned.cell.df = bin.time.space(cell.df,
                                 get.bin.thresholds.fun=get.quantiles.fun(c(0.95, 1.0)),
                                 binned.var='deconv_trace',
                                 timebin.dur.msec=200)
-binned.cell.df[,is_running:=as.logical(is_running)]
+#binned.cell.df[,is_running:=as.logical(is_running)]
 
 gen_imgs_dir = '/home/prez/tmp/cheeseboard/'
 plot.cell.trials(binned.cell.df, trace.var='deconv_trace', facet.ncols=5)
@@ -311,14 +313,14 @@ ggsave('/tmp/traces_example.svg', width = 16, height = 8, units = 'cm')
 
 Plot event vectors
 ```{r}
-binned.cells.df = bin.time.space(data.traces[cell_id %in% selected.cell_ids,], 
+binned.cells.df = bin.time.space(data.traces, 
                                  nbins.x = nbins,
                                  nbins.y = nbins,
                                  get.bin.thresholds.fun=get.quantiles.fun(c(0.95, 1.0)),
                                  binned.var='trace',
                                  timebin.dur.msec=200)
-binned.cells.df[,is_running:=as.logical(is_running)]
-g.events = plot.event.vectors(binned.cells.df, event.var=nevents, event.thr=1) +
+
+g.events = plot.event.vectors(binned.cells.df[cell_id %in% selected.cell_ids], event.var=nevents, event.thr=1) +
   geom_path(data=binned.cells.df, mapping=aes(x=x,y=100-y,group=trial_id), alpha=0.2) +
   geom_rewards(rewards.df, animal_name, day, 100) +
   facet_wrap(. ~ cell_id, nrow = 1) +
@@ -331,12 +333,15 @@ Plot place fields
 ```{r}
 all.pf.df = data.frame()
 cell.infos = data.frame()
+#selected.cell_ids = unique(data.traces$cell_id)[1:3]
 frame.rate = 5
 for (cell_name in selected.cell_ids) {
-  pf = cell.spatial.info(binned.cells.df[is_running & cell_id == cell_name, ],
+  pf = cell.spatial.info(binned.cells.df[is_running & cell_id == cell_name & exp_title == 'beforetest', ],
                          nbins, nbins,
-                         trace.var = 'trace',
+                         trace.var = 'deconv_trace',
                          generate.plots=FALSE,
+                         min.occupancy.sec = 0.5,
+                         gaussian.var=2,
                          nshuffles=1000)
   pf.df = create.pf.df(pf$field, pf$occupancy, 
                        frame.rate=frame.rate)
@@ -366,11 +371,6 @@ ggsave('/tmp/pf_example.svg', plot = g.pf_example, width = 16, height = 6, units
 
 # Changes in PF over days
 ```{r}
-#selected.days = c('2019-08-29', '2019-08-30', '2019-09-03', '2019-09-04', '2019-09-06','2019-09-07', '2019-09-08')
-#all.days = place.cell.db$date %>% unique
-#all.days = goal.cell.db$day_desc %>% unique
-#selected.days = format(all.days)
-
 trials.meta.df = data.table(trials.meta.df)
 create.animal.days.df = function(animal_name, cell_name) {
   selected.days = names(run.fields[[animal_name]])
@@ -470,13 +470,15 @@ rewards.df = as.data.table(rewards.df)
 place.cell.db = data.table(place.cell.db)
 pc.test.df = data.table(pc.test.df)
 beforetest.cell.db = data.table(beforetest.cell.db)
-plot.rootdir = "/mnt/DATA/Prez/pf-animal-testdays_smooth-v3/"
+trials.meta.df = data.table(trials.meta.df)
+plot.rootdir = "/mnt/DATA/Prez/pf-animal-testdays_smooth-v3-test/"
 
 create.multifields.loc.df = function(...) {
   input.row = tibble(...)
   field = beforetest.fields[[input.row$animal]][[input.row$date]][[format(input.row$cell_id)]]
-  peaks.rowcol = as.data.frame(fieldPeaks(field, min.peakheight=0.5, sigma=1.4))
-  peaks.rowcol %>% 
+  peaks.rowcol = fieldPeaks(field, min.peakheight=0.5, sigma=0.0)
+  df = as.data.frame(peaks.rowcol)
+  df %>% 
     dplyr::mutate(animal=input.row$animal,
                   date=input.row$date,
                   day_desc=input.row$day_desc,
@@ -530,7 +532,7 @@ for (animal_name in names(run.fields)) {
       facet_grid(cell_id ~ day_desc) +
       geom_text(data=cell.desc.df, mapping=aes(x=1, y=nbins - 2, label=desc), size=3, hjust=0) +
       geom_rewards(merged.rewards.df, animal_name, nbins=nbins) +
-      geom_point(data=day.peaks.df, mapping=aes(x=row, y=nbins-col+0.7), color='black', size=2, alpha=0.5) +
+      geom_point(data=day.peaks.df, mapping=aes(x=row - 0.5, y=nbins-col + 0.2), color='black', size=2, alpha=0.5) +
       theme(legend.position = 'top')
     
     filename = paste0('cells_', as.integer(min(cell_chunk)), '-', as.integer(max(cell_chunk)), '.png')

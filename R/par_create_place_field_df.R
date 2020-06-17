@@ -38,7 +38,7 @@ traces2pf = function(binned.traces.run) {
     return(list())
   }
 
-  traces2pf.subset = function(subset.binned.traces, subset.name) {
+  traces2pf.subset = function(subset.binned.traces, subset.name, shuffle.shift.sec = 5) {
     if (nrow(subset.binned.traces) == 0) {
       return(list())
     }
@@ -53,10 +53,12 @@ traces2pf = function(binned.traces.run) {
                                       plot.dir=paste(plot.dir.prefix, subset.name, sep='/'),
                                       generate.plots=FALSE,
                                       nshuffles=1000,
-									  trace.var='deconv_trace',
+                                      shuffle.shift.sec = shuffle.shift.sec,
+                                      trace.var='deconv_trace',
                                       timebin.dur.msec=timebin.dur.msec,
                                       nbins=nbins,
-                                      min.occupancy.sec=0.7)
+                                      min.occupancy.sec=0.7,
+                                      gaussian.var=2)
     subset.result$df = add.meta.cols(subset.result$df, animal, date)
     toc()
     return(subset.result)
@@ -67,10 +69,10 @@ traces2pf = function(binned.traces.run) {
   # Test trials
   #max_test_trial_dur_msec = 240 * 1000
   beforetest.traces = binned.traces.run[exp_title == 'beforetest']# & timestamp <= max_test_trial_dur_msec]
-  beforetest.pf = traces2pf.subset(beforetest.traces, 'beforetest')
+  beforetest.pf = traces2pf.subset(beforetest.traces, 'beforetest', shuffle.shift.sec = 10)
 
   aftertest.traces = binned.traces.run[exp_title == 'aftertest']# & timestamp <= max_test_trial_dur_msec]
-  aftertest.pf = traces2pf.subset(aftertest.traces, 'aftertest')
+  aftertest.pf = traces2pf.subset(aftertest.traces, 'aftertest', shuffle.shift.sec = 10)
 
   # # Odd vs Even
   # odd.pf = traces2pf.subset(binned.traces.run[exp_title == 'trial' & trial %% 2 == 1,], 'odd')
@@ -89,9 +91,6 @@ traces2pf = function(binned.traces.run) {
               early=early.pf,
               late=late.pf))
 }
-
-#daytraces.pf.list = list()
-#for (caimg_result_dir in caimg_result_dirs) {
 
 print(paste('Started processing the traces', Sys.time()))
 # balance speed and memory, outfile "" should make the output print display in the console
@@ -152,5 +151,5 @@ beforetest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$beforetest$df)
 aftertest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$aftertest$df)
 
 print("Saving env variables")
-save.image(file="data/deconv_place_field_dfs_smoothed_percentile_95_bin200msec_nbins20_shuffle5sec_occupancy07sec_gaussvar2.RData")
+save.image(file="data/pf_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle10sec_occupancy07sec_gaussvar2.RData")
 

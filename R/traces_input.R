@@ -28,19 +28,23 @@ caimg_result_dirs = Filter(
   caimg_result_dirs)
 
 
-prepare.run.dirtraces = function(data.traces, nbins) {
+prepare.run.dirtraces = function(data.traces, nbins, binned.var='trace') {
   data.traces = data.traces[exp_title != 'homecage',]
   detect.events(data.traces, deconv.threshold=0.2)
 
   setorder(data.traces, trial_id, cell_id, timestamp)
-  running.index = isRunning(data.traces, 2, 4, 500)
+  # running speed min=2cm/s, avg min 4 cm/s
+  running.index = isRunning(data.traces, 1.6, 3.3, 500)
+  # running speed min=0.5cm/s, avg min 4 cm/s
+  #running.index = isRunning(data.traces, 0.4, 3.3, 500)
+  #running.index = isRunning(data.traces, 2, 4, 500)
 
   response.bin.quantiles = c(0.95, 1.0)
   binned.traces.run = bin.time.space(data.traces[running.index & x >= 0 & y >= 0, ],
                                      nbins.x = nbins,
                                      nbins.y = nbins,
                                      get.bin.thresholds.fun = get.quantiles.fun(response.bin.quantiles),
-                                     binned.var='trace',
+                                     binned.var=binned.var,
                                      timebin.dur.msec=timebin.dur.msec)
   return(binned.traces.run)
 }

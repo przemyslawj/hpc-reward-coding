@@ -13,6 +13,7 @@ source('plotting_params.R')
 source('locations.R')
 source('utils.R')
 source('traces_input.R')
+source('place_field_utils.R')
 
 summarise = dplyr::summarise
 summarize = dplyr::summarize
@@ -281,7 +282,7 @@ plot.cluster.assignments(filter(stage.peaks.filtered,
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   labs(title='Reward activated place cells at first translocated location\n(stage median)')
 
-########################################################################################################
+ ########################################################################################################
 # For the cells active at the translocated reward, were they active at reward before or after?
 # View of how the peaks in the place field of reward-active cell followed the reward.
 
@@ -383,7 +384,7 @@ animal.learning2test.rew.following = bind_rows(
            day_desc == 'learning3 day#3 test',
            animal_cell %in% cells.transloc.rew.active.l3d1t)
   ) %>%
-  mutate(is.at.rew = !!mindist.var <= goal.cell.max.dist) %>% 
+  dplyr::mutate(is.at.rew = !!mindist.var <= goal.cell.max.dist) %>% 
   group_by(animal, day_desc, cell_id) %>%
   dplyr::summarise(npresent = sum(!is.na(!!mindist.var)), 
                    nactive = sum(is.at.rew)) %>% 

@@ -22,9 +22,9 @@ source('plotting_params.R')
 source('traces_input.R')
 source('utils.R')
 
-nbins = 30
-timebin.dur.msec = 100
-min.occupancy.sec = 0.3
+nbins = 20
+timebin.dur.msec = 200
+min.occupancy.sec = 0.7
 gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
 
 #all.trials.si = data.frame()
@@ -107,6 +107,7 @@ for (caimg_result_dir in caimg_result_dirs) {
                                      generate.plots=FALSE,
                                      nshuffles=1000,
                                      timebin.dur.msec=timebin.dur.msec,
+                                     shuffle.shift.sec = 10,
                                      nbins=nbins,
                                      min.occupancy.sec=min.occupancy.sec)
     beforetest.trials.si = bind_rows(beforetest.trials.si, add.meta.cols(test.spatial$df, animal, date))
@@ -122,6 +123,7 @@ for (caimg_result_dir in caimg_result_dirs) {
                                      plot.dir=paste0(plot.dir.prefix, '/aftertest/'),
                                      generate.plots=FALSE,
                                      nshuffles=1000,
+                                     shuffle.shift.sec = 10,
                                      timebin.dur.msec=timebin.dur.msec,
                                      nbins=nbins,
                                      min.occupancy.sec=min.occupancy.sec)
