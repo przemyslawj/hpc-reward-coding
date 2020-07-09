@@ -205,7 +205,8 @@ day.normalize.fields = function(pf.df) {
                   value.field = value.field / max(value.field, na.rm=TRUE))
 }
 
-geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20) {
+geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20,
+                        rew.colours = c('prev_rew'='gray60', 'current_rew'='white', 'TRUE'='red', 'FALSE'='blue')) {
   dayreward.df = rewards.df
   if (!is.null(subject)) {
     dayreward.df = filter(rewards.df, animal==subject)
@@ -219,7 +220,6 @@ geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20) {
   dayreward.df = dplyr::mutate(
     dayreward.df,
     rew_name = ifelse(current_loc, 'current_rew', 'prev_rew'))
-  rew.colours = c('prev_rew'='gray60', 'current_rew'='white', 'TRUE'='red', 'FALSE'='blue')
   #rew.shape = 0
   rew.shape = 2
   rew.size = 2

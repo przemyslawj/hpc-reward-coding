@@ -21,43 +21,198 @@ library(tictoc)
 
 library(ggplot2)
 library(cowplot)
-gtheme = theme_minimal() + theme_cowplot() +
-  theme(text = element_text(size=18), axis.text = element_text(size=15))
 
 summarise = dplyr::summarise
 summarize = dplyr::summarize
 
 source('locations.R')
 source('place_field.R')
+source('plotting_params.R')
 source('trace_utils.R')
 
 ```
 
-
-# Assess place information metrics and stability
-
+# Stability during test trial
 ```{r}
-run.trials.si %>%
-  ggplot() +
-  geom_histogram(aes(x=spatial.information, color=signif.mi)) +
-  facet_grid(. ~ animal) +
-  xlab('Spatial information')
+
+field.stability = function(binned.cell.df, make.plot=TRUE) {
+  #half.session.len = floor(nrow(binned.cell.df) / 2)
+  #early.cell.df = binned.cell.df[1:half.session.len,]
+  #late.cell.df = binned.cell.df[(half.session.len+1):nrow(binned.cell.df),]
+  half.session.timestamp = min(100 * 1000, max(binned.cell.df$timestamp) / 2)
+  end.timestamp = 2 * half.session.timestamp
+  early.cell.df = binned.cell.df[timestamp <= half.session.timestamp,]
+  late.cell.df = binned.cell.df[timestamp > half.session.timestamp & timestamp < end.timestamp,]
+  
+  early.pf = calcPlaceField(bin_x = early.cell.df$bin.x, 
+                            bin_y = early.cell.df$bin.y, 
+                            nbins_x = 20, 
+                            nbins_y = 20, 
+                            trace = early.cell.df$deconv_trace, 
+                            binnedTrace = early.cell.df$response_bin, 
+                            minOccupancy = 1, 
+                            kernelSize = 7, 
+                            gaussianVar = 1.4)
+  
+  late.pf = calcPlaceField(bin_x = late.cell.df$bin.x, 
+                           bin_y = late.cell.df$bin.y, 
+                           nbins_x = 20, 
+                           nbins_y = 20, 
+                           trace = late.cell.df$deconv_trace, 
+                           binnedTrace = late.cell.df$response_bin, 
+                           minOccupancy = 1, 
+                           kernelSize = 7, 
+                           gaussianVar = 2.0)
+  
+  early.pf.df = create.pf.df(early.pf$field, early.pf$occupancy)
+  late.pf.df = create.pf.df(late.pf$field, late.pf$occupancy)
+  if (make.plot) {
+    g.fields = plot_grid(
+      plot.trace.events(early.cell.df, event.var=nevents, event.thr=1) +
+        geom_rewards(test.rewards.df, animal_name, day, 100, rew.colours = c('current_rew'='black')),
+      plot.trace.events(late.cell.df, event.var=nevents, event.thr=1) +
+        geom_rewards(test.rewards.df, animal_name, day, 100, rew.colours = c('current_rew'='black')),
+      plot.pf(early.pf.df, nbins, nbins) +
+        geom_rewards(test.rewards.df, animal_name, day, 20, rew.colours = c('current_rew'='black')),
+      plot.pf(late.pf.df, nbins, nbins) +
+        geom_rewards(test.rewards.df, animal_name, day, 20, rew.colours = c('current_rew'='black')),
+      ncol=2)
+  }
+  
+  earlylate.cor = field.cor(early.pf.df, late.pf.df, make.cor.plot=TRUE, max.xy=nbins)
+  
+  g = NA
+  if (make.plot) {
+    earlylate.cor.title = paste0('Early vs Late cor=', format(earlylate.cor$cor, digits=2))
+    g.cor = earlylate.cor$g + labs(title=earlylate.cor.title, fill='Correlation')
+    
+    g = plot_grid(g.fields, g.cor, ncol=2, rel_widths = c(2, 1.1))
+  }
+  
+  return(list(cor=earlylate.cor$cor, g=g))
+}
 ```
 
-# Mutual information over time
+Example
+
+Test trial place field stability
+```{r}
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+animal_name = 'E-BL'
+exp_title='learning'
+day = '2019-09-06'
+
+caimg_result_dir = find.caimg.dir(caimg_result_dirs, animal_name, day)
+data.traces = read.data.trace(caimg_result_dir)
+binned.traces.run = prepare.run.dirtraces(data.traces[exp_title == 'beforetest',], 
+                                          nbins, 
+                                          binned.var='deconv_trace')
+```
+
+```{r}
+cell_name = 230
+binned.cell.df = binned.traces.run[cell_id == cell_name & x >= 0 & y >= 0, ]
+
+field.stability(binned.cell.df, make.plot = TRUE)
+```
+
+
+# Quantify stability of place fields over the test trial duration.
+```{r}
+test.trials.meta = pc.test.df %>% 
+  group_by(animal, date) %>% 
+  dplyr::select(implant, animal, date, day_desc) %>%
+  dplyr::distinct()
+
+pc.test.df$early.late.cor = rep(-1.0, nrow(pc.test.df))
+make.plots = FALSE
+pc.test.df = as.data.table(pc.test.df)
+gen_imgs_dir = "/mnt/DATA/Prez/pf_stability-beforetest/"
+
+for (i in 1:nrow(test.trials.meta)) {
+  animal_name = test.trials.meta$animal[i]
+  day = test.trials.meta$date[i]
+  caimg_result_dir = find.caimg.dir(caimg_result_dirs, animal_name, day)
+  
+  data.traces = read.data.trace(caimg_result_dir)
+  binned.traces.run = prepare.run.dirtraces(data.traces[exp_title == 'beforetest',], 
+                                            nbins, 
+                                            binned.var='deconv_trace')
+  
+  img.dir = file.path(gen_imgs_dir, animal_name, day)
+  dir.create(img.dir, showWarnings=FALSE, recursive=TRUE)
+  for (cell_name in pc.test.df[animal==animal_name & date==day, cell_id]) {
+    binned.cell.df = binned.traces.run[cell_id == cell_name, ]
+    cell.stability.res = field.stability(binned.cell.df, make.plot=make.plots)
+    pc.test.df[animal==animal_name & date==day & cell_id == cell_name, early.late.cor:= cell.stability.res$cor]
+    if (make.plots) {
+      plot.title = paste0(animal_name, ' ', day, ', cell:', cell_name,
+                         ifelse(pc.test.df[animal==animal_name & date==day & cell_id == cell_name, signif.si], ' SI', ''))
+      ggsave(file.path(img.dir, paste0(day, '_', animal_name, '_', cell_name, '.jpg')),
+             cell.stability.res$g + draw_label(plot.title, x=0.3, y=0.97, size=10),
+             units = 'cm',
+             width = 17,
+             height=6)
+    }
+  }
+  
+}
+```
+
+Compared early vs late correlations: same number of stable place cells during the test
+```{r}
+signif.pc.test.df = filter(pc.test.df, signif.si) 
+  #dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_') %>% str_replace(' test', '')) %>% 
+  #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day)
+
+group_by(signif.pc.test.df, implant, animal) %>%
+  dplyr::summarise(mean(early.late.cor, na.rm=T), sem(early.late.cor), median(early.late.cor, na.rm=T))
+
+ggplot(signif.pc.test.df, aes(x=implant, y=early.late.cor)) +
+  geom_violin() +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  gtheme
+
+stability.model = lmer(early.late.cor ~ implant + (1 | animal), data=signif.pc.test.df, REML=TRUE)
+summary(stability.model)
+plot.model.diagnostics(stability.model, 
+                       signif.pc.test.df$animal, 
+                       signif.pc.test.df$implant)
+```
+
+Compare within-day stability of place cells during habituation: not different
+```{r}
+habit.place.cell.db = filter(place.cell.db, signif.si, exp == 'habituation', day_desc == 'habituation day#3')
+group_by(habit.place.cell.db, implant, animal) %>%
+  dplyr::summarise(mean(early.late.cor, na.rm=T), sem(early.late.cor), median(early.late.cor, na.rm=T))
+
+ggplot(habit.place.cell.db, aes(x=implant, y=early.late.cor)) +
+  geom_violin() +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  gtheme
+
+stability.model = lmer(early.late.cor ~ implant + (1 | animal), data=habit.place.cell.db, REML=TRUE)
+summary(stability.model)
+plot.model.diagnostics(stability.model, 
+                       habit.place.cell.db$animal, 
+                       habit.place.cell.db$implant)
+```
+
+
+# Spatial information over time
 ```{r}
 run.trials.si %>%
-  filter(date < '2019-09-08') %>%
-  ggplot(aes(x=date,y=mutual.info - mutual.info.bias)) +
+  ggplot(aes(x=day_desc,y=spatial.information)) +
   geom_violin(fill='grey80') + 
   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
   gtheme +
+  facet_grid(. ~ implant) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  labs(y='Mutual information w.o. bias', x='', color='Place cell\non both days')
+  labs(y='Spatial info', x='', color='Place cell\non both days')
 ```
 
 ```{r}
-wilcox.test((mutual.info - mutual.info.bias) ~ (as.Date(date) < fst.learning.day), data=run.trials.si)
+wilcox.test((spatial.information) ~ exp, data=run.trials.si)
 ```
 
 
@@ -85,8 +240,9 @@ bind_rows(early.trials.si, late.trials.si) %>%
   dplyr::summarise(si.change=pairdiff(spatial.information)) -> pf.diff.df
 
 pf.diff.df %>%
+  left_join(trials.meta.df) %>%
   ggplot() +
-  geom_violin(aes(x=date, y=si.change)) +
+  geom_violin(aes(x=day_desc, y=si.change)) +
   geom_hline(aes(yintercept=0), linetype='dashed') +
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
@@ -334,24 +490,5 @@ run.trials.si.field %>%
 ggsave(file.path(gen_imgs_dir, 'pc_count.jpg'),
        width = 14, height = 10, units = 'cm')
 ```
-
-
-# Change of place fields and statistics across days
-
-Load reward locations
-```{r}
-locations.rootdir = "/mnt/DATA/Prez/cheeseboard/2019-08/"
-rewards.df = read_locations(locations.rootdir) %>%
-  filter(!is_test) %>%
-  dplyr::rename(animal=Animal)
-  
-locations.df = rewards.df %>%
-  select(date, animal, location_set) %>%
-  dplyr::distinct()
-
-locations.df = data.table(locations.df)
-setkey(locations.df, date, animal)
-```
-
 
 
