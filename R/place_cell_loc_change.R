@@ -52,7 +52,7 @@ trial.field.dist2moved.loc = bind_rows(
   ) %>%
   dplyr::mutate(animal_cell = join.chars(animal, cell_id))
 
-beforetest.field.dist2current.rew = beforetest.peaks.at.rew %>%
+beforetest.field.dist2current.rew = beforetest.peaks.at.current.rew %>%
   dplyr::mutate(animal_cell = join.chars(animal, cell_id))
 beforetest.field.dist2fst.moved = beforetest.peaks.fst.moved
 beforetest.field.dist2snd.moved = create.peaks.df.at.locs(beforetest.fields, snd.moved.location.df, trial.days.df, cell.db = beforetest.cell.db)
@@ -153,7 +153,7 @@ plot.cluster.assignments = function(clust.df,
   max.ncells = unique(clust.df$cell_id) %>% max
   clust.df$animal = as.factor(clust.df$animal)
   clust.df = dplyr::mutate(clust.df,
-                           cell_id=(as.numeric(animal) - 1) * max.ncells + cell_id)
+                           cell_id=(as.numeric(animal) - 1) * (max.ncells + 1) + cell_id)
   
   my.clust.df = dplyr::select(clust.df, cell_id, exp, my.clust) %>%
     spread(exp, my.clust)
@@ -286,12 +286,16 @@ plot.cluster.assignments(filter(stage.peaks.filtered,
 # For the cells active at the translocated reward, were they active at reward before or after?
 # View of how the peaks in the place field of reward-active cell followed the reward.
 
-get.rew.active.animal_cells = function(dist.df, dist.thr = goal.cell.max.dist) {
+get.animal_cells = function(dist.df, cell.predicate) {
   dist.df %>%
-    filter(!!mindist.var <= dist.thr) %>%
+    filter(!!cell.predicate) %>%
     filter(signif.si) %>%
     dplyr::mutate(animal_cell = join.chars(animal, cell_id)) %>%
     dplyr::pull(animal_cell)
+}
+
+get.rew.active.animal_cells = function(dist.df, dist.thr = goal.cell.max.dist) {
+  get.animal_cells(dist.df, expr(!!mindist.var <= goal.cell.max.dist))
 }
 
 #############################################################################
@@ -337,8 +341,14 @@ left_join(bind_rows(filtered.cells.peaks2current.rew.dist, filtered.cells.peaks2
 #############################################################################################
 cells.transloc.rew.active.l2d1t = get.rew.active.animal_cells(
   filter(beforetest.field.dist2moved.loc, day_desc == 'learning2 day#1 test', moved_loc == 'fst'))
+cells.transloc.rew.inactive.l2d1t = get.animal_cells(
+  filter(beforetest.field.dist2current.rew, day_desc == 'learning2 day#1 test'),
+  expr(!!mindist.var > goal.cell.max.dist))
 cells.transloc.rew.active.l3d1t = get.rew.active.animal_cells(
   filter(beforetest.field.dist2moved.loc, day_desc == 'learning3 day#1 test', moved_loc == 'snd'))
+cells.transloc.rew.inactive.l3d1t = get.animal_cells(
+  filter(beforetest.field.dist2current.rew, day_desc == 'learning3 day#1 test'),
+  expr(!!mindist.var > goal.cell.max.dist))
 
 # Distance to current reward for place cells active at translocated reward
 selected.cells.peaks2current.rew.dist = bind_rows(
@@ -366,15 +376,16 @@ filtered.cells.peaks2fst.rew.dist$compared_location = 'first reward location'
 left_join(bind_rows(filtered.cells.peaks2current.rew.dist, filtered.cells.peaks2fst.rew.dist), mouse.meta.df) %>%
   dplyr::mutate(unique_cell_id=join.chars(animal, cell_id)) %>%
   ggplot(aes(x=day_desc, y=!!mindist.var * perc2dist)) +
-  geom_path(mapping=aes(group=unique_cell_id), alpha=0.2) +
-  geom_violin(alpha=0.6) +
-  stat_summary(fun.y=median, geom="point", size=2) +
+  geom_path(mapping=aes(group=unique_cell_id), alpha=0.5) +
+  #geom_violin(alpha=0.6) +
+  #stat_summary(fun.y=median, geom="point", size=2) +
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   facet_grid(implant ~ compared_location) +
   geom_hline(yintercept = goal.cell.max.dist * perc2dist, linetype = 'dashed') +
   xlab('') + ylab('Distance to location (cm)') +
   scale_x_discrete(labels=c('habituation', 'learning1 probe', 'learning2 probe', 'learning3 probe'))
+ggsave('/tmp/translocated_distance.svg', units = 'cm', width=8, height=8)
 
 animal.learning2test.rew.following = bind_rows(
     filter(beforetest.field.dist2current.rew, 
@@ -393,29 +404,59 @@ animal.learning2test.rew.following = bind_rows(
   group_by(implant, animal, day_desc) %>% 
   dplyr::summarise(at.rew = sum(nactive), at.rew.pct = mean(nactive), n=n()) %>%
   arrange(animal, day_desc)
-# TODO include only trials when learnt
 
 beforetest.animal.peaks.at.rew.pct = beforetest.field.dist2current.rew %>%
-  filter(signif.si) %>%
+  #filter(signif.si) %>%
   filter(animal != 'A-BL', animal != 'L-TL') %>%
-  filter(day_desc %in% c('learning3 day#1 test', 'learning3 day#3 test')) %>%
+  filter(((day_desc == 'learning3 day#1 test') & (animal_cell %in% cells.transloc.rew.inactive.l2d1t)) |
+         ((day_desc == 'learning3 day#3 test') & (animal_cell %in% cells.transloc.rew.inactive.l3d1t))) %>%
   dplyr::mutate(is.at.rew = !!mindist.var <= goal.cell.max.dist) %>%
   dplyr::group_by(animal, implant, day_desc) %>%
   dplyr::summarise(at.rew = sum(is.at.rew), at.rew.pct = mean(is.at.rew), n=n()) %>%
   arrange(animal, day_desc)
 
-print('T test on reward cells percent - higher number of cells moves to reward than in general population')
-cells.following.pct = bind_rows(
+cells.comparison.mat = bind_rows(
   mutate(animal.learning2test.rew.following, cell_group='reward_cells'), 
-  mutate(beforetest.animal.peaks.at.rew.pct, cell_group='all_PCs')) %>%
-  reshape2::dcast(implant + animal + day_desc ~ cell_group, value.var='at.rew.pct') %>% 
-  filter(!is.na(reward_cells)) %>%
-  reshape2::melt(id.vars=c('implant', 'animal', 'day_desc'), value.name='at.rew.pct', variable.name='cell_group') 
-  #replace_na(list('at.rew.pct'=0))
-wilcox.test(at.rew.pct ~ cell_group,
-            data=cells.following.pct,
-            subset=implant=='dCA1' & animal != 'C-1R',
-            paired=TRUE)
+  mutate(beforetest.animal.peaks.at.rew.pct, cell_group='other_cells')) %>%
+  mutate(animal_beforetest_day = paste(animal, day_desc, sep='_') %>% str_replace(' test', '')) %>% 
+  # only keep trials when learnt
+  #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
+  tidyr::pivot_wider(id_cols=c(implant, animal, day_desc), 
+                     names_from=cell_group, 
+                     values_from=c(at.rew,at.rew.pct, n),
+                     names_sep='.') 
+
+print('Estimate for % of the cells following the reward')
+cells.comparison.mat.summary = group_by(cells.comparison.mat, implant) %>%
+  dplyr::summarise(n.rew_cells = sum(n.reward_cells, na.rm=TRUE),
+                   n.rew_cells_followed = sum(at.rew.reward_cells, na.rm=TRUE),
+                   n.rew_cells_notfollowed = n.rew_cells - n.rew_cells_followed,
+                   n.other_cells = sum(n.other_cells, na.rm=TRUE),
+                   n.other_cells_followed = sum(at.rew.other_cells, na.rm=TRUE),
+                   n.other_cells_notfollowed = n.other_cells - n.other_cells_followed,
+                   rew_cells_followed.pct = n.rew_cells_followed / n.rew_cells,
+                   other_cells_followed.pct= n.other_cells_followed / n.other_cells)
+cells.comparison.mat.summary
+
+dca1.following.mat = matrix(unlist(cells.comparison.mat.summary[1, c(3,4,6,7)]), ncol=2)
+dimnames(dca1.following.mat) = list(c('at rew 2', 'not at rew 2'), c('at rew 1', 'not at rew 1'))
+fisher.test(dca1.following.mat, alternative='greater')
+
+print('T test on reward cells percent - higher number of cells moves to reward than in general population')
+cells.following.pct = cells.comparison.mat %>%
+  #filter(n.reward_cells > 2) %>% # calculate percentages only when pop large enough
+  dplyr::select(implant, animal, day_desc, at.rew.pct.reward_cells, at.rew.pct.other_cells) %>%
+  tidyr::pivot_longer(-c(implant, animal, day_desc), 
+                      names_to='cell_group', 
+                      names_transform = list(cell_group= ~ str_remove(.x, 'at.rew.pct.')),
+                      values_to='at.rew.pct')
+
+
+t.test(at.rew.pct ~ cell_group,
+       data=cells.following.pct,
+       subset=implant=='dCA1',
+       paired=TRUE,
+       alternative = "less")
 
 print('The count of reward following cells not different in dCA1 than in the vCA1')
 learning2test.rew.following.summary = animal.learning2test.rew.following %>%

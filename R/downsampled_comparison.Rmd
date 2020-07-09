@@ -162,7 +162,6 @@ summary.df %>%
 
 fem.dca1.pcs = lmerTest::lmer(pct.pcs ~  exp_title + (1 + day_desc | animal), data=dca1.rew.pc.pct)
 print('Fraction of dCA1 place cells during test')
-t.test(pct.reward ~ exp_title, dca1.rew.pc.pct, paired=T)
 summary(fem.dca1.pcs)
 plot.model.diagnostics(fem.dca1.pcs, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp_title)
 ```
