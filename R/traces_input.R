@@ -15,12 +15,12 @@ caimg_result_dirs = c(
   get.subject.result.dirs(root_dir08, 'E-TR'),
   get.subject.result.dirs(root_dir08, 'F-BL'),
   get.subject.result.dirs(root_dir08, 'F-TL'),
-  get.subject.result.dirs(root_dir07, 'B-BL'),
-  get.subject.result.dirs(root_dir07, 'C-1R'),
-  get.subject.result.dirs(root_dir07, 'D-BR'),
   get.subject.result.dirs(root_dir01, 'G-BR'),
-  get.subject.result.dirs(root_dir01, 'K-BR')
-  #get.subject.result.dirs(root_dir01, 'L-TL')
+  get.subject.result.dirs(root_dir01, 'K-BR'),
+  #get.subject.result.dirs(root_dir01, 'L-TL'),
+  get.subject.result.dirs(root_dir07, 'B-BL'),
+  #get.subject.result.dirs(root_dir07, 'C-1R'),
+  get.subject.result.dirs(root_dir07, 'D-BR')
 )
 
 caimg_result_dirs = Filter(
@@ -28,13 +28,17 @@ caimg_result_dirs = Filter(
   caimg_result_dirs)
 
 
-prepare.run.dirtraces = function(data.traces, nbins, binned.var='trace') {
+prepare.run.dirtraces = function(data.traces, 
+                                 nbins, 
+                                 binned.var='trace',
+                                 event.deconv.threshold=0.2) {
   data.traces = data.traces[exp_title != 'homecage',]
-  detect.events(data.traces, deconv.threshold=0.2)
+  detect.events(data.traces, deconv.threshold=event.deconv.threshold)
 
   setorder(data.traces, trial_id, cell_id, timestamp)
   # running speed min=2cm/s, avg min 4 cm/s
   running.index = isRunning(data.traces, 1.6, 3.3, 500)
+  data.traces$is_running = running.index
   # running speed min=0.5cm/s, avg min 4 cm/s
   #running.index = isRunning(data.traces, 0.4, 3.3, 500)
   #running.index = isRunning(data.traces, 2, 4, 500)

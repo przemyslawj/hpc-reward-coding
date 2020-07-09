@@ -35,14 +35,14 @@ if numel(ms.time) > size(ms.RawTraces, 1)
 end
 ts = ms.time;
 
-%size_diff = size(ms.RawTraces, 1) - numel(ts);
-%if size_diff > 0
-%	avg_timestamp = floor(mean(diff(ts)));
-%	last_ts = ts(numel(ts)) + avg_timestamp;
-%	missing_ts = linspace(last_ts, size_diff*avg_timestamp, size_diff);
-%	ts = [ts missing_ts];
-%	warning('Too few timestamps, approximating timestamp based on frame rate')
-%end
+size_diff = size(ms.RawTraces, 1) - numel(ts);
+if size_diff > 0
+	avg_timestamp = floor(mean(diff(ts)));
+	last_ts = ts(numel(ts)) + avg_timestamp;
+	missing_ts = linspace(last_ts, size_diff*avg_timestamp, size_diff);
+	ts = [ts missing_ts];
+	warning('Too few timestamps, approximating timestamp based on frame rate')
+end
 timestampsBySession = mat2cell(ts', sessionLengths', 1);
 
 %% Load session info
@@ -67,11 +67,16 @@ for session_i = 1:numel(session_info.session_fpaths)
     sessionTimestamps = timestampsBySession{session_i}';
     sessionNo = str2num(replace(session_fpath_parts{end}, 'Session', ''));
 
+    %%
+    if strcmp(exp_title, 'test')
+        exp_title = 'beforetest';
+    end
+    
 	trackingDir = fullfile(datedRootDir, exp_title, 'movie', 'tracking');
     filenamepattern = [ dateStr '*' '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
     trackfiles = dir(fullfile(trackingDir, filenamepattern));
     if numel(trackfiles) > 0
-        trackingFilepath = fullfile(trackingDir trackfiles(1).name)
+        trackingFilepath = fullfile(trackingDir, trackfiles(1).name)
     end
     if 	~exist(trackingFilepath, 'file')
         warning('No tracking file for session: %s', session_info.session_fpaths{session_i})

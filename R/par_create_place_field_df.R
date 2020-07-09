@@ -68,7 +68,7 @@ traces2pf = function(binned.traces.run) {
 
   # Test trials
   #max_test_trial_dur_msec = 240 * 1000
-  beforetest.traces = binned.traces.run[exp_title == 'beforetest']# & timestamp <= max_test_trial_dur_msec]
+  beforetest.traces = binned.traces.run[exp_title == 'beforetest' | exp_title == 'test']# & timestamp <= max_test_trial_dur_msec]
   beforetest.pf = traces2pf.subset(beforetest.traces, 'beforetest', shuffle.shift.sec = 10)
 
   aftertest.traces = binned.traces.run[exp_title == 'aftertest']# & timestamp <= max_test_trial_dur_msec]
@@ -151,5 +151,5 @@ beforetest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$beforetest$df)
 aftertest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$aftertest$df)
 
 print("Saving env variables")
-save.image(file="data/pf_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle10sec_occupancy07sec_gaussvar2.RData")
+save.image(file="data/pf_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle10sec_occupancy07sec_gaussvar2_reg_more_cells.RData")
 
