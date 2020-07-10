@@ -18,9 +18,11 @@ source('place_field_utils.R')
 summarise = dplyr::summarise
 summarize = dplyr::summarize
 
+perc2dist = 1.2
+goal.cell.max.dist = 25 / perc2dist
+
 mouse.meta.df = read.mouse.meta(rootdirs)
 trials.meta.df = read.trials.meta(rootdirs)
-
 
 snd.moved.location.df = all.locations.df %>%
   filter(!is_test) %>%
@@ -30,6 +32,25 @@ snd.moved.location.df = all.locations.df %>%
   dplyr::select(-date) %>%
   dplyr::distinct()
 
+snd.moved.location.id = snd.moved.location.df %>%
+  dplyr::mutate(loc_id = paste0(animal, '_', location_ordinal)) %>%
+  dplyr::pull(loc_id)
+
+thd.moved.location.df = all.locations.df %>%
+  filter(!is_test, location_set == 2) %>% 
+  dplyr::select(-date) %>%
+  dplyr::distinct() %>% 
+  dplyr::mutate(loc_id = paste0(animal, '_', location_ordinal),
+                current_loc=FALSE) %>%
+  filter(!(loc_id %in% snd.moved.location.id)) 
+
+fourth.moved.location.df = all.locations.df %>%
+  filter(!is_test, location_set == 3) %>% 
+  dplyr::select(-date) %>%
+  dplyr::distinct() %>% 
+  dplyr::mutate(loc_id = paste0(animal, '_', location_ordinal),
+                current_loc=FALSE) %>%
+  filter(!(loc_id %in% thd.moved.location.df)) 
 # DFs need to have columns:
 # - implant
 # - animal
@@ -46,9 +67,11 @@ trial.field.dist2current.rew = trial.peaks.at.current.rew %>%
   dplyr::mutate(animal_cell = join.chars(animal, cell_id))
 trial.field.dist2fst.moved = trial.peaks.at.fst.moved
 trial.field.dist2snd.moved = create.peaks.df.at.locs(run.fields, snd.moved.location.df, filter(trial.days.df, exp=='habituation'))
+trial.field.dist2thd.moved = create.peaks.df.at.locs(run.fields, thd.moved.location.df, filter(trial.days.df, exp=='habituation'))
 trial.field.dist2moved.loc = bind_rows(
     dplyr::mutate(trial.field.dist2fst.moved, moved_loc = 'fst'),
-    dplyr::mutate(trial.field.dist2snd.moved, moved_loc = 'snd')
+    dplyr::mutate(trial.field.dist2snd.moved, moved_loc = 'snd'),
+    dplyr::mutate(trial.field.dist2thd.moved, moved_loc = 'thd'),
   ) %>%
   dplyr::mutate(animal_cell = join.chars(animal, cell_id))
 
@@ -56,9 +79,13 @@ beforetest.field.dist2current.rew = beforetest.peaks.at.current.rew %>%
   dplyr::mutate(animal_cell = join.chars(animal, cell_id))
 beforetest.field.dist2fst.moved = beforetest.peaks.fst.moved
 beforetest.field.dist2snd.moved = create.peaks.df.at.locs(beforetest.fields, snd.moved.location.df, trial.days.df, cell.db = beforetest.cell.db)
+beforetest.field.dist2thd.moved = create.peaks.df.at.locs(beforetest.fields, thd.moved.location.df, trial.days.df, cell.db = beforetest.cell.db)
+beforetest.field.dist2fourth.moved = create.peaks.df.at.locs(beforetest.fields, fourth.moved.location.df, trial.days.df, cell.db = beforetest.cell.db)
 beforetest.field.dist2moved.loc = bind_rows(
     mutate(beforetest.field.dist2fst.moved, moved_loc = 'fst'),
-    mutate(beforetest.field.dist2snd.moved, moved_loc = 'snd')
+    mutate(beforetest.field.dist2snd.moved, moved_loc = 'snd'),
+    mutate(beforetest.field.dist2thd.moved, moved_loc = 'thd'),
+    mutate(beforetest.field.dist2thd.moved, moved_loc = 'fourth')
   ) %>%
   dplyr::mutate(animal_cell = join.chars(animal, cell_id))
 
@@ -100,8 +127,6 @@ beforetest.field.dist2moved.loc = dplyr::mutate(beforetest.field.dist2moved.loc,
 beforetest.field.dist2current.rew = dplyr::mutate(beforetest.field.dist2current.rew,
                                                   day_desc = ifelse(endsWith(day_desc, 'test'), day_desc, paste(day_desc, 'test')))
 
-perc2dist = 1.2
-goal.cell.max.dist = 20 / perc2dist
 
 # Extracts first letters and numbers, e.g. learning1 day#1 -> l1d1
 get.shortname.from.day.desc = function(day_desc) {
@@ -341,13 +366,24 @@ left_join(bind_rows(filtered.cells.peaks2current.rew.dist, filtered.cells.peaks2
 #############################################################################################
 cells.transloc.rew.active.l2d1t = get.rew.active.animal_cells(
   filter(beforetest.field.dist2moved.loc, day_desc == 'learning2 day#1 test', moved_loc == 'fst'))
+
+# Baseline cells: inactive at the current rewards and not present at the future reward
 cells.transloc.rew.inactive.l2d1t = get.animal_cells(
-  filter(beforetest.field.dist2current.rew, day_desc == 'learning2 day#1 test'),
+  filter(beforetest.field.dist2moved.loc, 
+         day_desc == 'learning2 day#1 test',
+         moved_loc %in% c('fst', 'snd', 'thd')) %>%
+    dplyr::group_by(animal, cell_id) %>%
+    dplyr::summarise(!!mindist.var := min(!!mindist.var), signif.si=any(signif.si)),
   expr(!!mindist.var > goal.cell.max.dist))
+
 cells.transloc.rew.active.l3d1t = get.rew.active.animal_cells(
   filter(beforetest.field.dist2moved.loc, day_desc == 'learning3 day#1 test', moved_loc == 'snd'))
 cells.transloc.rew.inactive.l3d1t = get.animal_cells(
-  filter(beforetest.field.dist2current.rew, day_desc == 'learning3 day#1 test'),
+  filter(beforetest.field.dist2moved.loc, 
+         day_desc == 'learning3 day#1 test',
+         moved_loc %in% c('snd', 'thd', 'fourth')) %>%
+    dplyr::group_by(animal, cell_id) %>%
+    dplyr::summarise(!!mindist.var := min(!!mindist.var), signif.si=any(signif.si)),
   expr(!!mindist.var > goal.cell.max.dist))
 
 # Distance to current reward for place cells active at translocated reward
@@ -356,10 +392,11 @@ selected.cells.peaks2current.rew.dist = bind_rows(
   dplyr::filter(beforetest.field.dist2moved.loc, day_desc == 'learning2 day#1 test', moved_loc == 'fst'),
   dplyr::filter(beforetest.field.dist2current.rew, day_desc %in% c('learning3 day#1 test', 'learning3 day#3 test'))
 ) %>% 
-  dplyr::mutate(active = !!mindist.var <= goal.cell.max.dist) %>%
   dplyr::filter(animal_cell %in% cells.transloc.rew.active.l2d1t)
 
-filtered.cells.peaks2current.rew.dist = filter.cell.present.ntimes(selected.cells.peaks2current.rew.dist, 2, day_desc, !!mindist.var)
+filtered.cells.peaks2current.rew.dist = filter.cell.present.ntimes(
+  selected.cells.peaks2current.rew.dist, 2, day_desc, !!mindist.var) %>%
+  dplyr::mutate(active.at.rew = !!mindist.var <= goal.cell.max.dist)
 filtered.cells.peaks2current.rew.dist$compared_location = 'current reward'
 
 filtered.cells.peaks2fst.rew.dist = bind_rows(
@@ -367,11 +404,17 @@ filtered.cells.peaks2fst.rew.dist = bind_rows(
   dplyr::filter(beforetest.field.dist2moved.loc, 
                 day_desc %in% c('learning2 day#1 test', 'learning3 day#1 test', 'learning3 day#3 test'),
                 moved_loc == 'fst')) %>%
-  dplyr::mutate(animal_cell = join.chars(animal, cell_id),
-                active =  !!mindist.var <= goal.cell.max.dist) %>%
+  dplyr::mutate(animal_cell = join.chars(animal, cell_id)) %>%
   dplyr::filter(animal_cell %in% cells.transloc.rew.active.l2d1t) %>%
-  filter.cell.present.ntimes(2, day_desc, !!mindist.var)
+  filter.cell.present.ntimes(2, day_desc, !!mindist.var) %>%
+  dplyr::mutate(active.at.loc =  !!mindist.var <= goal.cell.max.dist)
 filtered.cells.peaks2fst.rew.dist$compared_location = 'first reward location'
+remapped.cells.l3d1 = filter(filtered.cells.peaks2fst.rew.dist, !active.at.loc, day_desc == 'learning3 day#1 test') %>%
+  dplyr::mutate(animal_cell = join.chars(animal, cell_id)) %>%
+  dplyr::pull(animal_cell)
+remapped.cells.l3d3 = filter(filtered.cells.peaks2fst.rew.dist, !active.at.loc, day_desc == 'learning3 day#3 test') %>%
+  dplyr::mutate(animal_cell = join.chars(animal, cell_id)) %>%
+  dplyr::pull(animal_cell)
 
 left_join(bind_rows(filtered.cells.peaks2current.rew.dist, filtered.cells.peaks2fst.rew.dist), mouse.meta.df) %>%
   dplyr::mutate(unique_cell_id=join.chars(animal, cell_id)) %>%
@@ -398,11 +441,39 @@ animal.learning2test.rew.following = bind_rows(
   dplyr::mutate(is.at.rew = !!mindist.var <= goal.cell.max.dist) %>% 
   group_by(animal, day_desc, cell_id) %>%
   dplyr::summarise(npresent = sum(!is.na(!!mindist.var)), 
-                   nactive = sum(is.at.rew)) %>% 
+                   nactive = sum(is.at.rew),
+                   min.dist = min(!!mindist.var, na.rm=TRUE)) %>% 
   filter(npresent == 1) %>% # include only cells found on both days
   left_join(mouse.meta.df, by='animal') %>% 
   group_by(implant, animal, day_desc) %>% 
-  dplyr::summarise(at.rew = sum(nactive), at.rew.pct = mean(nactive), n=n()) %>%
+  dplyr::summarise(at.rew = sum(nactive), 
+                   at.rew.pct = mean(nactive) * 100, 
+                   quantile30.dist = unname(quantile(min.dist, 0.3)[1]),
+                   med.dist = median(min.dist), 
+                   n=n()) %>%
+  arrange(animal, day_desc)
+
+animal.learning2test.rew.following2 = bind_rows(
+  filter(beforetest.field.dist2current.rew,
+         day_desc == 'learning3 day#3 test',
+         animal_cell %in% get.rew.active.animal_cells(
+            filter(beforetest.field.dist2moved.loc, 
+                   day_desc == 'learning2 day#1 test', 
+                   (moved_loc == 'fst' | moved_loc == 'snd'))))
+) %>%
+  dplyr::mutate(is.at.rew = !!mindist.var <= goal.cell.max.dist) %>%
+  group_by(animal, day_desc, cell_id) %>%
+  dplyr::summarise(npresent = sum(!is.na(!!mindist.var)),
+                   nactive = sum(is.at.rew),
+                   min.dist = min(!!mindist.var, na.rm=TRUE)) %>%
+  filter(npresent == 1) %>% # include only cells found on both days
+  left_join(mouse.meta.df, by='animal') %>%
+  group_by(implant, animal, day_desc) %>%
+  dplyr::summarise(at.rew = sum(nactive), 
+                   at.rew.pct = mean(nactive) * 100, 
+                   med.dist = median(min.dist), 
+                   quantile30.dist = unname(quantile(min.dist, 0.3)[1]),
+                   n=n()) %>%
   arrange(animal, day_desc)
 
 beforetest.animal.peaks.at.rew.pct = beforetest.field.dist2current.rew %>%
@@ -412,7 +483,11 @@ beforetest.animal.peaks.at.rew.pct = beforetest.field.dist2current.rew %>%
          ((day_desc == 'learning3 day#3 test') & (animal_cell %in% cells.transloc.rew.inactive.l3d1t))) %>%
   dplyr::mutate(is.at.rew = !!mindist.var <= goal.cell.max.dist) %>%
   dplyr::group_by(animal, implant, day_desc) %>%
-  dplyr::summarise(at.rew = sum(is.at.rew), at.rew.pct = mean(is.at.rew), n=n()) %>%
+  dplyr::summarise(at.rew = sum(is.at.rew), 
+                   at.rew.pct = mean(is.at.rew) * 100, 
+                   med.dist = median(!!mindist.var), 
+                   quantile30.dist = unname(quantile(!!mindist.var, 0.3)[1]),
+                   n=n()) %>%
   arrange(animal, day_desc)
 
 cells.comparison.mat = bind_rows(
@@ -423,8 +498,21 @@ cells.comparison.mat = bind_rows(
   #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
   tidyr::pivot_wider(id_cols=c(implant, animal, day_desc), 
                      names_from=cell_group, 
-                     values_from=c(at.rew,at.rew.pct, n),
+                     values_from=c(at.rew, at.rew.pct, med.dist, quantile30.dist, n),
                      names_sep='.') 
+
+cells.comparison.mat2 = bind_rows(
+  mutate(animal.learning2test.rew.following2, cell_group='reward_cells'), 
+  mutate(beforetest.animal.peaks.at.rew.pct, cell_group='other_cells')) %>%
+  mutate(animal_beforetest_day = paste(animal, day_desc, sep='_') %>% str_replace(' test', '')) %>% 
+  # only keep trials when learnt
+  #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
+  tidyr::pivot_wider(id_cols=c(implant, animal, day_desc), 
+                     names_from=cell_group, 
+                     values_from=c(at.rew, at.rew.pct, med.dist, quantile30.dist, n),
+                     names_sep='.') 
+
+#Compare median distance instead of counts of cells
 
 print('Estimate for % of the cells following the reward')
 cells.comparison.mat.summary = group_by(cells.comparison.mat, implant) %>%
@@ -444,17 +532,34 @@ fisher.test(dca1.following.mat, alternative='greater')
 
 print('T test on reward cells percent - higher number of cells moves to reward than in general population')
 cells.following.pct = cells.comparison.mat %>%
-  #filter(n.reward_cells > 2) %>% # calculate percentages only when pop large enough
-  dplyr::select(implant, animal, day_desc, at.rew.pct.reward_cells, at.rew.pct.other_cells) %>%
-  tidyr::pivot_longer(-c(implant, animal, day_desc), 
+  group_by(implant, animal) %>%
+  dplyr::summarise(n.rew_cells = sum(n.reward_cells, na.rm=TRUE),
+                   n.rew_cells_followed = sum(at.rew.reward_cells, na.rm=TRUE),
+                   n.other_cells = sum(n.other_cells, na.rm=TRUE),
+                   n.other_cells_followed = sum(at.rew.other_cells, na.rm=TRUE),
+                   at.rew.pct.reward_cells = n.rew_cells_followed / n.rew_cells,
+                   at.rew.pct.other_cells = n.other_cells_followed / n.other_cells) %>% 
+  filter(n.rew_cells > 0) %>% # calculate percentages only when pop large enough
+  dplyr::select(implant, animal, at.rew.pct.reward_cells, at.rew.pct.other_cells) %>%
+  tidyr::pivot_longer(-c(implant, animal), 
                       names_to='cell_group', 
                       names_transform = list(cell_group= ~ str_remove(.x, 'at.rew.pct.')),
                       values_to='at.rew.pct')
 
-
 t.test(at.rew.pct ~ cell_group,
        data=cells.following.pct,
        subset=implant=='dCA1',
+       paired=TRUE,
+       alternative = "less")
+
+# This should be on all cells per animal]
+t.test(subset(cells.comparison.mat2, implant=='vCA1')$med.dist.reward_cells, 
+       subset(cells.comparison.mat2, implant=='vCA1')$med.dist.other_cells,
+       paired=TRUE,
+       alternative = "less")
+# Test on quantiles
+t.test(subset(cells.comparison.mat, implant=='dCA1')$quantile30.dist.reward_cells, 
+       subset(cells.comparison.mat, implant=='dCA1')$quantile30.dist.other_cells,
        paired=TRUE,
        alternative = "less")
 
