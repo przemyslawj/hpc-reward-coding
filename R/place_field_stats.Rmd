@@ -304,16 +304,19 @@ ggsave('/tmp/pf_stats.svg', width=14, height=4.3, units='cm')
 
 ```{r}
 print('Spatial information not statistically different')
-spatial.info.model = lmer(log(spatial.information) ~ implant + (1 | animal), data=compared.pcs.df, REML=TRUE)
+spatial.info.model = lmerTest::lmer(log(spatial.information + 1) ~ implant + (1 | animal), 
+                                    data=compared.pcs.df, REML=TRUE)
 summary(spatial.info.model)
+anova(spatial.info.model, refit=FALSE, ddf='Satterthwaite')
 plot.model.diagnostics(spatial.info.model, 
                        compared.pcs.df$animal, 
                        compared.pcs.df$implant)
 #wilcox.test(spatial.information ~ implant, data=compared.pcs.df)
 
 print('Field size signif larger in vCA1')
-field.size.model = lmer(early.late.cor ~ implant + (1 | animal), data=compared.pcs.df, REML=TRUE)
+field.size.model = lmerTest::lmer(log(field.size.50)  ~ implant + (1 | animal), data=compared.pcs.df, REML=TRUE)
 summary(field.size.model)
+anova(field.size.model, refit=FALSE, ddf='Satterthwaite')
 plot.model.diagnostics(field.size.model, 
                        compared.pcs.df$animal, 
                        compared.pcs.df$implant)
@@ -355,9 +358,11 @@ pc.rew.dist.df = merged.run.trials.pc %>%
         closest.location.ordinal=calc.min.rew.dist(filter.rews.df(rewards.df, date[1], animal[1]),
                                                    field.max.x, field.max.y)$location.ordinal,
         min.rew.dist=calc.min.rew.dist(filter.rews.df(rewards.df, date[1], animal[1]),
-                                       field.max.x, field.max.y)$rew.dist) %>%
+                                       field.max.x, field.max.y)$rew.dist,
+        closer.rew.angle=calc.min.rew.dist(filter.rews.df(rewards.df, date[1], animal[1]),
+                               field.max.x, field.max.y)$rew.angle) %>%
   dplyr::mutate(is.goal.cell = signif.si & (min.rew.dist <= goal.cell.max.dist)) %>%
-  replace_na(is.goal.cell=FALSE)
+  replace_na(list(is.goal.cell=FALSE))
 
 pc.rew.dist.df %>%
   filter(exp != 'habituation', signif.si) %>% 
@@ -413,6 +418,8 @@ pc.test.df = pc.test.df %>%
   dplyr::mutate(
         min.rew.dist=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
                                        field.max.x, field.max.y)$rew.dist,
+        closer.rew.angle=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
+                                       field.max.x, field.max.y)$rew.angle,
         closest.location.ordinal=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
                                                    field.max.x, field.max.y)$location.ordinal,
         is.goal.cell = signif.si & (min.rew.dist <= goal.cell.max.dist))
@@ -613,11 +620,13 @@ vca1.rew.pc.pct = subset(merged.summary.df, implant == 'vCA1')
 fem.dca1 = lmerTest::lmer(pct.reward ~  exp + (1 + day_desc | animal), data=dca1.rew.pc.pct)
 print('Fraction of dCA1 place cells at reward increased')
 summary(fem.dca1)
+anova(fem.dca1, refit=FALSE, ddf='Satterthwaite')
 plot.model.diagnostics(fem.dca1, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp)
 
 fem.vca1 = lmerTest::lmer(pct.reward ~  exp + (1 + day_desc | animal), data=vca1.rew.pc.pct)
 print('Fraction of vCA1 place cells did not increase')
 summary(fem.vca1)
+anova(fem.vca1, refit=FALSE, ddf='Satterthwaite')
 plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp)
 
 #g.pc.change.pct.test = plot.val.change.between.groups(
@@ -1092,7 +1101,10 @@ wilcox.test(field.cor ~ stage, data=pc.nextday.unchanged)
 
 field.cor.model = lmerTest::lmer(field.cor ~ stage + (1 | animal), pc.nextday.unchanged, subset = implant=='vCA1')
 summary(field.cor.model)
-plot.model.diagnostics(field.cor.model, pc.nextday.unchanged$animal, pc.nextday.unchanged$stage)
+anova(field.cor.model, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(field.cor.model, 
+                       subset(pc.nextday.unchanged, implant == 'vCA1')$animal, 
+                       subset(pc.nextday.unchanged, implant == 'vCA1')$stage)
 ```
 How does it compare to change from one set of locations to another?
 No difference in median...
@@ -1187,6 +1199,8 @@ pc.prev.rew = merged.run.trials.pc %>%
                                                    field.max.x, field.max.y)$location.ordinal,
         min.rew.dist=calc.min.rew.dist(filter.rews.df(prev.locations.df, date[1], animal[1]),
                                        field.max.x, field.max.y)$rew.dist,
+        closer.rew.angle=calc.min.rew.dist(filter.rews.df(prev.locations.df, date[1], animal[1]),
+                               field.max.x, field.max.y)$rew.angle,
         is.prev.loc=closest.location.ordinal == get.prev.loc.ordinal(date[1], animal[1])) %>%
   dplyr::mutate(is.prev.rew.closest = is.prev.loc,
                 is.new.rew.closest =  !is.prev.loc)
@@ -1212,15 +1226,25 @@ source('place_field_utils.R')
 
 trial.days.df = trials.meta.df %>%
   dplyr::select(date, animal, exp) %>%
+  filter(animal != 'missing', animal != 'A-BL') %>%
   dplyr::distinct()
 
 create.peaks.df.at.locs = function(fields, locs.df, trial.days, max.rew.dist.thr=goal.cell.max.dist, cell.db=place.cell.db) {
   res = map2_dfr(trial.days$date,
                  trial.days$animal,
-                 ~ calc.field.peaks.info(.x, .y, 
-                                         fields[[.y]][[.x]], 
-                                         rew.df=filter.rews.df(locs.df, .x, .y),
-                                         max.rew.dist.thr))
+                 ~ {
+                    .x = as.character(.x)
+                    .y = as.character(.y)
+                     if ((.y %in% names(fields)) & (.x %in% names(fields[[.y]]))) {
+                       calc.field.peaks.info(.x, .y, 
+                                             fields[[.y]][[.x]], 
+                                             rew.df=filter.rews.df(locs.df, .x, .y),
+                                             max.rew.dist.thr)
+                     } else {
+                       warning('Not found animal=', .y, ' on day=', .x)
+                       return(data.frame())
+                     }
+                   })
   res %>%
     left_join(trials.meta.df, by=c('animal', 'date')) %>%
     left_join(cell.db, by=c('animal', 'date', 'cell_id', 'day_desc', 'exp'))
@@ -1252,9 +1276,9 @@ habittest.daypair = filter(trials.meta.df, exp == 'habituation', animal != 'A-BL
   left_join(dplyr::select(beforetest.rewards.df, date, animal, location_set), 
             by=c('animal'), suffix=c('.habitday', '.testday'))
 habit.fields.at.test.rews = map_dfr(1:nrow(habittest.daypair), ~ {
-  animal_name = habittest.daypair$animal[.x]
-  activity_date = habittest.daypair$date.habitday[.x]
-  test_date = habittest.daypair$date.testday[.x]
+  animal_name = as.character(habittest.daypair$animal[.x])
+  activity_date = as.character(habittest.daypair$date.habitday[.x])
+  test_date = as.character(habittest.daypair$date.testday[.x])
   rew.df = beforetest.rewards.df[animal==animal_name & date == test_date,]
   calc.field.peaks.info(activity_date,
                         animal_name,
@@ -1344,14 +1368,16 @@ merged.summary.df = bind_rows(
 
 dca1.rew.pc.pct = subset(merged.summary.df, implant == 'dCA1')
 vca1.rew.pc.pct = subset(merged.summary.df, implant == 'vCA1')
-fem.dca1 = lmerTest::lmer(pct.reward ~  exp + (1 + day_desc | animal), data=dca1.rew.pc.pct)
+fem.dca1 = lmerTest::lmer(pct.reward ~  exp + (1 + exp | animal), data=dca1.rew.pc.pct)
 print('Fraction of dCA1 place cells at reward increased')
+anova(fem.dca1, refit=FALSE, ddf='Satterthwaite')
 summary(fem.dca1)
 plot.model.diagnostics(fem.dca1, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp)
 
-fem.vca1 = lmerTest::lmer(pct.reward ~  exp + (1 + day_desc | animal), data=vca1.rew.pc.pct)<
+fem.vca1 = lmerTest::lmer(pct.reward ~  exp + (1 + exp | animal), data=vca1.rew.pc.pct)
 print('Fraction of vCA1 place cells did not increase')
 summary(fem.vca1)
+anova(fem.vca1, refit=FALSE, ddf='Satterthwaite')
 plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp)
 
 #g.fields.change.pct.test = plot.val.change.between.groups(
@@ -1404,6 +1430,7 @@ peak.count.model = lmerTest::lmer(
                                   subset = is.multi,
                                   REML=TRUE)
 summary(peak.count.model)
+anova(peak.count.model, refit=FALSE, ddf='Satterthwaite')
 plot.model.diagnostics(peak.count.model, 
                        subset(animal.multifields.count, is.multi)$animal, 
                        subset(animal.multifields.count, is.multi)$implant)

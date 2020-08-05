@@ -568,7 +568,7 @@ setDT(pc.beforetest.change.df)[day_desc.fst=='learning3 day#1' & day_desc.snd=='
 field.stability.model = lmerTest::lmer(field.cor ~  rew.active.fst + (1 + day_desc.fst | animal), 
                                        data=pc.beforetest.change.df, 
                                        subset=implant=='dCA1' & n > 1 & !is.na(rew.active.fst) & signif.si.fst)
-summary(field.stab.model)
+summary(field.stability.model)
 
 pc.beforetest.change.df %>%
   filter(n>1, !is.na(field.cor), signif.si.fst) %>%

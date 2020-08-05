@@ -170,6 +170,7 @@ cell.field.peaks.info = function(field,
     rew.peaks.count = length(loc.ordinals.with.peaks),
     current.rew.peaks.count = sum(day.rew.df[location_ordinal %in% loc.ordinals.with.peaks, current_loc], na.rm = TRUE),
     min.rew.dist = min.rew.dist.res$rew.dist[closer.reward.index],
+    closer.rew.angle = min.rew.dist.res$rew.angle[closer.reward.index],
     closer.rew.ordinal = min.rew.dist.res$location.ordinal[closer.reward.index]
   ))
 }
