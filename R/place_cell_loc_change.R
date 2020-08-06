@@ -453,7 +453,7 @@ left_join(bind_rows(filtered.cells.peaks2current.rew.dist, filtered.cells.peaks2
   scale_x_discrete(labels=c('habituation', 'learning1 probe', 'learning2 probe', 'learning3 probe'))
 ggsave('/tmp/translocated_distance.svg', units = 'cm', width=8, height=8)
 
-# DF with distance to the current reward, filtered to cells that remapped and 
+# DF with distance to the current reward, filtered to cells that 
 # were reward-active during the previous beforetest
 dist2current.rew.active = bind_rows(
   filter(beforetest.field.dist2current.rew, 
@@ -530,6 +530,7 @@ plot.model.diagnostics(rew.dist.model,
                        subset(dist2.current.rew.df, implant=='dCA1' & remapped)$animal,
                        subset(dist2.current.rew.df, implant=='dCA1' & remapped)$group)
 summary(rew.dist.model)
+anova(rew.dist.model, refit=FALSE, ddf='Satterthwaite')
 
 dist2.current.rew.df %>%
   filter(remapped) %>%
@@ -676,6 +677,89 @@ reward.cells.comparison =
   nrow = 2,
   dimnames = list(c("dCA1", "vCA1"), c("reward", "non-reward") ))
 fisher.test(reward.cells.comparison)
+
+# Attraction strength of rew active vs inactive cells
+## Compare habituation to fst moved
+field.attraction.fst.moved = 
+  dplyr::filter(trial.field.dist2moved.loc, day_desc == 'habituation day#3', moved_loc == 'fst') %>%
+  dplyr::mutate(is.rew.active.l2d1t = animal_cell %in% cells.transloc.rew.active.l2d1t,
+                is.rew.inactive.l2d1t = animal_cell %in% cells.transloc.rew.inactive.l2d1t) %>%
+  left_join(filter(beforetest.field.dist2current.rew, day_desc == 'learning2 day#1 test'),
+            suffix=c('.habit', '.fst'), 
+            by=c('implant', 'animal', 'cell_id', 'animal_cell')) %>%
+  filter(!is.na(date.fst)) %>%
+  dplyr::mutate(attraction.strength = calc.attraction.strength(min.rew.dist.habit, 
+                                                               closer.rew.angle.habit,
+                                                               min.rew.dist.fst,
+                                                               closer.rew.angle.fst))
+# Relation between previous to current distance to reward - suggestive of random remapping
+field.attraction.fst.moved %>%
+  filter(signif.si.fst) %>%
+  #filter(is.rew.active.l2d1t | is.rew.inactive.l2d1t) %>%
+  #ggplot(aes(x=min.rew.dist.habit * perc2dist, y=attraction.strength)) +
+  ggplot(aes(x=min.rew.dist.habit * perc2dist, y=min.rew.dist.fst * perc2dist)) +
+  geom_smooth(fill = 'grey80', method = 'lm') +
+  geom_point(aes(color=is.rew.active.l2d1t)) +
+  #geom_text(aes(label=animal_cell), label.size=0.2) +
+  #geom_abline(slope=1, intercept = 0) +
+  geom_hline(yintercept=20, linetype='dashed') +
+  facet_grid(implant ~ .) +
+  labs(x='Field distance to 1st rewarded location before learning (cm)',
+       y='Field distance to 1st rewarded location after learning (cm) ',
+       color='Cell active at 1st reward location')
+  gtheme
+
+## Compared fst learning to second learning and second to third
+field.attraction.snd.moved = bind_rows(
+    beforetest.field.dist2moved.loc %>%
+      filter(day_desc == 'learning2 day#1 test' | day_desc == 'learning3 day#1 test') %>%
+      filter(moved_loc=='snd' | moved_loc == 'thd') %>%
+      dplyr::mutate(comparison='first'),
+    beforetest.field.dist2moved.loc %>%  
+      filter(day_desc == 'learning3 day#1 test' | day_desc == 'learning3 day#3 test') %>%
+      filter(moved_loc=='thd' | moved_loc == 'fourth') %>%
+      dplyr::mutate(comparison='second')
+    ) %>%
+  dplyr::arrange(animal_cell, comparison, moved_loc, day_desc) %>% 
+  dplyr::group_by(animal, cell_id, animal_cell, exp, implant, comparison, moved_loc) %>%
+  dplyr::summarize(n=n(),
+                   signif.si.fst = signif.si[1],
+                   signif.si.snd = signif.si[2],
+                   min.rew.dist.fst = min.rew.dist[1],
+                   min.rew.dist.snd = min.rew.dist[2],
+                   attraction.strength = ifelse(n == 2, 
+                                                calc.attraction.strength(min.rew.dist[1], 
+                                                                         closer.rew.angle[1],
+                                                                         min.rew.dist[2],
+                                                                         closer.rew.angle[2]),
+                                             NA)) %>% 
+  filter(n == 2) %>% 
+  dplyr::group_by(animal, cell_id, animal_cell, exp, implant, comparison, signif.si.fst, signif.si.snd) %>%
+  dplyr::summarise(stronger.attr.rew = which.min(attraction.strength),
+                   attraction.strength = min(attraction.strength),
+                   min.rew.dist.fst = min.rew.dist.fst[stronger.attr.rew],
+                   min.rew.dist.snd = min.rew.dist.snd[stronger.attr.rew]) %>%
+  dplyr::mutate(is.rew.active.l2d1t = (animal_cell %in% cells.transloc.rew.active.l2d1t) & (comparison == 'first'),
+                is.rew.inactive.l2d1t = (animal_cell %in% cells.transloc.rew.inactive.l2d1t) & (comparison == 'first'),
+                is.rew.active.l3d1t = (animal_cell %in% cells.transloc.rew.active.l3d1t) & (comparison == 'second'),
+                is.rew.inactive.l3d1t = (animal_cell %in% cells.transloc.rew.inactive.l3d1t) & (comparison == 'second'))
+  
+field.attraction.snd.moved %>%
+  filter(signif.si.fst) %>%
+  filter((comparison == 'first' & (is.rew.active.l2d1t | is.rew.inactive.l2d1t)) |
+         (comparison == 'second' & (is.rew.active.l3d1t | is.rew.inactive.l3d1t)) )%>%
+  #ggplot(aes(x=min.rew.dist.fst * perc2dist, y=min.rew.dist.snd * perc2dist)) +
+  ggplot(aes(x=min.rew.dist.fst * perc2dist, y=attraction.strength)) +
+  geom_point(aes(color=(is.rew.active.l2d1t | is.rew.active.l3d1t))) +
+  #geom_text(aes(label=animal_cell), label.size=0.2) +
+  #geom_abline(slope=1, intercept = 0) +
+  geom_hline(yintercept=0.0, linetype='dashed') +
+  facet_grid(implant ~ .) +
+  labs(color='Reward-active cell',
+       #y='Field distance to rewarded location after learning (cm) ',
+       y='Attraction strength',
+       x='Field distance to rewarded location before learning (cm)')
+  gtheme
 
 ################
 # Cluster plot

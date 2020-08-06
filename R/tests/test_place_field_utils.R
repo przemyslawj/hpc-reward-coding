@@ -1,6 +1,8 @@
 library(testthat)
 
+###################################
 context('Tests for find peaks')
+###################################
 
 test_that('Returns a single point peak', {
   field = matrix(0, nrow=20, ncol=20)
@@ -52,3 +54,31 @@ test_that('Returns peak COM', {
   expect_equal(c(5, 4.75), as.vector(peaks.rowcol[2,]))
 })
 
+###########################################
+context('Tests for attraction strength')
+###########################################
+
+test_that('Attraction strength correct', {
+  res = calc.attraction.strength(sqrt(2), 45, sqrt(2), 45)
+  expect_equal(res, 0)
+  
+  res = calc.attraction.strength(1, 45, 0, 45)
+  expect_equal(res, 1)
+  
+  res = calc.attraction.strength(1, 45, 1, 0)
+   expect_equal(res, 0)
+  
+  res = calc.attraction.strength(1, 45, 2, 45)
+  expect_equal(res, 1/3)
+  
+  # Right Triangle with dist1=5, dist2=4, x=3
+  res = calc.attraction.strength(5, acos(4/5) * 180/pi, 4, 0)
+  expect_equal(res, 3/5 * (5-4) / (5+4))
+  
+  # Test parallel processing
+  res = calc.attraction.strength(c(1, 1, 1, 1), 
+                                 c(45, 45, 45, 45), 
+                                 c(1, 0, 1, 2), 
+                                 c(45, 45, 0, 45))
+  expect_equal(res, c(0, 1, 0, 1/3))
+})

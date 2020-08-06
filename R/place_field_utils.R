@@ -198,6 +198,23 @@ calc.field.peaks.info = function(day,
   })
 }
 
+# Calculates how stronly a field COM was attracted to the rewarded location.
+# Defined as (fst.dist - snd.dist) / (fst.dist + snd.dist) * cos(theta),
+# where theta is an angle between fst and snd vector. the argument angles are 
+# relative to the reward.
+calc.attraction.strength = function(fst.dist, fst.angle,
+                                    snd.dist, snd.angle) {
+  fst.z = complex(modulus = fst.dist, argument = fst.angle / 180 * pi)
+  snd.z = complex(modulus = snd.dist, argument = snd.angle / 180 * pi)
+  # x vector is a vectoral displacement of the field COM.
+  x.vec = fst.z - snd.z
+  x.norm = ifelse(Mod(x.vec) == 0, 1, Mod(x.vec))
+  
+  cos_theta = (fst.dist^2 + x.norm^2 - snd.dist^2) / (2 * fst.dist * x.norm) 
+  
+  (fst.dist - snd.dist) / (fst.dist + snd.dist) * cos_theta
+}
+
 
 day.normalize.fields = function(pf.df) {
   pf.df %>%
