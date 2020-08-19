@@ -35,16 +35,12 @@ prepare.run.dirtraces = function(data.traces,
   data.traces = data.traces[exp_title != 'homecage',]
   detect.events(data.traces, deconv.threshold=event.deconv.threshold)
 
-  setorder(data.traces, trial_id, cell_id, timestamp)
-  # running speed min=2cm/s, avg min 4 cm/s
-  running.index = isRunning(data.traces, 1.6, 3.3, 500)
-  data.traces$is_running = running.index
-  # running speed min=0.5cm/s, avg min 4 cm/s
-  #running.index = isRunning(data.traces, 0.4, 3.3, 500)
-  #running.index = isRunning(data.traces, 2, 4, 500)
+  setorder(data.traces, exp_title, trial_id, cell_id, timestamp)
+  # running speed avg > 4 cm/s in 0.5 s window
+  data.traces = add.running.col(data.traces, 3.3, 10)
 
   response.bin.quantiles = c(0.95, 1.0)
-  binned.traces.run = bin.time.space(data.traces[running.index & x >= 0 & y >= 0, ],
+  binned.traces.run = bin.time.space(data.traces[running.index & x > 0 & y > 0, ],
                                      nbins.x = nbins,
                                      nbins.y = nbins,
                                      get.bin.thresholds.fun = get.quantiles.fun(response.bin.quantiles),

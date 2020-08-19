@@ -49,7 +49,7 @@ data.traces = data.table(data.traces)
 ```{r}
 cell_name = 355
 
-cell.df = data.traces[cell_id == cell_name & smooth_trans_x >= 0 & smooth_trans_y >= 0,]
+cell.df = data.traces[cell_id == cell_name & smooth_trans_x > 0 & smooth_trans_y > 0,]
 cell.events = cell.df[nevents > 0,]
 trace.col = 'deconv_trace'
 frame.hz = 20

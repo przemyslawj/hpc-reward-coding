@@ -301,7 +301,7 @@ hab_loc$total_dist = rep(0, nrow(hab_loc))
 hab_loc$total_frames = rep(0, nrow(hab_loc))
 for (i in 1:nrow(hab_loc)) {
   tracking.df = read_csv(hab_loc$filepath[i], col_types = cols())
-  tracking.df.filtered = filter(tracking.df, trans_x >= 0, trans_y >= 0)
+  tracking.df.filtered = filter(tracking.df, trans_x > 0, trans_y > 0)
   crossings = crossings4positions(
                       tracking.df.filtered$smooth_trans_x, tracking.df.filtered$smooth_trans_y, 
                       hab_loc$trans_x[i], hab_loc$trans_y[i], 10)

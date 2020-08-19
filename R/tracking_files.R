@@ -7,7 +7,7 @@ get_tracking_files = function(root_dat_dir) {
                           date = character(),
                           animal = factor(),
                           trial = integer(),
-                          exp_title = logical())
+                          exp_title = character())
   
   all_subfiles = list.files(root_dat_dir, full.names=TRUE)
   dated_subdirs = all_subfiles[file.info(all_subfiles)$isdir]

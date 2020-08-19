@@ -235,7 +235,7 @@ plot.cell.trials = function(cell.df, trace.var='trace', facet.ncols=3) {
 }
 
 cell_name = 183
-cell.df = data.traces.run[cell_id == cell_name & x >= 0 & y >= 0, ]
+cell.df = data.traces.run[cell_id == cell_name & x > 0 & y > 0, ]
 binned.cell.df = bin.time.space(cell.df, 
                                 nbins.x = nbins,
                                 nbins.y = nbins,

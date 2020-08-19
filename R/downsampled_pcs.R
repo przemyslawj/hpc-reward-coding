@@ -62,7 +62,7 @@ prepare.timebinned.run.traces = function(data.traces, timebin.dur.msec) {
   # running speed min=2cm/s, avg min 4 cm/s
   running.index = isRunning(data.traces, 1.6, 3.3, 500)
   #running.index = isRunning(data.traces, 2, 4, 500)
-  timebinned.run = timebin.traces(data.traces[running.index & x >= 0 & y >= 0, ],
+  timebinned.run = timebin.traces(data.traces[running.index & x > 0 & y > 0, ],
                                   timebin.dur.msec = timebin.dur.msec)
   return(timebinned.run)
 }

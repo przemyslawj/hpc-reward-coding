@@ -82,6 +82,23 @@ is.at.reward = function(velocities, rew.dist, timestamps, running.thresh = 1.5, 
   return(res[1:length(res) - 1])
 }
 
+# Returns logical vector with TRUE for timestamps which are on the direct approach to reward0.
+# The approach is capped at max duration.
+is.reward.approach = function(atReward0, atReward1, timestamps, max.approach.dur.sec=3) {
+  arrived.rew0 = min(which(atReward0 > 0))
+  arrived.rew1 = min(which(atReward1 > 0))
+  approach.rew0.start.msec = ifelse(timestamps[arrived.rew0] < timestamps[arrived.rew1],
+                                    max(0, timestamps[arrived.rew0] - max.approach.dur.sec * 1000),
+                                    max(timestamps[arrived.rew1], timestamps[arrived.rew0] - max.approach.dur.sec * 1000))
+  (timestamps >= approach.rew0.start.msec) & (timestamps <= timestamps[arrived.rew0])
+}
+
+reward.approach.timestamp = function(atReward, timestamps) {
+  arrived.rew = min(which(atReward > 0))
+  arrived.rew.msec = timestamps[arrived.rew]
+  timestamps - arrived.rew.msec
+}
+
 next.goal.reward = function(is_at_rew0, is_at_rew1) {
   trial_end = length(is_at_rew0)
   next.goal = rep(-1, trial_end)
