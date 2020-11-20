@@ -11,8 +11,7 @@ source('tracking_files.R')
 source('tracking_info.R')
 source('traces_input.R')
 
-rew_zone_radius = 15
-frame_rate = 24
+behav_cam_frame_rate = 24
 root_dat_dir = '/mnt/DATA/Prez/cheeseboard/'
 
 get_time_arrived = function(at.reward.vec, timestamps) {
@@ -67,18 +66,20 @@ get_stats = function(tracking_df, animal_locations.df) {
   roi_durs = get.crossing.durations(inside_roi, dist_df$timestamp)
   roi_velocity = dist_df$velocity[which(inside_roi==1)]
   
-  frame_30s = frame_rate * 30
-  frame_60s = frame_rate * 60
-  frame_90s = frame_rate * 90
-  frame_120s = frame_rate * 120
+  frame_30s = behav_cam_frame_rate * 30
+  frame_60s = behav_cam_frame_rate * 60
+  frame_90s = behav_cam_frame_rate * 90
+  frame_120s = behav_cam_frame_rate * 120
   
   main_summary = list(
               total_dist=total_dist, 
-              dist_30s=sum(dist_df$dist_trans[1:frame_30s],na.rm=TRUE),
-              dist_60s=sum(dist_df$dist_trans[1:frame_60s],na.rm=TRUE),
+              dist_0_30s=sum(dist_df$dist_trans[1:frame_30s],na.rm=TRUE),
+              dist_30_60s=sum(dist_df$dist_trans[frame_30s:frame_60s],na.rm=TRUE),
+              dist_60_90s=sum(dist_df$dist_trans[frame_60s:frame_90s],na.rm=TRUE),
+              dist_90_120s=sum(dist_df$dist_trans[frame_90s:frame_120s],na.rm=TRUE),
               total_frames=total_frames, 
-              crossings_n=get_crossings_n(valid_pos_df$dist_reward0, frame_rate=frame_rate) +
-                          get_crossings_n(valid_pos_df$dist_reward1, frame_rate=frame_rate),
+              crossings_n=get_crossings_n(valid_pos_df$dist_reward0, frame_rate=behav_cam_frame_rate) +
+                          get_crossings_n(valid_pos_df$dist_reward1, frame_rate=behav_cam_frame_rate),
               crossings_0_30s=get_crossings_n(valid_pos_df$dist_reward0[1:frame_30s]) +
                               get_crossings_n(valid_pos_df$dist_reward1[1:frame_30s]),
               crossings_30_60s=get_crossings_n(valid_pos_df$dist_reward0[frame_30s:frame_60s]) +
@@ -134,10 +135,30 @@ locations.df = map_dfr(rootdirs, read_locations) %>%
   add_prev_locations()
 
 files.df = map_dfr(tracking_rootdirs, ~ get_tracking_files(file.path(.x, 'learning'))) %>%
-  filter(exp_title != 'homecage')
+  filter(exp_title != 'homecage') %>%
+  # Used to concatenate the test tracking files with the same id
+  mutate(joined_tracking_id = paste(date, animal, exp_title, sep='_'),
+         joined_tracking_id = ifelse(exp_title == 'trial', 
+                                     paste(date, animal, exp_title, trial, sep='_'), 
+                                     paste(date, animal, exp_title, sep='_')))
 
-for (i in 1:nrow(files.df)) {
-  tracking_df = suppressWarnings(read_csv(files.df$filepath[i], col_types = cols()))
+for (joined_tracking_id in unique(files.df$joined_tracking_id)) {
+  file_indecies = which(files.df$joined_tracking_id == joined_tracking_id)
+  tracking_df = data.frame()
+  frame_start = 0
+  timestamp_start = 0
+  # Concatenate tracking for files with the same id
+  for (i in file_indecies) {
+    file_tracking_df = suppressWarnings(read_csv(files.df$filepath[i], col_types = cols()))
+    file_tracking_df$frame = file_tracking_df$frame + frame_start
+    file_tracking_df$timestamp = file_tracking_df$timestamp + timestamp_start
+    frame_start = file_tracking_df$frame[nrow(file_tracking_df)]
+    timestamp_start = file_tracking_df$timestamp[nrow(file_tracking_df)]
+    tracking_df = bind_rows(tracking_df, file_tracking_df)
+  }
+
+  i = file_indecies[1]
+  
   tracking_df$inside_roi = as.logical(tracking_df$inside_roi)
   print(files.df$filepath[i])
       
@@ -164,8 +185,10 @@ for (i in 1:nrow(files.df)) {
                        animal=files.df$animal[i],
                        trial_n=files.df$trial[i],
                        dist=res['total_dist'],
-                       dist_30s=res['dist_30s'],
-                       dist_60s=res['dist_60s'],
+                       dist_0_30s=res['dist_0_30s'],
+                       dist_30_60s=res['dist_30_60s'],
+                       dist_60_90s=res['dist_60_90s'],
+                       dist_90_120s=res['dist_90_120s'],
                        total_frames=res['total_frames'],
                        exp_title=files.df$exp_title[i],
                        location_set=current_reward_pos$location_set[1],

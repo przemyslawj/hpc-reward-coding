@@ -31,7 +31,7 @@ gen_imgs_dir = '~/tmp/cheeseboard/learning/'
 df = read_csv(paste0(dir, '/trial_stats.csv'))
 locations.df = map_dfr(rootdirs, read_locations)
 
-frame.hz = 24
+behav_cam_frame_rate = 24
 ```
 
 
@@ -85,7 +85,7 @@ Duration of the trials
 gdur = d %>%
   filter(time_finished > 0) %>%
   #group_by(animal,learning_day1) %>%
-  #summarise(mdur=mean(total_frames/frame.hz)) %>%
+  #summarise(mdur=mean(total_frames/behav_cam_frame_rate)) %>%
   ggplot() +
   geom_boxplot(aes(x=learning_day1, y=time_finished)) +
   #geom_jitter(aes(x=learning_day1, y=mdur, color=animal),height=0, width=0.1, size=1) +
@@ -114,7 +114,7 @@ Total distance travelled per mouse
 d %>% 
   filter(time_finished > 0) %>%
   group_by(animal, learning_day1) %>%
-  dplyr::summarise(mdist=mean(total_dist), sddist=sd(total_dist), mdur=mean(total_frames/frame.hz), sddur=sd(total_frames/frame.hz)) %>%
+  dplyr::summarise(mdist=mean(total_dist), sddist=sd(total_dist), mdur=mean(total_frames/behav_cam_frame_rate), sddur=sd(total_frames/behav_cam_frame_rate)) %>%
   ggplot() +
   geom_line(aes(x=learning_day1, y=mdist, group=animal, color=animal)) 
   #geom_ribbon(aes(x=learning_day1, ymin=mdist-sddist, ymax=mdist+sddist, group=animal, fill=animal), alpha=0.1)
@@ -195,8 +195,8 @@ d2 %>%
             sddist=sd(norm_dist),
             mrew_dwell_pct=mean(rew_dwell_pct),
             sdrew_dwell_pct=sd(rew_dwell_pct),
-            mdur=mean(total_frames/frame.hz), 
-            sddur=sd(total_frames/frame.hz)) %>%
+            mdur=mean(total_frames/behav_cam_frame_rate), 
+            sddur=sd(total_frames/behav_cam_frame_rate)) %>%
   ggplot() +
   geom_line(aes(x=learning_day1, y=mrew_dwell_pct, group=animal, color=animal)) 
 
@@ -252,10 +252,15 @@ df %>%
 # Number of crossings in trial tests
 ```{r}
 test.trial.df = df %>%
-  mutate(learning_day1_f = as.factor(learning_day1)) %>%
-  mutate(crossings_0_60s=crossings_0_30s+crossings_30_60s) %>%
-  mutate(crossings_per_min=crossings_n/(total_frames/frame.hz) * 60) %>%
-  mutate(norm_crossings=crossings_0_30s * 100.0 / dist_30s) %>%
+  mutate(learning_day1_f = as.factor(learning_day1),
+         crossings_0_60s=crossings_0_30s+crossings_30_60s,
+         crossings_0_120s=crossings_0_60s+crossings_60_90s+crossings_90_120s,
+         crossings_per_min=crossings_n/(total_frames/behav_cam_frame_rate) * 60,
+         dist_0_60s = dist_0_30s + dist_30_60s,
+         dist_0_120s = dist_0_60s + dist_60_90s + dist_90_120s,
+         norm_crossings_30s=crossings_0_30s * 100.0 / dist_0_30s,
+         norm_crossings_60s=crossings_0_60s * 100.0 / dist_0_60s,
+         norm_crossings_120s=crossings_0_120s * 100.0 / dist_0_120s) %>%
   filter(exp_title == 'beforetest') 
 
 gcross = test.trial.df %>%
@@ -271,8 +276,8 @@ ggsave(filename='gcross.svg', plot=gcross, width=3)
 
 gcross.ratio = test.trial.df %>%
   ggplot() +
-  geom_boxplot(aes(x=learning_day1_f, y=crossings_0_60s/(dist_60s/20.0/25)), outlier.size=0) +
-  geom_jitter(aes(x=learning_day1_f, y=crossings_0_60s/(dist_60s/20.0/25), color=animal),height=0, width=0.1, size=3) +
+  geom_boxplot(aes(x=learning_day1_f, y=crossings_0_60s/(dist_0_60s/20.0/25)), outlier.size=0) +
+  geom_jitter(aes(x=learning_day1_f, y=crossings_0_60s/(dist_0_60s/20.0/25), color=animal),height=0, width=0.1, size=3) +
   xlab('Test day') +
   ylab('# Crossings / \n# Crossings per some norm distance') +
   gtheme +
@@ -301,16 +306,23 @@ hab_loc$total_dist = rep(0, nrow(hab_loc))
 hab_loc$total_frames = rep(0, nrow(hab_loc))
 for (i in 1:nrow(hab_loc)) {
   tracking.df = read_csv(hab_loc$filepath[i], col_types = cols())
-  tracking.df.filtered = filter(tracking.df, trans_x > 0, trans_y > 0)
+  tracking.df.filtered = filter(tracking.df, trans_x > 0, trans_y > 0) %>%
+    arrange(timestamp)
   crossings = crossings4positions(
                       tracking.df.filtered$smooth_trans_x, tracking.df.filtered$smooth_trans_y, 
-                      hab_loc$trans_x[i], hab_loc$trans_y[i], 10)
+                      hab_loc$trans_x[i], hab_loc$trans_y[i], rew_zone_radius)
   hab_loc$crossings[i] = crossings
-  frame_60s = frame.hz*60
-  hab_loc$crossings_0_60s = crossings4positions(
+  frame_60s = behav_cam_frame_rate * 60
+  frame_120s = behav_cam_frame_rate * 120
+  hab_loc$crossings_0_60s[i] = crossings4positions(
                       tracking.df.filtered$smooth_trans_x[1:frame_60s], tracking.df.filtered$smooth_trans_y[1:frame_60s], 
-                      hab_loc$trans_x[i], hab_loc$trans_y[i], 10)
+                      hab_loc$trans_x[i], hab_loc$trans_y[i], rew_zone_radius)
+  hab_loc$crossings_0_120s[i] = crossings4positions(
+                      tracking.df.filtered$smooth_trans_x[1:frame_120s], tracking.df.filtered$smooth_trans_y[1:frame_120s], 
+                      hab_loc$trans_x[i], hab_loc$trans_y[i], rew_zone_radius)
   distances = vec_dist(tracking.df.filtered$smooth_trans_x, tracking.df.filtered$smooth_trans_y)
+  hab_loc$dist_0_60s[i] = sum(distances[1:frame_60s])
+  hab_loc$dist_0_120s[i] = sum(distances[1:frame_120s])
   hab_loc$total_dist[i] = sum(distances)
   hab_loc$total_frames[i] = last(tracking.df.filtered$frame) - first(tracking.df.filtered$frame)
 }
@@ -321,6 +333,9 @@ Average across different trials
 hab.loc.set.crossings = group_by(hab_loc, filepath, filename, date, animal, trial, exp_title, location_set) %>%
   dplyr::summarize(crossings = sum(crossings),
                    crossings_0_60s = sum(crossings_0_60s),
+                   crossings_0_120s = sum(crossings_0_120s),
+                   dist_0_60s = mean(dist_0_60s),
+                   dist_0_120s = mean(dist_0_120s),
                    total_dist = mean(total_dist),
                    total_frames = mean(total_frames)) %>%
   dplyr::mutate(norm_crossings = crossings * 100.0/ total_dist)
@@ -328,8 +343,11 @@ hab.loc.set.crossings = group_by(hab_loc, filepath, filename, date, animal, tria
 mhab_loc = hab.loc.set.crossings %>%
   group_by(animal, location_set) %>%
   dplyr::summarise(mnorm_crossings = mean(norm_crossings),
-                   mcrossings_0_60s = mean(crossings_0_60s)) %>%
-  dplyr::rename(norm_crossings=mnorm_crossings, crossings_0_60s=mcrossings_0_60s, animal=animal) %>%
+                   mcrossings_0_60s = mean(crossings_0_60s),
+                   mcrossings_0_120s = mean(crossings_0_120s)) %>%
+  dplyr::rename(norm_crossings=mnorm_crossings, 
+                crossings_0_60s=mcrossings_0_60s, 
+                crossings_0_120s=mcrossings_0_120s) %>%
   dplyr::mutate(type="habituation")
 ```
 
@@ -340,9 +358,11 @@ mhab_loc.perdate = test.trial.df %>%
   dplyr::select(animal, location_set, date) %>%
   left_join(mhab_loc.filtered, by=c('animal', 'location_set'))
 
+mouse.meta.df = read.mouse.meta(rootdirs)
 trials.meta.df$date = char2date(trials.meta.df$date)
 test.trial.df.joined = test.trial.df %>%
-  dplyr::select(animal, location_set, date, norm_crossings, crossings_0_60s) %>%
+  dplyr::select(animal, location_set, date, norm_crossings_120s, crossings_0_60s, crossings_0_120s) %>%
+  dplyr::rename(norm_crossings = norm_crossings_120s) %>%
   dplyr::mutate(type="test")  %>%
   bind_rows(mhab_loc.perdate) %>%
   left_join(dplyr::select(trials.meta.df, -location_set), by=c('animal', 'date')) %>%
@@ -385,16 +405,14 @@ wilcox.test(norm_crossings ~ type, data=df, paired=TRUE)
 ```
 
 ```{r}
-
-
 # Paired comparisons of crossings counts
 gcross.paired.absolute = test.trial.df.joined %>%
-  dplyr::select(animal, date, location_set, crossings_0_60s, type) %>%
-  spread(type, crossings_0_60s) %>%
+  dplyr::select(animal, date, location_set, crossings_0_120s, type) %>%
+  spread(type, crossings_0_120s) %>%
   mutate(cross_diff = test-habituation) %>%
   ggplot() +
   #geom_boxplot(aes(x=location_set, y=cross_diff)) +
-  geom_dotplot(aes(x=location_set, y=cross_diff, fill=animal), binaxis='y', dotsize=2) +
+  geom_dotplot(aes(x=location_set, y=cross_diff, fill=animal), binaxis='y', dotsize=1) +
   xlab('Reward location set') +
   ylab('Increase in #crossings (60s)\nafter learning vs habituation') +
   ylim(c(0,8)) +

@@ -3,7 +3,7 @@ library(purrr)
 library(stringr)
 
 source('utils.R')
-
+rew_zone_radius = 15
 
 is.date <- function(x) !is.na(char2date(x))
 

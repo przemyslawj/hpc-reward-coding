@@ -7,10 +7,17 @@ source('utils.R')
 root_dir07 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
 root_dir08 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
 root_dir01 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
-rootdirs = c(root_dir07, root_dir08, root_dir01)
+root_dir10 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
+#rootdirs = c(root_dir07, root_dir08, root_dir01, root_dir10)
+rootdirs = c(root_dir10)
 tracking_rootdirs = stringr::str_replace(rootdirs, '-down/down_2', '')
 
 caimg_result_dirs = c(
+  get.subject.result.dirs(root_dir10, 'O-TR'),
+  get.subject.result.dirs(root_dir10, 'R-TR'),
+  get.subject.result.dirs(root_dir10, 'M-BR'),
+  get.subject.result.dirs(root_dir10, 'N-BR'),
+  get.subject.result.dirs(root_dir10, 'N-BL'),
   get.subject.result.dirs(root_dir08, 'E-BL'),
   get.subject.result.dirs(root_dir08, 'E-TR'),
   get.subject.result.dirs(root_dir08, 'F-BL'),
