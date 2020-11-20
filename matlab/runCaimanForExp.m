@@ -2,11 +2,12 @@
 % The script requires that the variables: animal and expMonth are present in
 % the environment
 
-%animal = 'D-BR';
-%expMonth = '2020-01';
-%expDir = ['/home/prez/neurodata/cheeseboard-down/down_2/' expMonth];
-expDir = ['/mnt/DATA/Prez/cheeseboard/' expMonth];
-overwrite = 0;
+animal = 'M-BR';
+expMonth = '2020-10';
+expDir = ['/mnt/DATA/Prez/cheeseboard-down/down_2/' expMonth];
+%expDir = ['/mnt/DATA/Prez/cheeseboard/' expMonth];
+overwrite = 1;
+v3 = 0;
 
 expTitles = {'habituation', 'learning'};
 for expTitle = expTitles

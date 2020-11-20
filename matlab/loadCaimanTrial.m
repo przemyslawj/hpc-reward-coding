@@ -60,23 +60,25 @@ trackingVars = {'inside_roi', 'smooth_trans_x', 'smooth_trans_y',...
 
 for session_i = 1:numel(session_info.session_fpaths)
     session_fpath_parts = split(session_info.session_fpaths{session_i}, filesep);
-    exp_title = session_fpath_parts{end-3};
+    ts_file_parts = split(session_info.timestamp_files{session_i}, filesep);
 
     traceBySession = mat2cell(ms.RawTraces, sessionLengths);
     deconvTraceBySession = mat2cell(ms.DeconvTraces, sessionLengths);
     sessionTimestamps = timestampsBySession{session_i}';
-    sessionNo = str2num(replace(session_fpath_parts{end}, 'Session', ''));
 
     %%
+    if v3 == 1
+        sessionNo = str2num(replace(session_fpath_parts{end}, 'Session', ''));
+        trackingFilepath = getTrackingFilepathV3(sessionNo);
+        exp_title = session_fpath_parts{end-3};
+    else
+        sessionNo = str2num(replace(ts_file_parts{end-3}, 'Session', ''));
+        trackingFilepath = getTrackingFilepathV4(datedRootDir, ...
+            dateStr, animal, ts_file_parts);
+        exp_title = ts_file_parts{end-5};
+    end
     if strcmp(exp_title, 'test')
         exp_title = 'beforetest';
-    end
-    
-	trackingDir = fullfile(datedRootDir, exp_title, 'movie', 'tracking');
-    filenamepattern = [ dateStr '*' '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
-    trackfiles = dir(fullfile(trackingDir, filenamepattern));
-    if numel(trackfiles) > 0
-        trackingFilepath = fullfile(trackingDir, trackfiles(1).name)
     end
     if 	~exist(trackingFilepath, 'file')
         warning('No tracking file for session: %s', session_info.session_fpaths{session_i})
@@ -152,3 +154,27 @@ cell_mapping.cell_no = (1:numel(ms.cellId))';
 cell_mapping.cell_id = ms.cellId';
 writetable(cell_mapping, [caimg_analysis_dir filesep 'filtered' filesep 'cell_mapping.csv']);
 
+%%
+function trackingFilepath = getTrackingFilepathV3(sessionNo)
+	trackingDir = fullfile(datedRootDir, exp_title, 'movie', 'tracking');
+    filenamepattern = [ dateStr '*' '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
+    trackfiles = dir(fullfile(trackingDir, filenamepattern));
+    if numel(trackfiles) > 0
+        trackingFilepath = fullfile(trackingDir, trackfiles(1).name)
+    else
+        trackingFilepath = '/non-existant-path/';
+    end
+end
+
+function trackingFilepath = getTrackingFilepathV4(datedRootDir, ...
+        dateStr, animal, ts_file_parts)
+    trackingDir = fullfile(datedRootDir, ts_file_parts{(end-5):(end-2)},...
+        'BehavCam', 'tracking');
+    filenamepattern = [ dateStr '*' '_' animal '_trial_*_positions.csv' ];
+    trackfiles = dir(fullfile(trackingDir, filenamepattern));
+    if numel(trackfiles) > 0
+        trackingFilepath = fullfile(trackingDir, trackfiles(1).name)
+    else 
+        trackingFilepath = '/non-existant-path/';
+    end
+end
