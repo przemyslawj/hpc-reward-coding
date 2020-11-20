@@ -35,8 +35,15 @@ find.caimg.dir = function(caimg_result_dirs, subject, date) {
   return(dirs[[1]])
 }
 
+char2date = function(dirnames) {
+  origin = '1970-01-01'
+  purrr::map_dbl(dirnames, 
+                 ~ ifelse(grepl('_', .x), as.Date(.x, '%Y_%m_%d'), as.Date(.x)) ) %>% 
+    as.Date.numeric(origin=origin)
+}
+
 max.consecutive.days = function(dates) {
-  ordered.dates = ordered(dates) %>% as.Date
+  ordered.dates = ordered(dates) %>% char2date
   days.gap = diff(c(as.Date('2018-01-01'), ordered.dates, as.Date('2100-01-01')))
   max(diff(which(days.gap != 1)))
 }

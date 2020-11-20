@@ -1,5 +1,8 @@
 library(dplyr)
 
+source('utils.R')
+
+
 get_tracking_files = function(root_dat_dir) {
   print(paste0('Getting tracking files for dir=', root_dat_dir))
   tracking_files = tibble(filepath = character(), 
@@ -18,14 +21,18 @@ get_tracking_files = function(root_dat_dir) {
         next
       }
       
-      tracking_dat_dir = file.path(dated_dir, exp_title, 'movie/tracking/')
-      
-      for (filename in list.files(tracking_dat_dir, pattern='*.csv$')) {
+      tracking_files_list = list.files(file.path(dated_dir, exp_title), 
+                                       pattern='*_positions.csv', 
+                                       recursive=TRUE,
+                                       full.names = TRUE)
+
+      for (filepath in tracking_files_list) {
+        filename = basename(filepath)
         fileparts = strsplit(filename,'_')[[1]]
         date_str = basename(dated_dir)
         
-        animal = fileparts[2]
-        trial_n=fileparts[4]
+        animal = fileparts[length(fileparts)-3]
+        trial_n = fileparts[length(fileparts)-1]
         if (endsWith(date_str, '_test')) {
           date_str = substring(date_str, 1, nchar(date_str) - nchar('_test'))
           if (animal == 'test') {
@@ -34,8 +41,8 @@ get_tracking_files = function(root_dat_dir) {
           }
         } 
         tracking_files = add_row(tracking_files, 
-                                 filepath=paste0(tracking_dat_dir, filename),
-                                 date=date_str, 
+                                 filepath=filepath,
+                                 date=date_str,
                                  filename=basename(filename), 
                                  animal=animal, 
                                  trial=as.integer(trial_n), 
@@ -43,5 +50,6 @@ get_tracking_files = function(root_dat_dir) {
       }
     }
   }
+  tracking_files$date = char2date(tracking_files$date)
   return(tracking_files)
 }

@@ -70,6 +70,13 @@ pop.traces
 ```
 Draw population activity
 ```{r}
+source('place_field_utils.R')
+all.locations.df = map_dfr(rootdirs, read_locations)
+rewards.df =  all.locations.df %>%
+  filter(!is_test) %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
+
 large.pop.events = filter(pop.traces, pop.events > 0.05)
 pop.traces$trial = as.factor(pop.traces$trial)
 ggplot(pop.traces) +
@@ -162,7 +169,7 @@ g.raster = plot.time.activity.raster(
 plot_grid(g.raster, g.behav, ncol=1, rel_heights = c(2, 1))
 ```
 
-TOOO: identify walking bouts
+TOOO: identify walking bouts: their starts and ends
 ```{r}
 
 ```
@@ -177,25 +184,26 @@ plot.time.activity.raster(df.joined[is.active==TRUE], norm_deconv_trace)
 
 ```{r}
 goal.cell.max.dist = 20
+in.reward.zone.sec = df.joined[dist_reward1 < goal.cell.max.dist * perc2dist, 
+                               unique(trial_time_bin * (timebin.dur.msec / 1000))]
+
 library(MASS)
 regressed.df = df.joined %>%
   filter(is.active) %>%
   filter(nevents > 0) %>%
-  filter(timestamp > 35 * 1000) %>%
-  dplyr::mutate(trial.time.sec = trial_time_bin * (timebin.dur.msec / 1000))
+  dplyr::mutate(trial.time.sec = trial_time_bin * (timebin.dur.msec / 1000))  %>%
+  filter(trial.time.sec > 35) 
 
-#seq.model = lm(cell_order ~ trial.time.sec, data=regressed.df)
-seq.model = MASS::ltsreg(cell_order ~ trial.time.sec, data=regressed.df)
-summary(seq.model)
-seq.model$coefficients
-
-in.reward.zone.sec = df.joined[cell_id == regressed.df$cell_id[1] & dist_reward1 < goal.cell.max.dist * perc2dist, 
-                               .(trial.time.sec = trial_time_bin * (timebin.dur.msec / 1000))]
-
+seq.model.before = MASS::ltsreg(cell_order ~ trial.time.sec, data=regressed.df, subset = trial.time.sec < in.reward.zone.sec)
+summary(seq.model.before)
+#seq.model.before$coefficients
+seq.model.rew = MASS::ltsreg(cell_order ~ trial.time.sec, data=regressed.df, subset = trial.time.sec >= in.reward.zone.sec[1] & trial.time.sec < 53)
+summary(seq.model.rew)
 
 ggplot(regressed.df, aes(x=trial.time.sec, y=cell_order)) +
   geom_point() +
-  geom_abline(intercept=-seq.model$coefficients[1], slope = -seq.model$coefficients[2]) +
+  geom_abline(intercept=-seq.model.before$coefficients[1], slope = -seq.model.before$coefficients[2]) +
+  geom_abline(intercept=-seq.model.rew$coefficients[1], slope = -seq.model.rew$coefficients[2]) +
   scale_y_reverse() +  
   geom_vline(xintercept = min(in.reward.zone.sec), linetype='dashed') +
   gtheme
@@ -206,12 +214,12 @@ ggplot(regressed.df, aes(x=trial.time.sec, y=cell_order)) +
 ## Plot by distance run
 ```{r}
 cell.order.df = order.cells.by.max.val(trial.traces[timestamp > 35 * 1000, ])
-max.moved.dist = ceiling(max(data.traces$moved_distance))
+max.moved.dist = ceiling(max(binned.traces$moved_distance))
 dist.nbins = 100
-dist.traces = stimbin.traces(data.traces[trial == selected.trial & timestamp > 35 * 1000, ], 
+dist.traces = stimbin.traces(binned.traces[trial == selected.trial & timestamp > 35 * 1000, ], 
                              moved_distance, dist.nbins, max.width = max.moved.dist)
-binned.dist.traces = dist.traces[, .(mean.norm_deconv_trace = mean(norm_deconv_trace),
-                                     mean.norm_trace = mean(norm_trace),
+binned.dist.traces = dist.traces[, .(mean.norm_deconv_trace = max(norm_deconv_trace),
+                                     mean.norm_trace = max(norm_trace),
                                      atReward=mean(atReward0 + atReward1)), 
                                  by=.(animal, date, trial, cell_id, bin.moved_distance)]
 binned.dist.traces$atReward = as.factor(ifelse(binned.dist.traces$atReward > 0.5, 'at_reward', 'not_at_reward'))

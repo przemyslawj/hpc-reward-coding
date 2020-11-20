@@ -363,7 +363,7 @@ Proportion of the same cells active between days during the experiment
 cell.overlap.df = data.frame()
 cell.day.activity.df = data.table(cell.day.activity.df)
 for (animal_name in unique(cell.day.activity.df$animal)) {
-  all.days = cell.day.activity.df[animal==animal_name, unique(date)] %>% as.Date
+  all.days = cell.day.activity.df[animal==animal_name, unique(date)] %>% char2date
   implant = cell.day.activity.df[animal==animal_name]$implant[1]
   day.comb = combn(1:length(all.days), 2)
   for (i in 1:ncol(day.comb)) {
@@ -465,7 +465,7 @@ Number of consecutive days a cell active
 ```{r}
 source('utils.R')
 
-#active.day.df$date = as.Date(active.day.df$date)
+#active.day.df$date = char2date(active.day.df$date)
 ncons.days.df = cell.day.activity.df %>%
   filter(day.nevents > min.day.nevents) %>%
   ddply(.(animal, cell_id), summarise, ncons=max.consecutive.days(date))

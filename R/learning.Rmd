@@ -340,7 +340,7 @@ mhab_loc.perdate = test.trial.df %>%
   dplyr::select(animal, location_set, date) %>%
   left_join(mhab_loc.filtered, by=c('animal', 'location_set'))
 
-trials.meta.df$date = as.Date(trials.meta.df$date)
+trials.meta.df$date = char2date(trials.meta.df$date)
 test.trial.df.joined = test.trial.df %>%
   dplyr::select(animal, location_set, date, norm_crossings, crossings_0_60s) %>%
   dplyr::mutate(type="test")  %>%

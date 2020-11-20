@@ -53,10 +53,10 @@ data$inside_roi = data$inside_roi > 0
 ncells = unique(data$cell) %>% length
 
 first_learning_day = as.Date('2019-02-20')
-last_day = max(as.Date(data$date))
+last_day = max(char2date(data$date))
 max_trial = max(data$trial)
 data = mutate(data, 
-              learning_day = as.integer(as.Date(date) - first_learning_day + 1),
+              learning_day = as.integer(char2date(date) - first_learning_day + 1),
               trial_no = (learning_day - 1) * max_trial + trial)
 ```
 

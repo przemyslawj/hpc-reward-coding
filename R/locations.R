@@ -2,7 +2,10 @@ library(dplyr)
 library(purrr)
 library(stringr)
 
-is.date <- function(x) !is.na(as.Date(x, '%Y-%m-%d'))
+source('utils.R')
+
+
+is.date <- function(x) !is.na(char2date(x))
 
 get.subdirs = function(path) {
   subdirs = list.files(path, full.names=TRUE)
@@ -161,6 +164,7 @@ read_locations = function(root.data.dir) {
   merged.df = dplyr::rename(merged.df, animal=Animal)
   merged.df$animal = as.factor(merged.df$animal)
   result = add_location_set(merged.df)
+  result$date = char2date(result$date)
   
   dplyr::distinct(result, animal, Valence, date, is_test, location_set, location_ordinal, .keep_all=TRUE)
 }
@@ -170,7 +174,7 @@ read.trials.meta = function(rootdirs) {
   df = data.frame()
   for (rootdir in rootdirs) {
     habit.days = list.files(file.path(rootdir, 'habituation'))
-    habit.dates = as.Date(habit.days) %>% sort()
+    habit.dates = char2date(habit.days) %>% sort()
     habit.df.parts = lapply(habit.days, function(.x) {
       caiman.dir = file.path(rootdir, 'habituation', .x, 'caiman')
       if (!file.exists(caiman.dir)) {
@@ -178,8 +182,8 @@ read.trials.meta = function(rootdirs) {
       }
       animal_names = list.files(caiman.dir)
       df = data.frame(animal = animal_names)
-      df$date = .x
-      df$day_ordinal = which(habit.dates == .x)
+      df$date = char2date(.x)
+      df$day_ordinal = which(habit.dates == char2date(.x))
       df
     })
     habit.df = do.call('rbind', habit.df.parts)
@@ -203,7 +207,7 @@ read.trials.meta = function(rootdirs) {
         distinct()
       
       .dayorder = function(days) {
-        days = as.Date(unique(days)) %>% sort
+        days = char2date(unique(days)) %>% sort
         map_int(days, ~ which(days == .x))
       }
       

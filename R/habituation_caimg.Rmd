@@ -51,11 +51,11 @@ data = zscore.traces(data) %>%
 ```{r}
 ncells = unique(data$cell) %>% length
 
-first_learning_day = as.Date('2019-08-27')
-last_day = max(as.Date(data$date))
+first_learning_day = char2date('2019-08-27')
+last_day = max(char2date(data$date))
 max_trial = max(data$trial)
 data = mutate(data, 
-              learning_day = as.integer(as.Date(date) - first_learning_day + 1),
+              learning_day = as.integer(char2date(date) - first_learning_day + 1),
               trial_no = (learning_day - 1) * max_trial + trial)
 ```
 
@@ -415,7 +415,7 @@ day.summary.df$mfr_responsive = as.factor(day.summary.df$mfr_responsive)
 ```{r}
 notest.day.summary = day.summary.df %>%
   filter(is_test == FALSE) %>%
-  mutate(learning_day = as.integer(as.Date(date) - first_learning_day + 1))
+  mutate(learning_day = as.integer(char2date(date) - first_learning_day + 1))
 ggplot(notest.day.summary, aes(x=factor(1), fill=mfr_responsive)) +
   geom_bar(width=1) +
   facet_grid(. ~ learning_day) +
@@ -494,7 +494,7 @@ after.sec = 20
 timestamp.var = paste0('timestamp.rew', which.rew)
 rew.aligned.data = filter(aligned.data.df, .data[[timestamp.var]] > -before.sec*1000, .data[[timestamp.var]] < after.sec * 1000) %>%
   mutate(trace_id = paste0(trial_id, '_', cell)) 
-rew.aligned.data$date = as.Date(rew.aligned.data$date)
+rew.aligned.data$date = char2date(rew.aligned.data$date)
 
 # Calculate length of a frame (ms)
 subset.aligned.data = filter(aligned.data.df, cell == 1, date=='2019-03-11', trial==2)
@@ -582,7 +582,7 @@ binned.aligned.data %>%
 
 ```{r}
 day.summary.df %>%
-  mutate(learning_day = as.integer(as.Date(date) - as.Date('2019-02-20') + 1)) %>%
+  mutate(learning_day = as.integer(char2date(date) - char2date('2019-02-20') + 1)) %>%
   filter(learning_day >= 1, learning_day <=22) %>%
   mutate(day_test = paste0(sprintf("%02d", learning_day), ifelse(is_test, '_test', '_trial')))  %>%
   ggplot(aes(x=day_test, y=pct_events_at_rew * 100)) +

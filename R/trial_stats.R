@@ -196,14 +196,14 @@ for (i in 1:nrow(files.df)) {
 }
 
 output_df$animal = as.factor(output_df$animal)
-output_df$date = as.Date(output_df$date)
+output_df$date = char2date(output_df$date)
 output_df$trial_n = as.integer(output_df$trial_n)
 
 animal.fst.learning.date = trials.meta.df %>%
   filter(day_ordinal==1, location_set==1) %>%
   group_by(animal) %>%
-  summarise(fst.learning.date=min(as.Date(date)))
-trials.meta.df$date = as.Date(trials.meta.df$date)
+  summarise(fst.learning.date=min(char2date(date)))
+trials.meta.df$date = char2date(trials.meta.df$date)
 
 output_df = output_df %>% 
     left_join(animal.fst.learning.date, by='animal') %>%

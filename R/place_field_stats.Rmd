@@ -472,7 +472,7 @@ Compare the last day trials with habituation trials:
 Higher peak of number of cells in proximity around 25 % of cheeseboard
 ```{r}
 baseline.trials.pc = filter(run.trials.pc2rew.dist, signif.si, day_desc.activity=='habituation day#3', animal!='A-BL')
-compared.trials.pc = filter(run.trials.pc2rew.dist, signif.si, date.activity == format(as.Date(date.reward) - 1), animal!='A-BL')
+compared.trials.pc = filter(run.trials.pc2rew.dist, signif.si, date.activity == format(char2date(date.reward) - 1), animal!='A-BL')
 
 beforetest.days = c('learning2 day#1', 'learning3 day#1', 'learning3 day#3')
 ggplot() +
@@ -654,7 +654,7 @@ ggsave('/tmp/test_pf_shift.svg', g.pf.shift.fig,
 When habituation compared to learning - using theshold of 25 where distribution of distances peak
 ```{r}
 # summary.lastday.df = run.trials.pc2rew.dist %>%
-#   filter(signif.si, date.activity == format(as.Date(date.reward) - 1)) %>%
+#   filter(signif.si, date.activity == format(char2date(date.reward) - 1)) %>%
 #   dplyr::rename(date=date.reward,
 #                 day_desc=day_desc.reward) %>%
 #   summarize.rew.pc.pct(dist.threshold=25)
@@ -706,7 +706,7 @@ daypair.diff = function(animal.daypair.df,
                      goal.cell.fst = is.goal.cell[1],
                      same.rew.loc = pairequal(location_set),
                      same.closest.loc = pairequal(closest.location.ordinal),
-                     days.diff = as.Date(days) %>% diff %>% as.integer,
+                     days.diff = char2date(days) %>% diff %>% as.integer,
                      date.diff=paste(format(days[2]), ' - ', format(days[1])),
                      date.fst = format(days[1]),
                      date.snd = format(days[2]),
@@ -741,7 +741,7 @@ Stability of place fields between beforetest trials
 pc.beforetest.change.df = data.frame()
 pc.test.df = as.data.table(pc.test.df)
 for (animal_name in unique(pc.test.df$animal)) {
-  all.days = unique(subset(pc.test.df, animal==animal_name)$date) %>% as.Date
+  all.days = unique(subset(pc.test.df, animal==animal_name)$date) %>% char2date
   day.comb = combn(1:length(all.days), 2)
   for (i in 1:ncol(day.comb)) {
     days_i = day.comb[,i]
@@ -762,7 +762,7 @@ pc.rew.dist.df = data.table(pc.rew.dist.df)
 max.days.diff = 5
 pc.change.df = data.frame()
 for (animal_name in unique(pc.rew.dist.df$animal)) {
-  all.days = unique(subset(pc.rew.dist.df, animal==animal_name)$date) %>% as.Date
+  all.days = unique(subset(pc.rew.dist.df, animal==animal_name)$date) %>% char2date
   day.comb = combn(1:length(all.days), 2)
   for (i in 1:ncol(day.comb)) {
     days_i = day.comb[,i]
@@ -786,7 +786,7 @@ Shuffle cell identities to see if the remapping different than random
 # nshuffles=100
 # field.xy.dist.thr.df = data.frame()
 # for (animal_name in unique(pc.rew.dist.df$animal)) {
-#   all.days = unique(subset(pc.rew.dist.df, animal==animal_name)$date) %>% as.Date
+#   all.days = unique(subset(pc.rew.dist.df, animal==animal_name)$date) %>% char2date
 #   for (i in 1:(length(all.days)-1)) {
 #     day.fst = all.days[i]
 #     day.snd = all.days[i+1]
@@ -832,8 +832,8 @@ Distance between place field centre on consecutive days
 ```
 
 ```{r}
-fst.learning.days = (as.Date(beforetest.rewards.df$date))  %>% unique
-fst.learning.day = filter(rewards.df, !is.na(location_set))$date %>% as.Date %>% min
+fst.learning.days = (char2date(beforetest.rewards.df$date))  %>% unique
+fst.learning.day = filter(rewards.df, !is.na(location_set))$date %>% char2date %>% min
 fst.learning.days = c(fst.learning.day, fst.learning.days)
 ```
 

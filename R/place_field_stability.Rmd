@@ -29,7 +29,7 @@ source('locations.R')
 source('place_field.R')
 source('plotting_params.R')
 source('trace_utils.R')
-
+source('utils.R')
 ```
 
 # Stability during test trial
@@ -252,7 +252,7 @@ pf.diff.df %>%
 Calculate stats for changes between odd and even trials
 ```{r}
 max.xy = getNBinsXY()
-all.days = unique(run.trials.si$date) %>% as.Date
+all.days = unique(run.trials.si$date) %>% char2date()
 
 compare.day.trials = function(day.trials.comparison, fields1, fields2, occupancies1, occupancies2) {
   pc.change.df = data.frame()
