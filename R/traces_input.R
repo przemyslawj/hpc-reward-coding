@@ -17,17 +17,17 @@ caimg_result_dirs = c(
   get.subject.result.dirs(root_dir10, 'R-TR'),
   get.subject.result.dirs(root_dir10, 'M-BR'),
   get.subject.result.dirs(root_dir10, 'N-BR'),
-  get.subject.result.dirs(root_dir10, 'N-BL'),
-  get.subject.result.dirs(root_dir08, 'E-BL'),
-  get.subject.result.dirs(root_dir08, 'E-TR'),
-  get.subject.result.dirs(root_dir08, 'F-BL'),
-  get.subject.result.dirs(root_dir08, 'F-TL'),
-  get.subject.result.dirs(root_dir01, 'G-BR'),
-  get.subject.result.dirs(root_dir01, 'K-BR'),
-  #get.subject.result.dirs(root_dir01, 'L-TL'),
-  get.subject.result.dirs(root_dir07, 'B-BL'),
-  #get.subject.result.dirs(root_dir07, 'C-1R'),
-  get.subject.result.dirs(root_dir07, 'D-BR')
+  get.subject.result.dirs(root_dir10, 'N-BL')
+  #get.subject.result.dirs(root_dir08, 'E-BL'),
+  #get.subject.result.dirs(root_dir08, 'E-TR'),
+  #get.subject.result.dirs(root_dir08, 'F-BL'),
+  #get.subject.result.dirs(root_dir08, 'F-TL'),
+  #get.subject.result.dirs(root_dir01, 'G-BR'),
+  #get.subject.result.dirs(root_dir01, 'K-BR'),
+  ##get.subject.result.dirs(root_dir01, 'L-TL'),
+  #get.subject.result.dirs(root_dir07, 'B-BL'),
+  ##get.subject.result.dirs(root_dir07, 'C-1R'),
+  #get.subject.result.dirs(root_dir07, 'D-BR')
 )
 
 caimg_result_dirs = Filter(
@@ -42,12 +42,12 @@ prepare.run.dirtraces = function(data.traces,
   data.traces = data.traces[exp_title != 'homecage',]
   detect.events(data.traces, deconv.threshold=event.deconv.threshold)
 
-  setorder(data.traces, exp_title, trial_id, cell_id, timestamp)
   # running speed avg > 4 cm/s in 0.5 s window
   data.traces = add.running.col(data.traces, 3.3, 10)
+  data.traces = gauss.smooth.df.var(data.traces, filter.len=10, sigma=1.5)
 
   response.bin.quantiles = c(0.95, 1.0)
-  binned.traces.run = bin.time.space(data.traces[running.index & x > 0 & y > 0, ],
+  binned.traces.run = bin.time.space(data.traces[is_running & x > 0 & y > 0, ],
                                      nbins.x = nbins,
                                      nbins.y = nbins,
                                      get.bin.thresholds.fun = get.quantiles.fun(response.bin.quantiles),

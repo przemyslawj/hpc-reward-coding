@@ -37,6 +37,12 @@ rewards.df =  all.locations.df %>%
   filter(!is_test) %>%
   left_join(mouse.meta.df, by='animal') %>% 
   left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
+prev.locations.df = all.locations.df %>%
+  filter(!is_test) %>%
+  add_prev_locations(prev.loc.set.diff=1) %>%
+  add_prev_locations(prev.loc.set.diff=2) %>%
+  add_prev_locations(prev.loc.set.diff=3) %>%
+  filter()
 ```
 
 
@@ -136,10 +142,10 @@ Load the traces
 # exp_title='learning'
 # day = '2019-09-04'
 # root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
-animal_name = 'G-BR'
+animal_name = 'N-BL'
 exp_title='learning'
-day = '2020-02-06'
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
+day = '2020_10_18'
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
 
 
 caimg_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered/')
@@ -147,8 +153,7 @@ data.traces = read.data.trace(caimg_result_dir)
 setorder(data.traces, trial_id, cell_id, timestamp)
 #data.traces$is_running = isRunning(data.traces, 2, 4, 500)
 # running speed min=2cm/s, avg min 4 cm/s                                     
-data.traces$is_running = isRunning(data.traces, 1.6, 3.3, 500) 
-data.traces = as.data.table(data.traces)
+data.traces = add.running.col(data.traces, 3.3, 10)
 detect.events(data.traces, deconv.threshold=0.2)
 data.traces.run = data.traces[(is_running), ]
 
@@ -234,7 +239,7 @@ plot.cell.trials = function(cell.df, trace.var='trace', facet.ncols=3) {
   return(g)
 }
 
-cell_name = 183
+cell_name = 144
 cell.df = data.traces.run[cell_id == cell_name & x > 0 & y > 0, ]
 binned.cell.df = bin.time.space(cell.df, 
                                 nbins.x = nbins,
@@ -290,14 +295,14 @@ ggsave('/tmp/traces_example.svg', width = 16, height = 8, units = 'cm')
 
 Plot event vectors
 ```{r}
-binned.cells.df = bin.time.space(data.traces, 
+binned.cells.df = bin.time.space(data.traces[cell_id %in% selected.cell_ids], 
                                  nbins.x = nbins,
                                  nbins.y = nbins,
                                  get.bin.thresholds.fun=get.quantiles.fun(c(0.95, 1.0)),
                                  binned.var='trace',
                                  timebin.dur.msec=200)
 
-g.events = plot.event.vectors(binned.cells.df[cell_id %in% selected.cell_ids], event.var=nevents, event.thr=1) +
+g.events = plot.event.vectors(binned.cells.df, event.var=nevents, event.thr=1) +
   geom_path(data=binned.cells.df, mapping=aes(x=x,y=100-y,group=trial_id), alpha=0.2) +
   geom_rewards(rewards.df, animal_name, day, 100) +
   facet_wrap(. ~ cell_id, nrow = 1) +
@@ -313,18 +318,21 @@ cell.infos = data.frame()
 #selected.cell_ids = unique(data.traces$cell_id)[1:3]
 frame.rate = 5
 for (cell_name in selected.cell_ids) {
-  pf = cell.spatial.info(binned.cells.df[is_running & cell_id == cell_name & exp_title == 'beforetest', ],
-                         nbins, nbins,
-                         trace.var = 'deconv_trace',
-                         generate.plots=FALSE,
-                         min.occupancy.sec = 0.5,
-                         gaussian.var=2,
-                         nshuffles=1000)
-  pf.df = create.pf.df(pf$field, pf$occupancy, 
-                       frame.rate=frame.rate)
-  pf.df$cell_id = cell_name
-  all.pf.df = bind_rows(all.pf.df, pf.df)
-  cell.infos = bind_rows(cell.infos, pf$cell_info)
+  binned.cell.df = binned.cells.df[is_running & cell_id == cell_name & exp_title == 'beforetest', ]
+  if (nrow(binned.cell.df) > 0) {
+    pf = cell.spatial.info(binned.cell.df,
+                           nbins, nbins,
+                           trace.var = 'deconv_trace',
+                           generate.plots=FALSE,
+                           min.occupancy.sec = 0.5,
+                           gaussian.var=2,
+                           nshuffles=1000)
+    pf.df = create.pf.df(pf$field, pf$occupancy, 
+                         frame.rate=frame.rate)
+    pf.df$cell_id = cell_name
+    all.pf.df = bind_rows(all.pf.df, pf.df)
+    cell.infos = bind_rows(cell.infos, pf$cell_info)
+  }
 }
 
 g.pf = plot.pf(all.pf.df, max.x=nbins, max.y=nbins) +
@@ -420,12 +428,12 @@ plot.all.day.fields = function(animal_name, cell_id) {
     geom_rewards(rewards.df, animal_name, nbins=nbins) 
 }
 
-plot.all.day.fields('E-BL', 50)
+plot.all.day.fields('M-BR', 1)
 ```
 Multicell plot of all day activity for selected cells
 ```{r}
 rewards.df = as.data.table(rewards.df)
-animal_name = 'F-TL'
+animal_name = 'M-BR'
 
 #g.etr = map_dfr(c(89, 90, 99, 122, 139), ~ create.animal.days.df(animal_name, .x)) %>%
 g.etr = map_dfr(c(0, 5, 51, 54,77,97), ~ create.animal.days.df(animal_name, .x)) %>%
@@ -523,7 +531,7 @@ for (animal_name in names(run.fields)) {
 ```
 
 ```{r}
-animal_name = 'K-BR'
+animal_name = 'M-BR'
 g.gbr = map_dfr(c(0,4,18, 31, 36,44), ~ create.animal.days.df(animal_name, .x)) %>%
   create.all.day.pf() %>%
   #filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning3 day#3') %>%

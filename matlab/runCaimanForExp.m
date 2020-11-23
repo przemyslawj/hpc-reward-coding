@@ -2,11 +2,11 @@
 % The script requires that the variables: animal and expMonth are present in
 % the environment
 
-animal = 'M-BR';
+animal = 'P-BR';
 expMonth = '2020-10';
 expDir = ['/mnt/DATA/Prez/cheeseboard-down/down_2/' expMonth];
 %expDir = ['/mnt/DATA/Prez/cheeseboard/' expMonth];
-overwrite = 1;
+overwrite = 0;
 v3 = 0;
 
 expTitles = {'habituation', 'learning'};

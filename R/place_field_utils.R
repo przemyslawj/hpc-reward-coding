@@ -193,7 +193,7 @@ calc.field.peaks.info = function(day,
   
   map_dfr(cell_names, ~ {
     field.info = cell.field.peaks.info(field.list[[.x]], rew.df, bin.size, max.rew.dist.thr)
-    meta = list(animal=animal_name, date=day, cell_id=as.integer(.x))
+    meta = list(animal=animal_name, date=as.Date(day), cell_id=as.integer(.x))
     return(append(meta, field.info))
   })
 }
@@ -230,7 +230,7 @@ geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20,
     dayreward.df = filter(rewards.df, animal==subject)
   }
   if (!is.null(day)) {
-    dayreward.df = filter(dayreward.df, date==day)
+    dayreward.df = filter(dayreward.df, date==char2date(day))
   }
   if (!('current_loc' %in% names(dayreward.df))) {
     dayreward.df$current_loc = TRUE

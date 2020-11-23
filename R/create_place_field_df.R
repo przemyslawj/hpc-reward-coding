@@ -63,6 +63,7 @@ add.meta.cols = function(df, animal, date) {
 for (caimg_result_dir in caimg_result_dirs) {
   tic("reading and preprocessing traces")
   data.traces = read.data.trace(caimg_result_dir)
+  data.traces$date = char2date(data.traces$date)
   date = data.traces$date[1]
   animal = data.traces$animal[1]
 
@@ -190,5 +191,5 @@ for (caimg_result_dir in caimg_result_dirs) {
 
 
 print("Saving env variables")
-save.image(file="data/pf_smoothed_percentile_95_shuffle5sec_occupancy03sec.RData")
+save.image(file="data/2020-10_pf_smoothed_percentile_95_shuffle5sec_occupancy03sec.RData")
 

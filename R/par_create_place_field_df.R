@@ -25,6 +25,7 @@ source('utils.R')
 nbins = 20
 timebin.dur.msec = 200
 gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
+trace.var = 'smoothed_deconv_trace'
 
 
 add.meta.cols = function(df, animal, date) {
@@ -38,7 +39,7 @@ traces2pf = function(binned.traces.run) {
     return(list())
   }
 
-  traces2pf.subset = function(subset.binned.traces, subset.name, shuffle.shift.sec = 5) {
+  traces2pf.subset = function(subset.binned.traces, subset.name, shuffle.shift.sec = 10) {
     if (nrow(subset.binned.traces) == 0) {
       return(list())
     }
@@ -54,10 +55,10 @@ traces2pf = function(binned.traces.run) {
                                       generate.plots=FALSE,
                                       nshuffles=1000,
                                       shuffle.shift.sec = shuffle.shift.sec,
-                                      trace.var='deconv_trace',
+                                      trace.var=trace.var,
                                       timebin.dur.msec=timebin.dur.msec,
                                       nbins=nbins,
-                                      min.occupancy.sec=0.7,
+                                      min.occupancy.sec=1,
                                       gaussian.var=2)
     subset.result$df = add.meta.cols(subset.result$df, animal, date)
     toc()
@@ -69,10 +70,10 @@ traces2pf = function(binned.traces.run) {
   # Test trials
   #max_test_trial_dur_msec = 240 * 1000
   beforetest.traces = binned.traces.run[exp_title == 'beforetest' | exp_title == 'test']# & timestamp <= max_test_trial_dur_msec]
-  beforetest.pf = traces2pf.subset(beforetest.traces, 'beforetest', shuffle.shift.sec = 10)
+  beforetest.pf = traces2pf.subset(beforetest.traces, 'beforetest', shuffle.shift.sec = 20)
 
   aftertest.traces = binned.traces.run[exp_title == 'aftertest']# & timestamp <= max_test_trial_dur_msec]
-  aftertest.pf = traces2pf.subset(aftertest.traces, 'aftertest', shuffle.shift.sec = 10)
+  aftertest.pf = traces2pf.subset(aftertest.traces, 'aftertest', shuffle.shift.sec = 20)
 
   # # Odd vs Even
   # odd.pf = traces2pf.subset(binned.traces.run[exp_title == 'trial' & trial %% 2 == 1,], 'odd')
@@ -101,7 +102,8 @@ daytraces.pf.list = foreach(caimg_result_dir=caimg_result_dirs,
                             .packages=c('datatrace', 'dplyr', "data.table", 'tictoc')) %dopar% {
   tic("reading and preprocessing traces")
   data.traces = read.data.trace(caimg_result_dir)
-  binned.traces.run = prepare.run.dirtraces(data.traces, nbins)
+  data.traces$date = char2date(data.traces$date)
+  binned.traces.run = prepare.run.dirtraces(data.traces, nbins, binned.var=trace.var)
   toc()
 
   date_str = format(binned.traces.run$date[1])
@@ -151,5 +153,5 @@ beforetest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$beforetest$df)
 aftertest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$aftertest$df)
 
 print("Saving env variables")
-save.image(file="data/pf_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle10sec_occupancy07sec_gaussvar2_reg_more_cells.RData")
+save.image(file="data/2020-10_pf_smooth_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle20sec_occupancy1sec_gaussvar2.RData")
 
