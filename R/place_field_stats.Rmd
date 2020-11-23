@@ -399,7 +399,9 @@ run.trials.pc2rew.dist = merged.run.trials.pc %>%
 pc.test.df = beforetest.trials.si %>%
   mutate(is.pc = is.place.cell(signif.si, mutual.info - mutual.info.bias, field.size.50, field.size.25, field.max, field.mean, 1.0)) %>%
   left_join(mouse.meta.df, by='animal') %>%
-  left_join(select(trials.meta.df, -location_set), by=c('date', 'animal'))
+  left_join(trials.meta.df, by=c('date', 'animal')) %>%
+  dplyr::mutate(beforetest_ordinal=location_set-1) %>%
+  dplyr::select(-location_set)
 
 beforetest.cell.db = pc.test.df %>%
   dplyr::select(date, day_desc, exp, animal, cell_id, implant, is.pc,
@@ -659,6 +661,75 @@ g.pf.shift.fig = plot_grid(g.test.pf.shift,
 
 ggsave('/tmp/test_pf_shift.svg', g.pf.shift.fig,
        width=10, height=4.5, units='cm')
+```
+
+# Do cells have propoensity to be close to reward?
+
+Model of cell randomly assigned at distances following observed distribution
+- empirical distribution per mouse per location set.
+```{r}
+cell.dist.df = compared.test.trials.pc %>%
+  dplyr::select(implant, animal, date, cell_id, min.rew.dist) %>%
+  dplyr::group_by(implant, animal, date)
+
+nsamplings = 1000
+shuffled.cell.dist.df = map_dfr(
+  1:nsamplings, ~ dplyr::mutate(cell.dist.df, 
+                                shuffle.id=.x,
+                                shuffle.cell_id = cell_id[shuffle(length(cell_id))]))
+
+
+shuffled.cell.dist.summary = shuffled.cell.dist.df %>%
+  group_by(implant, animal, shuffle.cell_id, shuffle.id) %>%
+  dplyr::summarise(m.dist = mean(min.rew.dist), 
+                   n=n(), 
+                   var.dist=var(min.rew.dist) / (n)) %>%
+  #filter(n > 1) %>%
+  dplyr::mutate(group='sampled', line_g=paste0(group, shuffle.id))
+  
+```
+
+
+```{r}
+hist.breaks = seq(0, 120, 10)
+
+create.hist.tibble = function(vals) {
+  h = hist(vals, breaks=hist.breaks, plot=FALSE) 
+  tibble(count=h$counts, mid=as.integer(h$mids))
+}
+
+shuffled.cell.dist.hist.summary = shuffled.cell.dist.summary %>%
+  group_by(implant, animal, shuffle.id) %>%
+  dplyr::summarise(create.hist.tibble(m.dist)) %>%  # histogram per shuffle
+  group_by(implant, mid) %>%
+  dplyr::summarise(m.count=mean(count), sem.count=sem(count), sd.count=sd(count))
+
+cell.rew.distance.summary = compared.test.trials.pc %>%
+  dplyr::group_by(implant, animal, cell_id) %>%
+  dplyr::summarise(m.dist = mean(min.rew.dist), 
+                   n=n(), 
+                   var.dist=var(min.rew.dist) / (n)) %>%  # biased estimate for variance
+  filter(n>1) %>%
+  dplyr::mutate(group='actual', line_g=group)
+
+
+#ggplot(data=cell.rew.distance.summary, aes(x=m.dist)) +
+  #geom_density(data=shuffled.cell.dist.summary, linetype='dashed', color='grey60') +
+ggplot(shuffled.cell.dist.hist.summary) +
+  geom_col(aes(x=mid, y=m.count), fill='grey50', color='grey50', width=10, alpha=0.5) +
+  geom_errorbar(aes(x=mid, ymin=m.count-sd.count, ymax=m.count+sd.count), color='grey30', width=4) +
+  geom_histogram(data=cell.rew.distance.summary, aes(x=m.dist), fill='blue', breaks=hist.breaks, alpha=0.5) +
+  facet_grid(. ~ implant) +
+  xlim(c(0,100)) +
+  gtheme
+
+bind_rows(
+  cell.rew.distance.summary,
+  shuffled.cell.dist.summary) %>%
+  ggplot(aes(x=m.dist, y=var.dist, group=group)) +
+  geom_point(style=1) +
+  facet_grid(group ~ implant) +
+  gtheme
 ```
 
 When habituation compared to learning - using theshold of 25 where distribution of distances peak
@@ -1674,10 +1745,10 @@ pc_cell_ids = filter(pc.test.df, day_desc == 'learning2 day#1') %>%
 beforetest.peaks.at.rew %>% 
   left_join(trials.meta.df) %>% 
   dplyr::mutate(animal_cell_id = paste(animal, cell_id, sep='_')) %>%
-  dplyr::mutate(location_set_name = paste0('loc', location_set-1)) %>%
+  dplyr::mutate(beforetest_name = paste0('loc', location_set-1)) %>%
   dplyr::filter(animal_cell_id %in% pc_cell_ids) %>%
-  dplyr::select(animal, cell_id, location_set_name, signif.si) %>%
-  reshape2::dcast(animal + cell_id ~ location_set_name, fun.aggregate=mean) %>% 
+  dplyr::select(animal, cell_id, beforetest_name, signif.si) %>%
+  reshape2::dcast(animal + cell_id ~ beforetest_name, fun.aggregate=mean) %>% 
   dplyr::group_by(animal) %>%
   dplyr::summarise(l2d1.n = sum(!is.na(loc1)),
                    nsignif.l2d1.n = sum(loc1, na.rm=T),

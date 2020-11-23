@@ -102,7 +102,7 @@ daytraces.pf.list = foreach(caimg_result_dir=caimg_result_dirs,
                             .packages=c('datatrace', 'dplyr', "data.table", 'tictoc')) %dopar% {
   tic("reading and preprocessing traces")
   data.traces = read.data.trace(caimg_result_dir)
-  data.traces$date = char2date(data.traces$date)
+  data.traces$date = rep(char2date(data.traces$date[1]), nrow(data.traces))
   binned.traces.run = prepare.run.dirtraces(data.traces, nbins, binned.var=trace.var)
   toc()
 

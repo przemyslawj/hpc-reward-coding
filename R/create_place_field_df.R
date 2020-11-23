@@ -63,7 +63,7 @@ add.meta.cols = function(df, animal, date) {
 for (caimg_result_dir in caimg_result_dirs) {
   tic("reading and preprocessing traces")
   data.traces = read.data.trace(caimg_result_dir)
-  data.traces$date = char2date(data.traces$date)
+  data.traces$date = rep(char2date(data.traces$date[1]), nrow(data.traces))
   date = data.traces$date[1]
   animal = data.traces$animal[1]
 

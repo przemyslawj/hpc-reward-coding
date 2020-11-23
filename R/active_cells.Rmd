@@ -31,33 +31,11 @@ select = dplyr::select
 
 source('locations.R')
 source('utils.R')
+source('traces_input.R')
 ```
 
 
 ```{r}
-root_dir07 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
-root_dir08 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
-root_dir01 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
-rootdirs = c(root_dir07, root_dir08, root_dir01)
-
-caimg_result_dirs = c(
-  get.subject.result.dirs(root_dir08, 'E-BL'),
-  get.subject.result.dirs(root_dir08, 'E-TR'),
-  get.subject.result.dirs(root_dir08, 'F-BL'),
-  get.subject.result.dirs(root_dir08, 'F-TL'),
-  get.subject.result.dirs(root_dir07, 'A-BL'),
-  get.subject.result.dirs(root_dir07, 'B-BL'),
-  get.subject.result.dirs(root_dir07, 'C-1R'),
-  get.subject.result.dirs(root_dir07, 'D-BR'),
-  get.subject.result.dirs(root_dir01, 'G-BR'),
-  get.subject.result.dirs(root_dir01, 'K-BR'),
-  get.subject.result.dirs(root_dir01, 'L-TL')
-)
-
-caimg_result_dirs = Filter(
-  function(ca_img_dir) {file.exists(paste(ca_img_dir, 'traces_and_positions.csv', sep='/'))}, 
-  caimg_result_dirs)
-
 gen_imgs_dir = '/tmp/'
 ```
 
@@ -76,6 +54,7 @@ cell.day.activity.df = data.frame()
 
 for (caimg_result_dir in caimg_result_dirs) {
   data.traces = read.data.trace(caimg_result_dir)
+  data.traces$date = rep(char2date(data.traces$date[1]), nrow(data.traces))
   data.traces = detect.events(data.traces, deconv.threshold=0.3)
   
   dir_parts = str_split(caimg_result_dir, '/')
@@ -84,28 +63,24 @@ for (caimg_result_dir in caimg_result_dirs) {
   
   trial.meta.row = filter(trials.meta.df, animal == animal_name, date == data.traces$date[1]) %>%
     mutate(short_day_desc = paste0(substr(exp,1,1), location_set, ' d', day_ordinal))
-  data.traces = mutate(data.traces,
-                       trial_name = paste(trial.meta.row$short_day_desc[1], exp_title, num2str(trial, fmt=0)))
-  cell.events.df = data.traces %>%
-    group_by(animal, date, cell, cell_id) %>%
-    summarise(day.nevents = sum(is.event))
+  data.traces[, trial_name := paste(trial.meta.row$short_day_desc[1], exp_title, num2str(trial, fmt=0))]
+  cell.events.df = data.traces[, .(day.nevents=sum(is.event)), by=.(animal, date, cell, cell_id)]
   
-  trial.activity.df = data.traces %>%
-    group_by(animal, date, exp_title, trial_id, trial_name, cell, cell_id) %>%
-    summarise(event.rate = sum(is.event) / n() * fr,
-              deconv.mean = mean(deconv_trace)) %>%
-    left_join(cell.events.df, by=c('animal', 'date', 'cell', 'cell_id'))
-  
-  day.activity.df = data.traces %>%
-    group_by(animal, date, exp_title, cell, cell_id) %>%
-    summarise(event.rate = sum(is.event) / n() * fr,
-              deconv.mean = mean(deconv_trace)) %>%
-    left_join(cell.events.df, by=c('animal', 'date', 'cell', 'cell_id'))
+  trial.activity.df = data.traces[, 
+    .(event.rate = sum(is.event) / .N * fr,
+      deconv.mean = mean(deconv_trace)), 
+    by=.(animal, date, exp_title, trial_id, trial_name, cell, cell_id)
+  ][cell.events.df, on=c('animal', 'date', 'cell', 'cell_id')]
+
+  day.activity.df = data.traces[,
+    .(event.rate = sum(is.event) / .N * fr,
+    deconv.mean = mean(deconv_trace)), 
+    by=.(animal, date, exp_title, cell, cell_id)
+  ][cell.events.df, on=c('animal', 'date', 'cell', 'cell_id')]
   
   cell.trial.activity.df = bind_rows(cell.trial.activity.df, trial.activity.df)
   cell.day.activity.df = bind_rows(cell.day.activity.df, day.activity.df)
 }
-
 ```
 
 Prepare meta info
@@ -416,10 +391,9 @@ ggsave('/tmp/cell_recall_pct.svg',
 Next day recall
 ```{r}
 cell.overlap.df %>%
-  dplyr::mutate(day1.str=format(day1), day2.str=format(day2)) %>%
-  left_join(trials.meta.df, by=c('animal'='animal', 'day1.str'='date')) %>% 
+  left_join(trials.meta.df, by=c('animal'='animal', 'day1'='date')) %>% 
   dplyr::rename(day_desc1 = day_desc) %>% 
-  left_join(trials.meta.df, by=c('animal'='animal', 'day2.str'='date')) %>% 
+  left_join(trials.meta.df, by=c('animal'='animal', 'day2'='date')) %>% 
   dplyr::rename(day_desc2 = day_desc) %>%
   #filter(as.integer(days.diff) == 1)  %>%
   filter(day_desc1 == 'habituation day#3', day_desc2 == 'learning2 day#1') %>%
@@ -430,10 +404,9 @@ cell.overlap.df %>%
 ```
 ```{r}
 cell.overlap.df %>%
-  dplyr::mutate(day1.str=format(day1), day2.str=format(day2)) %>%
-  left_join(trials.meta.df, by=c('animal'='animal', 'day1.str'='date')) %>% 
+  left_join(trials.meta.df, by=c('animal'='animal', 'day1'='date')) %>% 
   dplyr::rename(day_desc1 = day_desc) %>% 
-  left_join(trials.meta.df, by=c('animal'='animal', 'day2.str'='date')) %>% 
+  left_join(trials.meta.df, by=c('animal'='animal', 'day2'='date')) %>% 
   dplyr::rename(day_desc2 = day_desc) %>%
   filter(as.integer(days.diff) == 1)  %>%
   dplyr::mutate(nrecalled=recall/100*nfstday.cells,
@@ -494,10 +467,10 @@ for (caimg_result_dir in caimg_result_dirs) {
   data.traces = read.data.trace(caimg_result_dir)
   data.traces = detect.events(data.traces, deconv.threshold=0.3)
   setorder(data.traces, trial_id, cell_id, timestamp)
-  data.traces$mobile = isRunning(data.traces, 2, 4, 250)
+  data.traces = add.running.col(data.traces, 3.3, 10)
   timebinned.traces = timebin.traces(data.traces, timebin.dur.msec=1000 * timebin.dur.sec) 
   timebinned.traces[, er := nevents ]
-  timebinned.traces[, mobile := ifelse(mobile > 0.2, 'mobile', 'immobile') ]
+  timebinned.traces[, mobile := ifelse(is_running, 'mobile', 'immobile') ]
   
   # MER for mobile vs immobile
   cell.mobile.mer = timebinned.traces[, .(mer = mean(er), time.sec = .N * timebin.dur.sec), 
