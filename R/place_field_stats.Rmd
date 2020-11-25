@@ -204,10 +204,10 @@ run.trials.pc %>%
 ## How many place cells per day
 ```{r}
 run.trials.pc %>%
-  group_by(date, animal, implant) %>%
+  group_by(day_desc, animal, implant) %>%
   dplyr::summarise(pc.pct = sum(signif.si) / n() * 100) %>%
   ggplot() +
-  geom_line(aes(x=date, y=pc.pct, group=animal, color=animal, linetype=implant)) +
+  geom_line(aes(x=day_desc, y=pc.pct, group=animal, color=animal, linetype=implant)) +
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   xlab('Date') +
@@ -666,6 +666,7 @@ ggsave('/tmp/test_pf_shift.svg', g.pf.shift.fig,
 # Do cells have propoensity to be close to reward?
 
 Model of cell randomly assigned at distances following observed distribution
+- do on all cells not only place cells?
 - empirical distribution per mouse per location set.
 ```{r}
 cell.dist.df = compared.test.trials.pc %>%
@@ -681,55 +682,70 @@ shuffled.cell.dist.df = map_dfr(
 
 shuffled.cell.dist.summary = shuffled.cell.dist.df %>%
   group_by(implant, animal, shuffle.cell_id, shuffle.id) %>%
-  dplyr::summarise(m.dist = mean(min.rew.dist), 
+  dplyr::summarise(m.dist = median(min.rew.dist), 
                    n=n(), 
-                   var.dist=var(min.rew.dist) / (n)) %>%
-  #filter(n > 1) %>%
+                   var.dist=var(min.rew.dist) / (n),
+                   at.rew.times=sum(min.rew.dist <= goal.cell.max.dist)) %>%
+  filter(n > 1) %>%
   dplyr::mutate(group='sampled', line_g=paste0(group, shuffle.id))
   
 ```
 
-
+TODO 
+- do for field closer to reward not max field
+- include all cells that were signif one day? or on first day?
 ```{r}
 hist.breaks = seq(0, 120, 10)
 
-create.hist.tibble = function(vals) {
-  h = hist(vals, breaks=hist.breaks, plot=FALSE) 
-  tibble(count=h$counts, mid=as.integer(h$mids))
+create.hist.tibble = function(vals, breaks=hist.breaks) {
+  h = hist(vals, breaks=breaks, plot=FALSE) 
+  ncells = sum(h$counts)
+  tibble(count=h$counts, mid=h$mids, pct.count=count/ncells * 100)
 }
 
 shuffled.cell.dist.hist.summary = shuffled.cell.dist.summary %>%
   group_by(implant, animal, shuffle.id) %>%
   dplyr::summarise(create.hist.tibble(m.dist)) %>%  # histogram per shuffle
-  group_by(implant, mid) %>%
-  dplyr::summarise(m.count=mean(count), sem.count=sem(count), sd.count=sd(count))
+  group_by(animal, implant, mid) %>%
+  dplyr::summarise(m.count=mean(pct.count), sem.count=sem(pct.count), sd.count=sd(pct.count))
 
 cell.rew.distance.summary = compared.test.trials.pc %>%
   dplyr::group_by(implant, animal, cell_id) %>%
-  dplyr::summarise(m.dist = mean(min.rew.dist), 
+  dplyr::summarise(m.dist = median(min.rew.dist), 
                    n=n(), 
-                   var.dist=var(min.rew.dist) / (n)) %>%  # biased estimate for variance
+                   var.dist=var(min.rew.dist) / (n),
+                   at.rew.times=sum(min.rew.dist <= goal.cell.max.dist)) %>%  # biased estimate for variance
   filter(n>1) %>%
   dplyr::mutate(group='actual', line_g=group)
 
+cell.rew.distance.hist.summary = cell.rew.distance.summary %>%
+  group_by(implant, animal) %>%
+  dplyr::summarise(create.hist.tibble(m.dist))
 
-#ggplot(data=cell.rew.distance.summary, aes(x=m.dist)) +
-  #geom_density(data=shuffled.cell.dist.summary, linetype='dashed', color='grey60') +
+cell.rew.distance.summary %>%
+  group_by(implant, animal) %>%
+  dplyr::summarise(create.hist.tibble(at.rew.times, breaks=seq(-0.5,3.5,1))) %>%
+  ggplot() +
+  geom_col(aes(x=mid, y=count)) +
+  facet_wrap(. ~ animal + implant) +
+  gtheme
+
 ggplot(shuffled.cell.dist.hist.summary) +
   geom_col(aes(x=mid, y=m.count), fill='grey50', color='grey50', width=10, alpha=0.5) +
   geom_errorbar(aes(x=mid, ymin=m.count-sd.count, ymax=m.count+sd.count), color='grey30', width=4) +
-  geom_histogram(data=cell.rew.distance.summary, aes(x=m.dist), fill='blue', breaks=hist.breaks, alpha=0.5) +
-  facet_grid(. ~ implant) +
+  geom_col(data=cell.rew.distance.hist.summary, aes(x=mid, y=pct.count), fill='blue', color='blue', width=10, alpha=0.5) +
+  #geom_histogram(data=cell.rew.distance.summary, aes(x=m.dist), fill='blue', breaks=hist.breaks, alpha=0.5) +
+  facet_wrap(. ~ implant + animal) +
   xlim(c(0,100)) +
   gtheme
 
-bind_rows(
-  cell.rew.distance.summary,
-  shuffled.cell.dist.summary) %>%
-  ggplot(aes(x=m.dist, y=var.dist, group=group)) +
-  geom_point(style=1) +
-  facet_grid(group ~ implant) +
-  gtheme
+#bind_rows(
+#  cell.rew.distance.summary,
+#  shuffled.cell.dist.summary) %>%
+#  ggplot(aes(x=m.dist, y=var.dist, group=group)) +
+#  geom_point(style=1) +
+#  facet_grid(group ~ implant) +
+#  gtheme
 ```
 
 When habituation compared to learning - using theshold of 25 where distribution of distances peak
@@ -1005,125 +1021,126 @@ ggsave(
 
 # Place field correlation between trials and test sessions
 ```{r}
-day.cors.df = place.cell.db %>%
-  rowwise() %>%
-  dplyr::mutate(
-    aftertest2trial.cor = calc.field.cor(
-        aftertest.fields[[animal]][[format(date)]][[paste(cell_id)]],
-        late.fields[[animal]][[format(date)]][[paste(cell_id)]],
-        aftertest.occupancies[[animal]][[format(date)]][[paste(cell_id)]],
-        late.occupancies[[animal]][[format(date)]][[paste(cell_id)]]),
-    beforetest2trial.cor = calc.field.cor(
-        beforetest.fields[[animal]][[format(date)]][[paste(cell_id)]],
-        early.fields[[animal]][[format(date)]][[paste(cell_id)]],
-        beforetest.occupancies[[animal]][[format(date)]][[paste(cell_id)]],
-        early.occupancies[[animal]][[format(date)]][[paste(cell_id)]]
-    )
-  )
+# day.cors.df = place.cell.db %>%
+#   rowwise() %>%
+#   dplyr::mutate(
+#     aftertest2trial.cor = calc.field.cor(
+#         aftertest.fields[[animal]][[format(date)]][[paste(cell_id)]],
+#         late.fields[[animal]][[format(date)]][[paste(cell_id)]],
+#         aftertest.occupancies[[animal]][[format(date)]][[paste(cell_id)]],
+#         late.occupancies[[animal]][[format(date)]][[paste(cell_id)]]),
+#     beforetest2trial.cor = calc.field.cor(
+#         beforetest.fields[[animal]][[format(date)]][[paste(cell_id)]],
+#         early.fields[[animal]][[format(date)]][[paste(cell_id)]],
+#         beforetest.occupancies[[animal]][[format(date)]][[paste(cell_id)]],
+#         early.occupancies[[animal]][[format(date)]][[paste(cell_id)]]
+#     )
+#   )
 ```
 
 ```{r}
-day.cors.df %>%
-  filter(!is.na(aftertest2trial.cor)) %>%
-  group_by(date, animal, implant, signif.si) %>%
-  dplyr::summarise(med.cor=median(aftertest2trial.cor)) %>%
-  group_by(signif.si, implant) %>%
-  dplyr::summarise(median(med.cor))
-
-day.cors.df %>%
-  filter(!is.na(aftertest2trial.cor)) %>%
-  ggplot(aes(x=day_desc, y=aftertest2trial.cor, fill=is.pc)) +
-  geom_violin() +
-  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
-  geom_hline(yintercept = 0.0, linetype='dashed') +
-  facet_grid(implant ~ .) +
-  gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# day.cors.df %>%
+#   filter(!is.na(aftertest2trial.cor)) %>%
+#   group_by(date, animal, implant, signif.si) %>%
+#   dplyr::summarise(med.cor=median(aftertest2trial.cor)) %>%
+#   group_by(signif.si, implant) %>%
+#   dplyr::summarise(median(med.cor))
+# 
+# day.cors.df %>%
+#   filter(!is.na(aftertest2trial.cor)) %>%
+#   ggplot(aes(x=day_desc, y=aftertest2trial.cor, fill=is.pc)) +
+#   geom_violin() +
+#   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+#   geom_hline(yintercept = 0.0, linetype='dashed') +
+#   facet_grid(implant ~ .) +
+#   gtheme +
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
-```{r}
-day.cors.df %>%
-  filter(!is.na(beforetest2trial.cor)) %>%
-  group_by(date, animal, is.pc, implant) %>%
-  dplyr::summarise(med.cor=median(beforetest2trial.cor)) %>%
-  group_by(is.pc, implant) %>%
-  dplyr::summarise(median(med.cor))
 
-day.cors.df %>%
-  filter(!is.na(beforetest2trial.cor)) %>%
-  sample.by.animal(n=100, other.cols=c('date')) %>%
-  ggplot(aes(x=day_desc, y=beforetest2trial.cor, fill=is.pc)) +
-  geom_violin() +
-  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
-  geom_hline(yintercept = 0.0, linetype='dashed') +
-  #facet_wrap(. ~ animal, ncol=4) +
-  facet_grid(. ~ implant) +
-  gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```{r}
+# day.cors.df %>%
+#   filter(!is.na(beforetest2trial.cor)) %>%
+#   group_by(date, animal, is.pc, implant) %>%
+#   dplyr::summarise(med.cor=median(beforetest2trial.cor)) %>%
+#   group_by(is.pc, implant) %>%
+#   dplyr::summarise(median(med.cor))
+# 
+# day.cors.df %>%
+#   filter(!is.na(beforetest2trial.cor)) %>%
+#   sample.by.animal(n=100, other.cols=c('date')) %>%
+#   ggplot(aes(x=day_desc, y=beforetest2trial.cor, fill=is.pc)) +
+#   geom_violin() +
+#   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+#   geom_hline(yintercept = 0.0, linetype='dashed') +
+#   #facet_wrap(. ~ animal, ncol=4) +
+#   facet_grid(. ~ implant) +
+#   gtheme +
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 Early vs late trial cors
 ```{r}
-day.cors.df %>%
-  filter(!is.na(early.late.cor), exp=='learning') %>%
-  group_by(date, animal, signif.si, implant) %>%
-  dplyr::summarise(med.cor=median(early.late.cor)) %>%
-  group_by(signif.si, implant) %>%
-  dplyr::summarise(median(med.cor),
-                   sem(med.cor))
-
-day.cors.df %>%
-  filter(day_desc != 'learning3 day#3') %>%
-  filter(!is.na(early.late.cor)) %>%
-  #sample.by.animal(other.cols=c('date')) %>%
-  ggplot(aes(x=day_desc, y=early.late.cor, fill=signif.si)) +
-  geom_violin() +
-  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
-  geom_hline(yintercept = 0.3, linetype='dashed') +
-  #facet_wrap(. ~ animal, ncol=4) +
-  facet_grid(implant ~ .) +
-  ylab('Place field correlation:\nearly vs late trials') +
-  xlab('') +
-  labs(fill='Significant\nSpatial Info') +
-  gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1),
-        legend.position = 'right')
-
-ggsave('/tmp/field_cors_earlylate.svg', height=11, width=23, units = 'cm')
+# day.cors.df %>%
+#   filter(!is.na(early.late.cor), exp=='learning') %>%
+#   group_by(date, animal, signif.si, implant) %>%
+#   dplyr::summarise(med.cor=median(early.late.cor)) %>%
+#   group_by(signif.si, implant) %>%
+#   dplyr::summarise(median(med.cor),
+#                    sem(med.cor))
+# 
+# day.cors.df %>%
+#   filter(day_desc != 'learning3 day#3') %>%
+#   filter(!is.na(early.late.cor)) %>%
+#   #sample.by.animal(other.cols=c('date')) %>%
+#   ggplot(aes(x=day_desc, y=early.late.cor, fill=signif.si)) +
+#   geom_violin() +
+#   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+#   geom_hline(yintercept = 0.3, linetype='dashed') +
+#   #facet_wrap(. ~ animal, ncol=4) +
+#   facet_grid(implant ~ .) +
+#   ylab('Place field correlation:\nearly vs late trials') +
+#   xlab('') +
+#   labs(fill='Significant\nSpatial Info') +
+#   gtheme +
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1),
+#         legend.position = 'right')
+# 
+# ggsave('/tmp/field_cors_earlylate.svg', height=11, width=23, units = 'cm')
 ```
 
 Early vs late correlations are higher than late vs after
 ```{r}
-day.cors.df %>%
-  filter(!is.na(aftertest2trial.cor)) %>%
-  dplyr::mutate(late.after.cor.diff = early.late.cor - aftertest2trial.cor) %>%
-  sample.by.animal(nsamples=100, other.cols=c('date')) %>%
-  ggplot(aes(x=implant, y=late.after.cor.diff, fill=signif.si)) +
-  geom_violin() +
-  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
-  geom_hline(yintercept = 0.0, linetype='dashed') +
-  #facet_wrap(. ~ animal, ncol=4) +
-  #facet_grid(implant ~ .) +
-  gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1),
-        legend.position = 'top')
+# day.cors.df %>%
+#   filter(!is.na(aftertest2trial.cor)) %>%
+#   dplyr::mutate(late.after.cor.diff = early.late.cor - aftertest2trial.cor) %>%
+#   sample.by.animal(nsamples=100, other.cols=c('date')) %>%
+#   ggplot(aes(x=implant, y=late.after.cor.diff, fill=signif.si)) +
+#   geom_violin() +
+#   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+#   geom_hline(yintercept = 0.0, linetype='dashed') +
+#   #facet_wrap(. ~ animal, ncol=4) +
+#   #facet_grid(implant ~ .) +
+#   gtheme +
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1),
+#         legend.position = 'top')
 ```
 Median Early vs late correlations are about the same as the before test vs early
 TODO: interesting to look at cells which remapped during the learning. They would have one place field
 in the before and early trials and another after. Therefore, look at cells significant in the late trials, and quantify
 if they moved.
 ```{r}
-day.cors.df %>%
-  filter(!is.na(beforetest2trial.cor)) %>%
-  dplyr::mutate(early.before.cor.diff = early.late.cor - beforetest2trial.cor) %>%
-  sample.by.animal(nsamples=100,  other.cols=c('date')) %>%
-  ggplot(aes(x=implant, y=early.before.cor.diff, fill=signif.si)) +
-  geom_violin() +
-  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
-  geom_hline(yintercept = 0.0, linetype='dashed') +
-  #facet_wrap(. ~ animal, ncol=4) +
-  #facet_grid(implant ~ .) +
-  gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1),
-        legend.position = 'top')
+# day.cors.df %>%
+#   filter(!is.na(beforetest2trial.cor)) %>%
+#   dplyr::mutate(early.before.cor.diff = early.late.cor - beforetest2trial.cor) %>%
+#   sample.by.animal(nsamples=100,  other.cols=c('date')) %>%
+#   ggplot(aes(x=implant, y=early.before.cor.diff, fill=signif.si)) +
+#   geom_violin() +
+#   stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+#   geom_hline(yintercept = 0.0, linetype='dashed') +
+#   #facet_wrap(. ~ animal, ncol=4) +
+#   #facet_grid(implant ~ .) +
+#   gtheme +
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1),
+#         legend.position = 'top')
 ```
 
 Split for habituation and learning
@@ -1266,7 +1283,7 @@ prev.locations.df = data.table(prev.locations.df)
 setkey(prev.locations.df, date, animal)
 
 get.prev.loc.ordinal = function(date_str, animal_name) {
-  x = prev.locations.df[date==date_str & animal==animal_name & !current_loc, location_ordinal]
+  x = prev.locations.df[date==date_str & animal==as.character(animal_name) & !current_loc, location_ordinal]
   if (length(x) == 0) {
     return(-1)
   }

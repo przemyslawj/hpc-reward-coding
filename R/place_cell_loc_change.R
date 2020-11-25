@@ -77,7 +77,9 @@ add.beforetest.ordinal = function(df, day.var=day_desc, ordinal.var=loc_set_ordi
 }
 
 trial.field.dist2current.rew = trial.peaks.at.current.rew %>%
-  dplyr::mutate(animal_cell = join.chars(animal, cell_id))
+  dplyr::mutate(animal_cell = join.chars(animal, cell_id)) %>%
+  add.beforetest.ordinal()
+
 trial.field.dist2fst.moved = trial.peaks.at.fst.moved
 trial.field.dist2snd.moved = create.peaks.df.at.locs(run.fields, snd.moved.location.df, filter(trial.days.df, exp=='habituation'))
 trial.field.dist2thd.moved = create.peaks.df.at.locs(run.fields, thd.moved.location.df, filter(trial.days.df, exp=='habituation'))
@@ -361,7 +363,8 @@ selected.cells.peaks2current.rew.dist = bind_rows(
   dplyr::mutate(active = !!mindist.var <= goal.cell.max.dist) %>%
   dplyr::filter(animal_cell %in% cells.transloc.rew.active.l15)
 
-filtered.cells.peaks2current.rew.dist = filter.cell.present.ntimes(selected.cells.peaks2current.rew.dist, 2, day_desc, !!mindist.var)
+filtered.cells.peaks2current.rew.dist = filter.cell.present.ntimes(
+  selected.cells.peaks2current.rew.dist, 2, day_desc, !!mindist.var)
 filtered.cells.peaks2current.rew.dist$compared_location = 'current reward'
 
 filtered.cells.peaks2fst.rew.dist = 
@@ -383,8 +386,8 @@ left_join(bind_rows(filtered.cells.peaks2current.rew.dist, filtered.cells.peaks2
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   facet_grid(implant ~ compared_location) +
   geom_hline(yintercept = goal.cell.max.dist * perc2dist, linetype = 'dashed') +
-  xlab('') + ylab('Distance to location (cm)') +
-  scale_x_discrete(labels=c('habituation','learning1 day5','learning 2', 'learning 3'))
+  xlab('') + ylab('Distance to location (cm)')
+  #scale_x_discrete(labels=c('habituation','learning1 day5','learning 2', 'learning 3'))
 
 #############################################################################################
 # Distance to current reward for place cells active at fst translocated reward - test probes
@@ -425,24 +428,24 @@ cells.transloc.rew.inactive.l4d1t = get.animal_cells(
 
 # Distance to current reward for place cells active at translocated reward
 selected.cells.peaks2current.rew.dist = bind_rows(
-  dplyr::filter(trial.field.dist2moved.loc, day_desc == 'habituation day#3', moved_loc == 'fst'),
+  dplyr::filter(trial.field.dist2moved.loc, day_desc == 'habituation day#3', moved_loc == 'fst') %>% mutate(loc_set_ordinal=0),
   dplyr::filter(beforetest.field.dist2moved.loc, loc_set_ordinal==1, moved_loc == 'fst'),
   dplyr::filter(beforetest.field.dist2current.rew, loc_set_ordinal %in% c(2,3,4))
 ) %>% 
   dplyr::filter(animal_cell %in% cells.transloc.rew.active.l2d1t)
 
 filtered.cells.peaks2current.rew.dist = filter.cell.present.ntimes(
-  selected.cells.peaks2current.rew.dist, 2, day_desc, !!mindist.var) %>%
+  selected.cells.peaks2current.rew.dist, 2, loc_set_ordinal, !!mindist.var) %>%
   dplyr::mutate(active.at.rew = !!mindist.var <= goal.cell.max.dist)
 filtered.cells.peaks2current.rew.dist$compared_location = 'current reward'
 
 filtered.cells.peaks2fst.rew.dist = bind_rows(
-  dplyr::filter(trial.field.dist2moved.loc, day_desc == 'habituation day#3', moved_loc == 'fst'),
+  dplyr::filter(trial.field.dist2moved.loc, day_desc == 'habituation day#3', moved_loc == 'fst') %>% mutate(loc_set_ordinal=0),
   dplyr::filter(beforetest.field.dist2moved.loc, 
                 moved_loc == 'fst')) %>%
   dplyr::mutate(animal_cell = join.chars(animal, cell_id)) %>%
   dplyr::filter(animal_cell %in% cells.transloc.rew.active.l2d1t) %>%
-  filter.cell.present.ntimes(2, day_desc, !!mindist.var) %>%
+  filter.cell.present.ntimes(2, loc_set_ordinal, !!mindist.var) %>%
   dplyr::mutate(active.at.loc =  !!mindist.var <= goal.cell.max.dist)
 filtered.cells.peaks2fst.rew.dist$compared_location = 'first reward location'
 
@@ -484,16 +487,16 @@ remapped.cells.fromL1toL3 = filter(pc.beforetest.change.df,
 
 left_join(bind_rows(filtered.cells.peaks2current.rew.dist, filtered.cells.peaks2fst.rew.dist), mouse.meta.df) %>%
   dplyr::mutate(unique_cell_id=join.chars(animal, cell_id)) %>%
-  ggplot(aes(x=day_desc, y=!!mindist.var * perc2dist)) +
+  ggplot(aes(x=loc_set_ordinal, y=!!mindist.var * perc2dist)) +
   geom_path(mapping=aes(group=unique_cell_id), alpha=0.5) +
   #geom_violin(alpha=0.6) +
   #stat_summary(fun.y=median, geom="point", size=2) +
   gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  #theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   facet_grid(implant ~ compared_location) +
   geom_hline(yintercept = goal.cell.max.dist * perc2dist, linetype = 'dashed') +
-  xlab('') + ylab('Distance to location (cm)') +
-  scale_x_discrete(labels=c('habituation', 'learning1 probe', 'learning2 probe', 'learning3 probe', 'learning4 probe'))
+  xlab('Rewarded location') + ylab('Distance to location (cm)')
+  #scale_x_discrete(labels=c('habituation', 'learning1 probe', 'learning2 probe', 'learning3 probe', 'learning4 probe'))
 ggsave('/tmp/translocated_distance.svg', units = 'cm', width=8, height=8)
 
 # DF with distance to the current reward, filtered to cells that 

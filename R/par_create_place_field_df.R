@@ -153,5 +153,5 @@ beforetest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$beforetest$df)
 aftertest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$aftertest$df)
 
 print("Saving env variables")
-save.image(file="data/2020-10_pf_smooth_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle20sec_occupancy1sec_gaussvar2.RData")
+save.image(file="data/all_pf_smooth_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle20sec_occupancy1sec_gaussvar2.RData")
 
