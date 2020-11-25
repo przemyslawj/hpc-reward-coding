@@ -598,10 +598,15 @@ plot.xy.cor = function(df, xvar, yvar, facetcols, facetrows=NULL) {
   
   g = df %>%
     filter(!is.na(!!xvar), !is.na(!!yvar)) %>%
-    ggplot() +
-    geom_point(aes(x=!!xvar, y=!!yvar), shape=1) +
+    ggplot(aes(x=!!xvar, y=!!yvar, 
+           text=paste(quo_name(xvar), '=', format(!!xvar, digits=3),
+                       '<br>', quo_name(yvar), '=', format(!!yvar, digits=3),
+                       '<br>animal=', animal))) +
+    geom_point(shape=1, alpha=0.6) +
     geom_abline(slope=1, linetype='dashed') +
-    facet_grid(cols=dplyr::vars(!!facetcols)) +
+    facet_grid(cols=dplyr::vars(!!facetcols), scales='free') +
+    scale_x_log10() +
+    scale_y_log10() +
     gtheme
   
   if (!is.null(get_expr(facetrows))) {
@@ -656,8 +661,7 @@ plot.xy.diff.hist = function(df, xvar, yvar, facetcols, facetrows=NULL, ylab.hei
 }
 ```
 
-Higher fraction of cells in vCA1 that are more active when immobile than mobile.
-TODO: is the same cell_id consistently more active when mobile vs immobile?
+Potentially higher fraction of cells in vCA1 that are more active when immobile than mobile (TODO to quantify).
 ```{r}
 sample.by.animal = function(df, nsamples=50, other.cols=c('date.fst', 'date.snd')) {
   cols = c('animal', other.cols)
@@ -666,16 +670,20 @@ sample.by.animal = function(df, nsamples=50, other.cols=c('date.fst', 'date.snd'
     ungroup()
 }
 
-cell.mobility.mer.diff %>%
-  filter(exp_title != 'homecage') %>%
-  sample.by.animal(n=100, other.cols = c('date', 'exp_title')) %>%
+g = cell.mobility.mer.diff %>%
+  filter(exp_title %in% c('trial', 'beforetest')) %>%
+  filter(day_desc %in% c('learning3 day#1', 'learning2 day#1')) %>%
+  #filter(day_desc %in% c('habituation day#1', 'habituation day#2', 'habituation day#3')) %>%
+  sample.by.animal(n=50, other.cols = c('date', 'exp_title', 'day_desc')) %>%
   plot.xy.cor(mobile, immobile, implant, exp_title) +
   #xlim(c(0, 0.5)) + ylim(c(0, 0.5)) +
   gtheme
+ggplotly(g, tooltip = 'text')
 
 cell.mobility.mer.diff %>%
-  filter(exp_title != 'homecage') %>%
-  sample.by.animal(n=100, other.cols = c('date', 'exp_title')) %>%
+  filter(exp_title %in% c('trial', 'beforetest')) %>%
+  filter(day_desc %in% c('learning3 day#1', 'learning2 day#1')) %>%
+  sample.by.animal(n=50, other.cols = c('date', 'exp_title', 'day_desc')) %>%
   plot.xy.diff.hist(mobile, immobile, implant, exp_title) +
   xlab('MER mobile - immobile')
 
