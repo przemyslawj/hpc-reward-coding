@@ -2,6 +2,7 @@
 % The script requires that the variables: animal and expMonth are present in
 % the environment
 
+
 animal = 'P-BR';
 expMonth = '2020-10';
 expDir = ['/mnt/DATA/Prez/cheeseboard-down/down_2/' expMonth];

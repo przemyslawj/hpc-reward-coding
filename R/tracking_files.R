@@ -27,6 +27,10 @@ get_tracking_files = function(root_dat_dir) {
                                        full.names = TRUE)
 
       for (filepath in tracking_files_list) {
+        if (str_detect(filepath, 'tracking_bac')) {
+          next
+        }
+        
         filename = basename(filepath)
         fileparts = strsplit(filename,'_')[[1]]
         date_str = basename(dated_dir)

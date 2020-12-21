@@ -109,7 +109,7 @@ daytraces.pf.list = foreach(caimg_result_dir=caimg_result_dirs,
   date_str = format(binned.traces.run$date[1])
   animal_str = binned.traces.run$animal[1]
   day.pf = traces2pf(binned.traces.run)
-  list(animal=animal_str, date=date_str, pfval=day.pf)
+  list(animal=animal_str, date=date_str, pfavl=day.pf)
 }
 
 stopCluster(cl)
@@ -125,7 +125,7 @@ beforetest.fields = list()
 beforetest.occupancies = list()
 aftertest.fields = list()
 aftertest.occupancies = list()
-
+  
 for (i in 1:length(daytraces.pf.list)) {
   animal = daytraces.pf.list[[i]]$animal
   date = daytraces.pf.list[[i]]$date
@@ -153,5 +153,5 @@ beforetest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$beforetest$df)
 aftertest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$aftertest$df)
 
 print("Saving env variables")
-save.image(file="data/all_pf_smooth_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle20sec_occupancy1sec_gaussvar2.RData")
+save.image(file="data/20-11-28-all_pf_smooth_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle20sec_occupancy1sec_gaussvar2.RData")
 

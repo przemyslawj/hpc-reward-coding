@@ -25,7 +25,8 @@ find.caimg.dir = function(caimg_result_dirs, subject, date) {
   dirs = Filter(
     function(caimg_dir) {
       grepl(paste0(.Platform$file.sep, subject, .Platform$file.sep), caimg_dir) &&
-        grepl(paste0(.Platform$file.sep, date, .Platform$file.sep), caimg_dir)
+        (grepl(paste0(.Platform$file.sep, date, .Platform$file.sep), caimg_dir) ||
+           grepl(paste0(.Platform$file.sep, str_replace_all(date, '-', '_'), .Platform$file.sep), caimg_dir))
     },
     caimg_result_dirs)  
   
@@ -101,5 +102,11 @@ create.partial.df = function(fieldList, occupancyList, animal_name, day, cell_na
     df$group = group_name
   }
   return(df)
+}
+
+create.hist.tibble = function(vals, hist.breaks) {
+  h = hist(vals, breaks=hist.breaks, plot=FALSE) 
+  ncells = sum(h$counts)
+  tibble(count=h$counts, mid=h$mids, pct.count=count/ncells * 100)
 }
 

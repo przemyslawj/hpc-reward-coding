@@ -11,4 +11,5 @@ gtheme = theme_minimal() + theme_cowplot() +
         axis.text.x=element_text(size=8, colour = "black"),
         axis.text.y=element_text(size=8, colour = "black"),
         axis.title.x = element_text(size=8),
-        axis.title.y = element_text(size=8))
+        axis.title.y = element_text(size=8),
+        plot.title = element_text(size=8))

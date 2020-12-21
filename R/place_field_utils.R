@@ -223,8 +223,29 @@ day.normalize.fields = function(pf.df) {
                   value.field = value.field / max(value.field, na.rm=TRUE))
 }
 
+geom_rewards.current = function(rewards.df, subject=NULL, day=NULL, nbins=20, 
+                                rew.size=2, stroke.size=2) {
+  dayreward.df = rewards.df
+  if (!is.null(subject)) {
+    dayreward.df = filter(rewards.df, animal==subject)
+  }
+  if (!is.null(day)) {
+    dayreward.df = filter(dayreward.df, date==char2date(day))
+  }
+
+  rew.shape = 2
+  bin.size = 100 / nbins
+  list(geom_point(data=dayreward.df, 
+                  aes(x=trans_x / bin.size, y=(100 - trans_y) / bin.size), 
+                  shape=rew.shape,
+                  size=rew.size,
+                  color='#333333',
+                  stroke=stroke.size))
+}
+
 geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20,
-                        rew.colours = c('prev_rew'='gray60', 'current_rew'='white', 'TRUE'='red', 'FALSE'='blue')) {
+                        rew.colours = c('prev_rew'='gray60', 'current_rew'='white', 'TRUE'='red', 'FALSE'='blue'),
+                        rew.size=2) {
   dayreward.df = rewards.df
   if (!is.null(subject)) {
     dayreward.df = filter(rewards.df, animal==subject)
@@ -238,9 +259,7 @@ geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20,
   dayreward.df = dplyr::mutate(
     dayreward.df,
     rew_name = ifelse(current_loc, 'current_rew', 'prev_rew'))
-  #rew.shape = 0
   rew.shape = 2
-  rew.size = 2
   bin.size = 100 / nbins
   list(geom_point(data=dayreward.df, 
                   aes(x=trans_x / bin.size, y=(100 - trans_y) / bin.size, color=rew_name), 
@@ -248,4 +267,14 @@ geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20,
                   size=rew.size,
                   stroke=2),
        scale_color_manual(values=rew.colours))
+}
+
+geom_maze_contour = function(diameter, npoints=100) {
+  r = diameter / 2
+  center = c(r, r)
+  tt = seq(0,2*pi, length.out=npoints)
+  xx = center[1] + r * cos(tt)
+  yy = center[2] + r * sin(tt)
+  circle.df = data.frame(x = xx, y = yy)
+  geom_path(data=circle.df, aes(x=x, y=y), color='#333333')
 }

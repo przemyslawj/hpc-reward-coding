@@ -60,7 +60,6 @@ trackingVars = {'inside_roi', 'smooth_trans_x', 'smooth_trans_y',...
 
 for session_i = 1:numel(session_info.session_fpaths)
     session_fpath_parts = split(session_info.session_fpaths{session_i}, filesep);
-    ts_file_parts = split(session_info.timestamp_files{session_i}, filesep);
 
     traceBySession = mat2cell(ms.RawTraces, sessionLengths);
     deconvTraceBySession = mat2cell(ms.DeconvTraces, sessionLengths);
@@ -69,16 +68,18 @@ for session_i = 1:numel(session_info.session_fpaths)
     %%
     if v3 == 1
         sessionNo = str2num(replace(session_fpath_parts{end}, 'Session', ''));
-        trackingFilepath = getTrackingFilepathV3(sessionNo);
         exp_title = session_fpath_parts{end-3};
+        if strcmp(exp_title, 'test')
+            exp_title = 'beforetest';
+        end
+        trackingFilepath = getTrackingFilepathV3(datedRootDir, dateStr, ...
+            animal, exp_title, sessionNo);
     else
+        ts_file_parts = split(session_info.timestamp_files{session_i}, filesep);
         sessionNo = str2num(replace(ts_file_parts{end-3}, 'Session', ''));
         trackingFilepath = getTrackingFilepathV4(datedRootDir, ...
             dateStr, animal, ts_file_parts);
         exp_title = ts_file_parts{end-5};
-    end
-    if strcmp(exp_title, 'test')
-        exp_title = 'beforetest';
     end
     if 	~exist(trackingFilepath, 'file')
         warning('No tracking file for session: %s', session_info.session_fpaths{session_i})
@@ -155,7 +156,8 @@ cell_mapping.cell_id = ms.cellId';
 writetable(cell_mapping, [caimg_analysis_dir filesep 'filtered' filesep 'cell_mapping.csv']);
 
 %%
-function trackingFilepath = getTrackingFilepathV3(sessionNo)
+function trackingFilepath = getTrackingFilepathV3(datedRootDir,...
+        dateStr, animal, exp_title, sessionNo)
 	trackingDir = fullfile(datedRootDir, exp_title, 'movie', 'tracking');
     filenamepattern = [ dateStr '*' '_' animal '_' 'trial_' num2str(sessionNo) '_positions.csv' ];
     trackfiles = dir(fullfile(trackingDir, filenamepattern));

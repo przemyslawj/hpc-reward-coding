@@ -24,7 +24,7 @@ source('plotting_params.R')
 ```
 
 ```{r}
-dir = '/mnt/DATA/Prez/cheeseboard/'
+dir = '/mnt/DATA/Prez/cheeseboard'
 hab_dirs = map_chr(tracking_rootdirs, ~ paste(.x, 'habituation', sep='/'))
 gen_imgs_dir = '~/tmp/cheeseboard/learning/'
 

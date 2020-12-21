@@ -55,14 +55,16 @@ perc2dist = 1.2
 rew.dist.threshold = 20 / perc2dist
 
 prepare.timebinned.run.traces = function(data.traces, timebin.dur.msec) {
-  data.traces = data.traces[exp_title != 'homecage',]
+  data.traces = data.traces[exp_title != 'homecage' & exp_title != 'aftertest',]
+  
+  data.traces = add.running.col(data.traces, 3.3, 10)
+  data.traces$date = rep(char2date(data.traces$date[1]), nrow(data.traces))
+  setorder(data.traces, exp_title, trial_id, cell_id, timestamp)
   detect.events(data.traces, deconv.threshold=0.2)
+  
+  data.traces = gauss.smooth.df.var(data.traces, filter.len=20, sigma=5.0)
 
-  setorder(data.traces, trial_id, cell_id, timestamp)
-  # running speed min=2cm/s, avg min 4 cm/s
-  running.index = isRunning(data.traces, 1.6, 3.3, 500)
-  #running.index = isRunning(data.traces, 2, 4, 500)
-  timebinned.run = timebin.traces(data.traces[running.index & x > 0 & y > 0, ],
+  timebinned.run = timebin.traces(data.traces[is_running & x > 0 & y > 0, ],
                                   timebin.dur.msec = timebin.dur.msec)
   return(timebinned.run)
 }
@@ -148,11 +150,11 @@ for (caimg_result_dir in test_caimg_dirs) {
 
   get.bin.thresholds.fun = get.quantiles.fun(c(0.95, 1.0))
   binned.habit.traces.run = stimbin.traces.xy(timebinned.habit.traces.run, nbins)
-  binned.habit.traces.run = bin.responses(binned.habit.traces.run, get.bin.thresholds.fun, binned.var='deconv_trace')
+  binned.habit.traces.run = bin.responses(binned.habit.traces.run, get.bin.thresholds.fun, binned.var='smoothed_deconv_trace')
   setkey(binned.habit.traces.run, timestamp, cell_id)
 
   binned.test.traces.run = stimbin.traces.xy(timebinned.test.traces.run, nbins)
-  binned.test.traces.run = bin.responses(binned.test.traces.run, get.bin.thresholds.fun, binned.var='deconv_trace')
+  binned.test.traces.run = bin.responses(binned.test.traces.run, get.bin.thresholds.fun, binned.var='smoothed_deconv_trace')
   setkey(binned.test.traces.run, timestamp, cell_id)
 
   sample.spatial.info = function(timestamps.df, binned.traces, shuffle_i, nshuffles=200) {
@@ -161,7 +163,7 @@ for (caimg_result_dir in test_caimg_dirs) {
     spatial.res = calc.spatial.info(down.binned.traces,
                                     nshuffles=nshuffles,
                                     timebin.dur.msec = timebin.dur.msec,
-                                    trace.var = 'deconv_trace',
+                                    trace.var = 'smoothed_deconv_trace',
                                     min.occupancy.sec=min.occupancy.sec,
                                     shuffle.shift.sec=10,
                                     nbins=nbins,
@@ -172,7 +174,9 @@ for (caimg_result_dir in test_caimg_dirs) {
     fields.df = calc.field.peaks.info(binned.traces$date[1],
                                       binned.traces$animal[1],
                                       spatial.res$field,
-                                      filter.rews.df(beforetest.rewards.df, test.traces$date[1], test.traces$animal[1]),
+                                      filter.rews.df(beforetest.rewards.df, 
+                                                     timebinned.test.traces.run$date[1], 
+                                                     timebinned.test.traces.run$animal[1]),
                                       max.rew.dist.thr = rew.dist.threshold)
     return(left_join(spatial.res$df, fields.df, by=c('cell_id')))
     #return(spatial.res$df)
@@ -190,7 +194,7 @@ for (caimg_result_dir in test_caimg_dirs) {
   # test.trials.si = calc.spatial.info(binned.test.traces.run,
   #                                    nshuffles=1000,
   #                                    timebin.dur.msec=timebin.dur.msec,
-  #                                    trace.var = 'deconv_trace',
+  #                                    trace.var = 'smoothed_deconv_trace',
   #                                    min.occupancy.sec=min.occupancy.sec,
   #                                    shuffle.shift.sec=10,
   #                                    nbins=nbins,
@@ -202,5 +206,5 @@ for (caimg_result_dir in test_caimg_dirs) {
 }
 
 print("Saving env variables")
-save.image(file="data/downsampled_deconv_bin200msec_nbins20_occupancy07sec_gaussvar2_dist15_shuffle_10s.RData")
+save.image(file="data/2020-12-30-downsampled_smoothed_deconv_bin200msec_nbins20_occupancy07sec_gaussvar2_dist15_shuffle_10s.RData")
 

@@ -433,10 +433,10 @@ plot.all.day.fields('M-BR', 1)
 Multicell plot of all day activity for selected cells
 ```{r}
 rewards.df = as.data.table(rewards.df)
-animal_name = 'M-BR'
+animal_name = 'N-BL'
 
 #g.etr = map_dfr(c(89, 90, 99, 122, 139), ~ create.animal.days.df(animal_name, .x)) %>%
-g.etr = map_dfr(c(0, 5, 51, 54,77,97), ~ create.animal.days.df(animal_name, .x)) %>%
+g.etr = map_dfr(c(137, 1, 54, 295, 363, 6), ~ create.animal.days.df(animal_name, .x)) %>%
   create.all.day.pf() %>%
   #filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning3 day#3') %>% 
   filter(day_desc != 'learning3 day#3') %>%
@@ -458,7 +458,9 @@ place.cell.db = data.table(place.cell.db)
 pc.test.df = data.table(pc.test.df)
 beforetest.cell.db = data.table(beforetest.cell.db)
 trials.meta.df = data.table(trials.meta.df)
-plot.rootdir = "/mnt/DATA/Prez/pf-animal-testdays_smooth-reg/"
+plot.rootdir = "/mnt/DATA/Prez/pf-animal-alldays/"
+#plotted.trial.days = c('habituation day#3')
+plotted.trial.days = c()
 
 create.multifields.loc.df = function(...) {
   input.row = tibble(...)
@@ -479,19 +481,24 @@ for (animal_name in names(run.fields)) {
   }
     
   chunk_size = 25
+  if (length(plotted.trial.days) == 0) {
+    plotted.trial.days = unique(rewards.df$day_desc)
+  }
   cell_ids = union(
-    place.cell.db[animal==animal_name & day_desc == 'habituation day#3', cell_id] %>% unique,
+    place.cell.db[animal==animal_name & day_desc %in% plotted.trial.days, cell_id] %>% unique,
     pc.test.df[animal==animal_name, cell_id] %>% unique) %>% 
     sort
   cell_chunks = split(sort(cell_ids), ceiling(seq_along(cell_ids)/chunk_size))
-  merged.rewards.df = bind_rows(filter(rewards.df, animal == animal_name, day_desc == 'habituation day#3'), 
+  
+  merged.rewards.df = bind_rows(filter(rewards.df, animal == animal_name, day_desc %in% plotted.trial.days), 
                                 filter(test.rewards.df, animal == animal_name, exp_title == 'beforetest') %>% 
                                   mutate(day_desc = paste0(day_desc, 't')))
   merged.rewards.df$current_loc = TRUE
   for (chunk_i in seq_along(cell_chunks)) {
     cell_chunk = cell_chunks[[chunk_i]]
     selected.cells.days.df = map_dfr(cell_chunk, ~ create.animal.days.df(animal_name, .x)) %>%
-      filter(day_desc == 'habituation day#3')
+      filter(day_desc %in% plotted.trial.days)
+      
     trials.pf = create.all.day.pf(selected.cells.days.df)
     
     beforetest.pf = map_dfr(cell_chunk, ~ 
@@ -514,18 +521,23 @@ for (animal_name in names(run.fields)) {
       day.normalize.fields()
       
     g.chunk = ggplot() +
-      geom_rect(data=beforetest.days.pf, xmin=0, xmax=100, ymin=0, ymax=100, fill='#bfbfbf', alpha=0.1) +
+      geom_rect(data=beforetest.days.pf, xmin=0, xmax=100, ymin=0, ymax=100, fill='#cccccc') +
       geom_pf(merged.pf.data, max.x=nbins, max.y=nbins) + 
       facet_grid(cell_id ~ day_desc) +
       geom_text(data=cell.desc.df, mapping=aes(x=1, y=nbins - 2, label=desc), size=3, hjust=0) +
       geom_rewards(merged.rewards.df, animal_name, nbins=nbins) +
-      geom_point(data=day.peaks.df, mapping=aes(x=row - 0.5, y=nbins-col + 0.2), color='black', size=2, alpha=0.5) +
       theme(legend.position = 'top')
+    
+    if (nrow(day.peaks.df) > 0) {
+      g.chunk = g.chunk +     
+        geom_point(data=day.peaks.df, mapping=aes(x=pmax(0,row - 0.5), y=pmax(0, nbins-col) + 0.2), 
+                 color='black', size=2, alpha=0.5) 
+    }
     
     filename = paste0('cells_', as.integer(min(cell_chunk)), '-', as.integer(max(cell_chunk)), '.png')
     ggsave(file.path(plot.dir, filename), plot=g.chunk, 
-           #width = 48, height = 60, units = 'cm')
-           width = 13, height = 60, units = 'cm')
+           width = 45, height = 60, units = 'cm')
+           #width = 13, height = 60, units = 'cm')
   }
 }
 ```
