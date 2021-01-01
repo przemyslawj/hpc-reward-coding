@@ -71,18 +71,21 @@ run.trials.si %>%
 ```
 Pct of significant place cells
 ```{r}
-run.trials.si %>%
+g = run.trials.si %>%
+  filter(animal != 'L-TL') %>% 
   group_by(date, day_desc, implant, animal) %>%
   dplyr::summarise(pct.mi.signif=sum(signif.mi, na.rm=TRUE)/n()*100,
                    pct.si.signif=sum(signif.si, na.rm=TRUE)/n()*100) %>%
-  ggplot(aes(x=day_desc)) +
-  geom_point(aes(y=pct.mi.signif, colour='Mutual Info')) +
+  ggplot(aes(x=day_desc, group=animal)) +
+  #geom_point(aes(y=pct.mi.signif, colour='Mutual Info')) +
   geom_point(aes(y=pct.si.signif, colour='Spatial Info')) +
   gtheme +
   geom_hline(yintercept=25, linetype='dashed') +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   facet_grid(implant ~ .) +
   ylab('Significant spatial cells (%)')
+library(plotly)
+ggplotly(g)
 ```
 Increase in mutual information due to higher spatial specificity or due to lower sampling of space.
 Explanations not satisfied:
@@ -129,11 +132,8 @@ sample.by.animal = function(df, nsamples=50, other.cols=c('date.fst', 'date.snd'
 }
 
 mi.thresh = -1.0
-#field.size.thresh.50 = 5
 field.size.thresh.50 = 100
-#field.size.thresh.25 = 10
 field.size.thresh.25 = 100
-#field.peak.thresh = 2
 field.peak.thresh = 0
 field.cor.min = 0.0
 
@@ -215,20 +215,22 @@ run.trials.pc %>%
 ```
 
 
+Count of place cells based on subsampling equal number of cells
 ```{r}
-run.trials.pc %>%
-  filter(exp=='learning', day_desc != 'learning3 day#3') %>%
-  sample.by.animal(n=50, other.cols = c('day_desc')) %>%
-  group_by(animal, implant, day_desc) %>%
-  dplyr::summarise(pc.pct=mean(is.pc),
-                   pc.sem=sem(is.pc),
-                   signif.pct=mean(signif.si)) %>%
-  ggplot(aes(x=day_desc, y=pc.pct, group=implant, color=implant)) +
-  geom_point(position=position_dodge(width=0.5), shape=1) +
-  gtheme +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  xlab('Date') +
-  ylab('Place cells (%)')
+# g = run.trials.pc %>%
+#   #filter(exp=='learning', day_desc != 'learning3 day#3') %>%
+#   sample.by.animal(n=50, other.cols = c('day_desc')) %>%
+#   group_by(animal, implant, day_desc) %>%
+#   dplyr::summarise(pc.pct=mean(is.pc),
+#                    pc.sem=sem(is.pc),
+#                    signif.pct=mean(signif.si)) %>%
+#   ggplot(aes(x=day_desc, y=pc.pct, group=implant, color=implant, text=animal)) +
+#   geom_point(position=position_dodge(width=0.5), shape=1) +
+#   gtheme +
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+#   xlab('Date') +
+#   ylab('Place cells (%)')
+# ggplotly(g)
 ```
 
 
@@ -255,24 +257,23 @@ run.trials.pc %>%
 Sparsity not different between vCA1 and dCA1, possibly larger fields in vCA1
 
 ```{r}
-cheeseboard.bin.cm = 6
-
 compared.pcs.df = place.cell.db %>%
     left_join(trials.meta.df) %>%
     left_join(mouse.meta.df) %>%
-    filter(exp=='habituation', day_desc=='habituation day#3') 
+    filter(animal != 'L-TL') %>%
+    filter(exp=='habituation')
 
 plot.pc.stat = function(metric) {
   metric = enquo(metric)
   compared.pcs.df %>%
     filter(signif.si) %>%
-    group_by(date,animal) %>%
-    sample_n(50, replace=TRUE) %>%
-    ungroup() %>%
+    # group_by(day_desc, animal) %>%
+    # sample_n(50, replace=TRUE) %>%
+    # ungroup() %>%
     ggplot(aes(x=implant, y=!!metric)) +
-    #geom_violin(aes(fill=implant)) +
-    geom_violin() +
-    stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+    geom_violin(fill='#8eabc0ff', color='#8eabc0ff') +
+    geom_jitter(shape=16, width=0.4, height=0, size=0.1, alpha=0.15, color='#333333')+
+    stat_summary(fun.y=median, geom="point", shape=23, size=2, color='white') +
     gtheme +
     xlab('') +
     #gxaxis.blank +
@@ -280,52 +281,69 @@ plot.pc.stat = function(metric) {
           legend.position = 'top')
 }
 
-g.place.cell.count = compared.pcs.df %>%
-  #group_by(implant, animal, date) %>%
-  #dplyr::summarise(day.pc.pct = mean(signif.si) * 100) %>%
-  group_by(implant, animal) %>%
-  #dplyr::summarise(pc.pct=mean(day.pc.pct), pc.sem=sem(day.pc.pct)) %>%
-  dplyr::summarise(pc.pct = mean(signif.si) * 100) %>%
+summary.compared.pcs.df = compared.pcs.df %>%
+  group_by(implant, animal, day_desc) %>%
+  dplyr::summarise(pc.pct = mean(signif.si) * 100)
+
+g.place.cell.count = summary.compared.pcs.df %>%
   ggplot(aes(x=implant, y=pc.pct, group=animal)) +
-  geom_point() +
-  #geom_errorbar(aes(ymin=pc.pct-pc.sem, ymax=pc.pct+pc.sem), width=0.1) +
+  #geom_point(shape=1) +
+  geom_jitter(shape=1, width=0.15, height=0, size=0.5, color='#222222')+
   gtheme +
   ylab('Place cells (%)') + xlab('') + ylim(c(0,80))
  
 plot_grid(
   g.place.cell.count,
   plot.pc.stat(field.size.50 / nbins / nbins * 100) +
-    ylab('Field size\n(% of maze)')  + ylim(c(0,20)),
-#  plot.pc.stat(sparsity)+
-#    ylab('Sparsity'),
-#  plot.pc.stat(mutual.info) +
-#    ylab('Mutual Info\n'),
-  plot.pc.stat(spatial.information) + ylab('Spatial Information\n(bits per dF unit)'),
-  plot.pc.stat(early.late.cor) + ylab('Field stability (correlation of early vs late session)'),
+    ylab('% of maze'),
+  plot.pc.stat(spatial.information) + ylab('bits per dF unit'),
+  plot.pc.stat(early.late.cor) + ylab('early vs late correlation'),
   nrow = 1)
 
 ggsave('/tmp/pf_stats.svg', width=14, height=4.3, units='cm')
 ```
 
 ```{r}
+print('Percent of place cells not different')
+field.size.model = lmerTest::lmer(pc.pct ~ implant + (1 | animal), data=summary.compared.pcs.df, REML=TRUE)
+summary(field.size.model)
+anova(field.size.model, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(field.size.model, 
+                       summary.compared.pcs.df$animal, 
+                       summary.compared.pcs.df$implant)
+
+print('Field size signif larger in vCA1')
+field.size.model = lmerTest::lmer(log(field.size.50 / nbins / nbins * 100) ~ implant + (1 + day_desc | animal), 
+                                  data=compared.pcs.df, REML=TRUE)
+summary(field.size.model)
+anova(field.size.model, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(field.size.model, 
+                       compared.pcs.df$animal, 
+                       compared.pcs.df$implant)
+estimated.val = exp(lsmeansLT(field.size.model)['implantdCA1',]$Estimate[1])
+x = -lsmeansLT(field.size.model, pairwise = TRUE)
+sprintf('Estimate change (log model) by %.0f pct (%.0f; %.0f)', 
+        exp(x$Estimate) * 100,
+        exp(x$lower) * 100,
+        exp(x$upper) * 100)
+
 print('Spatial information not statistically different')
-spatial.info.model = lmerTest::lmer(log(spatial.information + 1) ~ implant + (1 | animal), 
+spatial.info.model = lmerTest::lmer(log(0.05 + spatial.information) ~ implant + (1 + day_desc | animal), 
                                     data=compared.pcs.df, REML=TRUE)
 summary(spatial.info.model)
 anova(spatial.info.model, refit=FALSE, ddf='Satterthwaite')
 plot.model.diagnostics(spatial.info.model, 
                        compared.pcs.df$animal, 
                        compared.pcs.df$implant)
-#wilcox.test(spatial.information ~ implant, data=compared.pcs.df)
 
-print('Field size signif larger in vCA1')
-field.size.model = lmerTest::lmer(log(field.size.50)  ~ implant + (1 | animal), data=compared.pcs.df, REML=TRUE)
-summary(field.size.model)
-anova(field.size.model, refit=FALSE, ddf='Satterthwaite')
-plot.model.diagnostics(field.size.model, 
-                       compared.pcs.df$animal, 
-                       compared.pcs.df$implant)
-#wilcox.test(field.size.50 ~ implant, data=compared.pcs.df)
+print('Day-stability not statistically different')
+early.late.cors.model = lmerTest::lmer(early.late.cor ~ implant + (1 + day_desc | animal), 
+                                      data=compared.pcs.df, REML=TRUE)
+summary(early.late.cors.model)
+anova(early.late.cors.model, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(early.late.cors.model, 
+                       subset(compared.pcs.df, !is.na(early.late.cor))$animal, 
+                       subset(compared.pcs.df, !is.na(early.late.cor))$implant)
 ```
 
 
@@ -610,8 +628,7 @@ compared.habit.trials.df = run.trials.pc2rew.dist %>%
 merged.summary.df = bind_rows(
   summarize.rew.pc.pct(compared.habit.trials.df) %>% mutate(exp='habituation'),
   summary.pc.test.df %>% mutate(exp='test')) %>%
-  filter(animal != 'L-TL') %>% # remove animal with few cells during test 
-  filter(animal != 'C-1R') %>%
+  filter(animal != 'L-TL') %>% 
   dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_'))
 
 # Merge data about which test trials showed the animal learned
@@ -1298,6 +1315,61 @@ habit.fields.at.test.rews = habit.fields.at.test.rews %>%
 
 ## Summary on multiple fields per cell
 
+Fields per cell in dca1 and vCA1: fields have fewer multifields after learning
+```{r}
+npeaks.summary = bind_rows(
+    filter(trial.peaks.at.fst.moved, exp == 'habituation'),
+    beforetest.peaks.fst.moved) %>% 
+  filter(signif.si, npeaks > 0) %>%
+  #filter(day_desc == 'habituation day#3') %>% 
+  group_by(implant, exp, animal, day_desc) %>%
+  dplyr::summarise(create.hist.tibble(npeaks, hist.breaks=seq(0.5,6,1)), ncells=n()) %>%
+  filter(ncells >= 5) %>% # Only include samples with >= 5 cells
+  filter(animal != 'L-TL')
+
+plotted.npeaks.summary = npeaks.summary %>%
+  group_by(implant, exp, mid) %>%
+  dplyr::summarise(pct.mean = mean(pct.count), pct.sem = sem(pct.count)) 
+
+plotted.npeaks.summary %>%
+  ggplot(aes(x=mid, color=exp, fill=exp)) +
+  geom_col(data = filter(plotted.npeaks.summary,exp=='habituation'), 
+           aes(y=pct.mean, color=exp, x=mid), fill='white', stat='identity', position='identity', width=1, alpha=0.5) +
+  geom_errorbar(aes(ymin=pct.mean - pct.sem, ymax=pct.mean + pct.sem), width=0.3) +
+  geom_step(data = filter(plotted.npeaks.summary,exp=='learning'),
+            aes(x=mid-0.5, y=pct.mean), size=2) +
+  facet_wrap(implant ~ .) +
+  scale_color_manual(values=c('#444444', '#0098ff')) +
+  xlab('Peaks count') + ylab('Place cells (%)') +
+  gtheme
+
+```
+```{r}
+multifield.summary = npeaks.summary %>%
+  filter(mid > 1) %>%
+  group_by(implant, exp, animal, day_desc) %>%
+  dplyr::summarise(pct.multifield=sum(pct.count))
+multifield.summary$exp = as.factor(multifield.summary$exp)
+multifield.model = lmerTest::lmer(pct.multifield ~ implant * exp + (1 | animal),
+                                  data=multifield.summary,
+                                  REML=TRUE)
+summary(multifield.model)
+anova(multifield.model, ddf='Satterthwaite')
+plot.model.diagnostics(multifield.model, multifield.summary$animal, multifield.summary$exp)
+x = pairwise.post.hoc(multifield.model, factor.interaction=c('implant:exp'))
+
+# Effect change in percentage points
+get.effect.size.t.test(-x['implantvCA1:exphabituation - implantvCA1:explearning',], 100)
+get.effect.size.t.test(-x['implantdCA1:exphabituation - implantdCA1:explearning',], 100)
+ggplot(multifield.summary, aes(x=exp, y=pct.multifield, color=exp, text=paste(animal, day_desc))) +
+  geom_jitter(height = 0, width=0.3) +
+  facet_grid(. ~ implant) +
+  scale_color_manual(values=c('#444444', '#0098ff')) +
+  gtheme -> g
+ggplotly(g)
+```
+
+
 Changes in the number of fields from habituation to learning by number of peaks
 ```{r}
 bind_rows(
@@ -1416,15 +1488,20 @@ trial.peaks.at.current.rew %>%
 
 
 # Do cells have propoensity to be close to reward?
-TODO: compare number of fields at reward to shuffled number of times
+TODO: only include days when the cell was a place cell
 
 Model of cell randomly assigned at distances following observed distribution
 
 ```{r}
-pc.ids = filter(beforetest.peaks.at.current.rew, signif.si) %>%
-  dplyr::select(animal, cell_id) %>%
-  dplyr::distinct() %>%
+pc.ids = dplyr::group_by(beforetest.peaks.at.current.rew, implant, animal, cell_id) %>%
+  dplyr::summarise(nsignif=sum(signif.si), n=n()) %>%
+  dplyr::filter(nsignif/n >= 0.5) %>%
   dplyr::mutate(animal_cell = paste(animal, cell_id, sep='_')) 
+  
+# filter(beforetest.peaks.at.current.rew, signif.si) %>%
+# dplyr::select(animal, cell_id) %>%
+# dplyr::distinct() %>%
+# dplyr::mutate(animal_cell = paste(animal, cell_id, sep='_')) 
 
 cell.dist.df = beforetest.peaks.at.current.rew %>%
   dplyr::select(implant, animal, date, cell_id, min.rew.dist, npeaks.at.rew) %>%
@@ -1435,7 +1512,7 @@ nsamplings = 1000
 shuffled.cell.dist.df = map_dfr(
   1:nsamplings, ~ dplyr::mutate(cell.dist.df, 
                                 shuffle.id=.x,
-                                shuffle.cell_id = cell_id[shuffle(length(cell_id))]))
+                                shuffle.cell_id = cell_id[permute::shuffle(length(cell_id))]))
 
 shuffled.cell.dist.summary = shuffled.cell.dist.df %>%
   group_by(implant, animal, shuffle.cell_id, shuffle.id) %>%
@@ -1448,7 +1525,7 @@ shuffled.cell.dist.summary = shuffled.cell.dist.df %>%
   dplyr::mutate(group='sampled', line_g=paste0(group, shuffle.id))
 ```
 
-
+mean distance of the cell's field compared to reward with the mean distance calculated when cell identities randomly shuffled.
 ```{r}
 hist.breaks = seq(0, 120, 10)
 
@@ -1463,10 +1540,10 @@ shuffled.cell.dist.hist.summary = shuffled.cell.dist.hist %>%
 shuffled.cell.dist.95p = shuffled.cell.dist.hist %>%
   dplyr::mutate(close_fields = mid <= goal.cell.max.dist * perc2dist) %>%
   dplyr::group_by(implant, shuffle.id, close_fields) %>%
-  dplyr::summarise(npeaks.at.rew=sum(pct.count)) %>% 
+  dplyr::summarise(cells.pct=sum(pct.count)) %>% 
   dplyr::group_by(implant, close_fields) %>%
-  dplyr::summarise(npeaks.05p = quantile(npeaks.at.rew, 0.05)[1],
-                   npeaks.95p = quantile(npeaks.at.rew, 0.95)[1])
+  dplyr::summarise(cells.pct.05p = quantile(cells.pct, 0.05)[1],
+                   cells.pct.95p = quantile(cells.pct, 0.95)[1])
 
 cell.rew.distance.summary = beforetest.peaks.at.current.rew %>%
   filter(paste(animal, cell_id, sep='_') %in% pc.ids$animal_cell) %>%
@@ -1487,20 +1564,38 @@ cell.rew.distance.hist.summary = cell.rew.distance.summary %>%
 
 X = filter(shuffled.cell.dist.95p, close_fields) %>% left_join(
   filter(cell.rew.distance.hist.summary, mid==goal.cell.max.dist * perc2dist - 5)) 
-print(dplyr::select(X, implant, npeaks.05p, npeaks.95p, pct.count.cumsum))
+print(dplyr::select(X, implant, cells.pct.05p, cells.pct.95p, pct.count.cumsum))
 
+ggplot(shuffled.cell.dist.hist.summary) +
+  geom_bar(aes(x=mid, y=m.count), stat='identity', position='dodge',
+           fill='white', color='#444444', width=10, alpha=0.5) +
+  geom_errorbar(aes(x=mid, ymin=m.count-sd.count, ymax=m.count+sd.count), color='#444444', width=4) +
+  geom_step(data=cell.rew.distance.hist.summary, aes(x=mid - 5, y=pct.count), 
+            color='#0098ff', alpha=0.5, size=2) +
+  facet_wrap(. ~ implant) +
+  geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dashed') +
+  xlab('Distance to reward (cm)') +
+  xlim(c(0,100)) +
+  gtheme
+
+```
+
+Number of fields at reward per cell compared to the number after the cell identities randomly shuffled 
+TODO: need to normalize by the number of total rewards when the cell was present
+```{r}
 shuffled.cell.atrew.hist = shuffled.cell.dist.summary %>%
   group_by(implant, shuffle.id) %>%
   dplyr::summarise(create.hist.tibble(npeaks.at.rew, hist.breaks=seq(-0.5,10,1)))  # histogram per shuffle
+  #dplyr::summarise(create.hist.tibble(npeaks.at.rew / (n * 2) * 100, seq(0,100,20)))
 
 # Percentile of cells in the shuffles with few and many fields
 shuffled.pct.atrew.95p = shuffled.cell.atrew.hist %>%
-  dplyr::mutate(few_fields = mid <= 1, many_fields = mid >= 3) %>%
+  dplyr::mutate(few_fields = mid <= 0, many_fields = mid >= 3) %>%
   dplyr::group_by(implant, shuffle.id, few_fields, many_fields) %>%
-  dplyr::summarise(npeaks.at.rew=sum(pct.count)) %>% 
+  dplyr::summarise(cell.pct=sum(pct.count)) %>% 
   dplyr::group_by(implant, few_fields, many_fields) %>%
-  dplyr::summarise(npeaks.05p = quantile(npeaks.at.rew, 0.05)[1],
-                   npeaks.95p = quantile(npeaks.at.rew, 0.95)[1])
+  dplyr::summarise(cell.pct.05p = quantile(cell.pct, 0.05)[1],
+                   cell.pct.95p = quantile(cell.pct, 0.95)[1])
 
 shuffled.cell.atrew.hist.summary = shuffled.cell.atrew.hist %>%
   group_by(implant, mid) %>%
@@ -1509,15 +1604,16 @@ shuffled.cell.atrew.hist.summary = shuffled.cell.atrew.hist %>%
 cell.rew.atrew.hist = cell.rew.distance.summary %>%
   group_by(implant) %>%
   dplyr::summarise(create.hist.tibble(npeaks.at.rew, seq(-0.5,10,1)),
+  #dplyr::summarise(create.hist.tibble(npeaks.at.rew / (n * 2) * 100, seq(0,100,20)),
                    pct.count.cumsum = cumsum(pct.count))
 X = filter(shuffled.pct.atrew.95p, few_fields) %>% left_join(
-  filter(cell.rew.atrew.hist, mid==1)) 
-print(dplyr::select(X, implant, npeaks.05p, npeaks.95p, pct.count.cumsum))
+  filter(cell.rew.atrew.hist, mid==0)) 
+print(dplyr::select(X, implant, cell.pct.05p, cell.pct.95p, pct.count.cumsum))
 
 X = filter(shuffled.pct.atrew.95p, many_fields) %>% left_join(
   dplyr::filter(cell.rew.atrew.hist, mid==2)) %>%
   dplyr::mutate(pct.count.cumsum=100 - pct.count.cumsum)
-print(dplyr::select(X, implant, npeaks.05p, npeaks.95p, pct.count.cumsum))
+print(dplyr::select(X, implant, cell.pct.05p, cell.pct.95p, pct.count.cumsum))
 
 cell.rew.atrew.hist.summary = cell.rew.distance.summary %>%
   group_by(implant) %>%
@@ -1526,24 +1622,13 @@ cell.rew.atrew.hist.summary = cell.rew.distance.summary %>%
 shuffled.cell.atrew.hist.summary %>%
   ggplot(aes(x=mid)) +
   geom_bar(aes(y=m.count),  stat='identity', position='dodge', width=1,
-           fill='white', color='grey60', alpha=0.5) +
-  geom_errorbar(aes(ymin=m.count-sd.count, ymax=m.count+sd.count), width=0.4, color='grey50') +
-  geom_step(data=cell.rew.atrew.hist.summary, aes(x=mid-0.5, y=pct.count), color='blue', size=2) +
-  facet_wrap(. ~ implant) + ylab('Cells (%)') + xlab('# fields at reward') +
-  xlim(c(-0.5, 6)) +
+           fill='white', color='#444444', alpha=0.5) +
+  geom_errorbar(aes(ymin=m.count-sd.count, ymax=m.count+sd.count), width=0.4, color='#444444') +
+  geom_step(data=cell.rew.atrew.hist.summary, aes(x=mid-0.5, y=pct.count), color='#0098ff', size=2) +
+  facet_wrap(. ~ implant) + ylab('Cells (%)') + xlab('rewards with a field (%)') +
+  xlim(c(-0.5, 6.5)) +
   gtheme
 
-ggplot(shuffled.cell.dist.hist.summary) +
-  geom_bar(aes(x=mid, y=m.count), stat='identity', position='dodge',
-           fill='white', color='grey60', width=10, alpha=0.5) +
-  geom_errorbar(aes(x=mid, ymin=m.count-sd.count, ymax=m.count+sd.count), color='grey40', width=4) +
-  geom_step(data=cell.rew.distance.hist.summary, aes(x=mid - 5, y=pct.count), 
-            color='blue', alpha=0.5, size=2) +
-  facet_wrap(. ~ implant) +
-  geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dashed') +
-  xlab('Distance to reward (cm)') +
-  xlim(c(0,100)) +
-  gtheme
 ```
 
 ## Same cells at reward during baited trials
@@ -1633,19 +1718,19 @@ print(dplyr::select(X, implant, npeaks.05p, npeaks.95p, pct.count.cumsum))
 shuffled.cell.atrew.hist.summary %>%
   ggplot(aes(x=mid)) +
   geom_bar(aes(y=m.count),  stat='identity', position='dodge', width=1,
-           fill='white', color='grey60', alpha=0.5) +
-  geom_errorbar(aes(ymin=m.count-sd.count, ymax=m.count+sd.count), width=0.4, color='grey50') +
-  geom_step(data=cell.rew.atrew.hist.summary, aes(x=mid-0.5, y=pct.count), color='blue', size=2) +
+           fill='white', color='#444444', alpha=0.5) +
+  geom_errorbar(aes(ymin=m.count-sd.count, ymax=m.count+sd.count), width=0.4, color='#444444') +
+  geom_step(data=cell.rew.atrew.hist.summary, aes(x=mid-0.5, y=pct.count), color='#0098ff', size=2) +
   facet_wrap(. ~ implant) + ylab('Cells (%)') + xlab('# fields at reward') +
   #xlim(c(-0.5, 6)) +
   gtheme
 
 ggplot(shuffled.cell.dist.hist.summary) +
   geom_bar(aes(x=mid, y=m.count), stat='identity', position='dodge',
-           fill='white', color='grey60', width=10, alpha=0.5) +
-  geom_errorbar(aes(x=mid, ymin=m.count-sd.count, ymax=m.count+sd.count), color='grey40', width=4) +
+           fill='white', color='#444444', width=10, alpha=0.5) +
+  geom_errorbar(aes(x=mid, ymin=m.count-sd.count, ymax=m.count+sd.count), color='#444444', width=4) +
   geom_step(data=cell.rew.distance.hist.summary, aes(x=mid - 5, y=pct.count), 
-            color='blue', alpha=0.5, size=2) +
+            color='#0098ff', alpha=0.5, size=2) +
   facet_wrap(. ~ implant) +
   geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dashed') +
   xlab('Distance to reward (cm)') +

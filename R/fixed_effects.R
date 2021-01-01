@@ -89,3 +89,12 @@ pairwise.post.hoc = function(m.full, factor.interaction=c('implant:is.early.lear
   x$`Pr(>|t|).adj` = p.adjust(x$`Pr(>|t|)`, method=p.adjust.method)
   x                                                                             
 }
+
+get.effect.size.t.test = function(t.test.res, estimated.val, p.val.col='Pr(>|t|).adj') {
+  print(t.test.res[, c('df', 't value', p.val.col)])
+  sprintf('%s, estimate change by %.0f pct (%.0f; %.0f), ', 
+          row.names(t.test.res),
+          t.test.res$Estimate / estimated.val * 100,
+          t.test.res$lower / estimated.val * 100,
+          t.test.res$upper / estimated.val * 100)
+}

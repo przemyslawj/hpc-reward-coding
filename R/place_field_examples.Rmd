@@ -583,12 +583,12 @@ for (i in 1:nrow(animal.cells.df)) {
 
 ## Plot event vectors
 ```{r}
-animal_name = 'F-TL'
-exp_title = 'beforetest'
+animal_name = 'O-TR'
+exp_title = 'trial'
 
 animal.caimg_dirs = Filter(
   function(caimg_dir) {
-    str_detect(caimg_dir, animal_name) & str_detect(caimg_dir, 'learning')
+    str_detect(caimg_dir, animal_name) & str_detect(caimg_dir, 'habituation')
   },
   caimg_result_dirs)
 
@@ -599,7 +599,7 @@ for (caimg_dir in animal.caimg_dirs) {
   if (nrow(data.traces) > 0) {
     setorder(data.traces, trial_id, cell_id, timestamp)
     detect.events(data.traces, deconv.threshold=0.3, minpeakdistance=10)
-    data.traces$is_running = as.logical(isRunning(data.traces, 2, 4, 500))
+    data.traces = add.running.col(data.traces, 3.3, 10)
     binned.traces = bin.time.space(data.traces, 
                                    nbins.x = nbins,
                                    nbins.y = nbins,
@@ -616,6 +616,8 @@ for (caimg_dir in animal.caimg_dirs) {
 ```
 
 ```{r}
+binned.events$date = char2date(binned.events$date)
+paths.df$date = char2date(paths.df$date)
 binned.events = left_join(binned.events, trials.meta.df)
 paths.df = left_join(paths.df, trials.meta.df)
 

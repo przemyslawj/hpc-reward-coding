@@ -577,7 +577,7 @@ dist2current.rew.df = bind_rows(
 # Cells pooled: the rew.active vs inactive have the same distance to the reward
 wilcox.test(min.rew.dist ~ group,
             dist2current.rew.df,
-            subset = implant=='dCA1' & remapped,
+            subset = implant=='vCA1' & remapped,
             paired=FALSE,
             alternative='less')
 

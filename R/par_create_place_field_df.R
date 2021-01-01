@@ -130,28 +130,28 @@ for (i in 1:length(daytraces.pf.list)) {
   animal = daytraces.pf.list[[i]]$animal
   date = daytraces.pf.list[[i]]$date
 
-  run.fields[[animal]][[date]] = daytraces.pf.list[[i]]$pfval$run$field
-  run.occupancies[[animal]][[date]] = daytraces.pf.list[[i]]$pfval$run$occupancy
+  run.fields[[animal]][[date]] = daytraces.pf.list[[i]]$pfavl$run$field
+  run.occupancies[[animal]][[date]] = daytraces.pf.list[[i]]$pfavl$run$occupancy
 
-  early.fields[[animal]][[date]] = daytraces.pf.list[[i]]$pfval$early$field
-  early.occupancies[[animal]][[date]] = daytraces.pf.list[[i]]$pfval$early$occupancy
+  early.fields[[animal]][[date]] = daytraces.pf.list[[i]]$pfavl$early$field
+  early.occupancies[[animal]][[date]] = daytraces.pf.list[[i]]$pfavl$early$occupancy
 
-  late.fields[[animal]][[date]] = daytraces.pf.list[[i]]$pfval$late$field
-  late.occupancies[[animal]][[date]] = daytraces.pf.list[[i]]$pfval$late$occupancy
+  late.fields[[animal]][[date]] = daytraces.pf.list[[i]]$pfavl$late$field
+  late.occupancies[[animal]][[date]] = daytraces.pf.list[[i]]$pfavl$late$occupancy
 
-  beforetest.fields[[animal]][[date]] = daytraces.pf.list[[i]]$pfval$beforetest$field
-  beforetest.occupancies[[animal]][[date]] = daytraces.pf.list[[i]]$pfval$beforetest$occupancy
+  beforetest.fields[[animal]][[date]] = daytraces.pf.list[[i]]$pfavl$beforetest$field
+  beforetest.occupancies[[animal]][[date]] = daytraces.pf.list[[i]]$pfavl$beforetest$occupancy
 
-  aftertest.fields[[animal]][[date]] = daytraces.pf.list[[i]]$pfval$aftertest$field
-  aftertest.occupancies[[animal]][[date]] = daytraces.pf.list[[i]]$pfval$aftertest$occupancy
+  aftertest.fields[[animal]][[date]] = daytraces.pf.list[[i]]$pfavl$aftertest$field
+  aftertest.occupancies[[animal]][[date]] = daytraces.pf.list[[i]]$pfavl$aftertest$occupancy
 }
 
-run.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$run$df)
-early.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$early$df)
-late.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$late$df)
-beforetest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$beforetest$df)
-aftertest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfval$aftertest$df)
+run.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfavl$run$df)
+early.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfavl$early$df)
+late.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfavl$late$df)
+beforetest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfavl$beforetest$df)
+aftertest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfavl$aftertest$df)
 
 print("Saving env variables")
-save.image(file="data/20-11-28-all_pf_smooth_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle20sec_occupancy1sec_gaussvar2.RData")
+save.image(file="data/20-12-31-all_pf_smooth_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle20sec_occupancy1sec_gaussvar2.RData")
 

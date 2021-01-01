@@ -713,14 +713,6 @@ reward.aligned.pop.traces.earlylate.binned = bind_rows(
 reward.aligned.pop.traces.earlylate.binned$bout = as.factor(reward.aligned.pop.traces.earlylate.binned$bout)
 reward.aligned.pop.traces.earlylate.binned$proximal.timestamp = as.factor(reward.aligned.pop.traces.earlylate.binned$proximal.timestamp)
 
-get.effect.size = function(t.test.res, estimated.val) {
-  print(t.test.res[, c('df', 't value', 'Pr(>|t|).adj')])
-  sprintf('%s, estimate change by %.0f pct (%.0f; %.0f), ', 
-          row.names(t.test.res),
-          t.test.res$Estimate / estimated.val * 100,
-          t.test.res$lower / estimated.val * 100,
-          t.test.res$upper / estimated.val * 100)
-}
 
 m.earlylate = lmer.test.print(
   subset(reward.aligned.pop.traces.earlylate.binned, implant=='vCA1'),
@@ -731,12 +723,12 @@ m.earlylate = lmer.test.print(
 x = pairwise.post.hoc(m.earlylate, factor.interaction = c('bout:proximal.timestamp'))
 x
 est.vals = lsmeansLT(m.earlylate)
-get.effect.size(-x['boutlate:proximal.timestampFALSE - boutlate:proximal.timestampTRUE',], 
-                est.vals['boutlate:proximal.timestampFALSE','Estimate'])
-get.effect.size(-x['boutearly:proximal.timestampFALSE - boutearly:proximal.timestampTRUE',], 
-                est.vals['boutearly:proximal.timestampFALSE','Estimate'])
-get.effect.size(-x['boutnon-reward:proximal.timestampFALSE - boutnon-reward:proximal.timestampTRUE',], 
-                est.vals['boutnon-reward:proximal.timestampFALSE','Estimate'])
+get.effect.size.t.test(-x['boutlate:proximal.timestampFALSE - boutlate:proximal.timestampTRUE',], 
+                        est.vals['boutlate:proximal.timestampFALSE','Estimate'])
+get.effect.size.t.test(-x['boutearly:proximal.timestampFALSE - boutearly:proximal.timestampTRUE',], 
+                       est.vals['boutearly:proximal.timestampFALSE','Estimate'])
+get.effect.size.t.test(-x['boutnon-reward:proximal.timestampFALSE - boutnon-reward:proximal.timestampTRUE',], 
+                       est.vals['boutnon-reward:proximal.timestampFALSE','Estimate'])
 
 day.mean.on.arrival = reward.aligned.pop.traces %>%
   filter(aligned_event_id >= 0, timestamp_from_start >= 0, timestamp_from_end >= -5000) %>%

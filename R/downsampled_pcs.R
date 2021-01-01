@@ -114,8 +114,8 @@ next.down.timestamps = function(shuffle.timestamps) {
 }
 
 nbins = 20
-ndownsample_shuffles = 30
-min.occupancy.sec = 0.7
+ndownsample_shuffles = 100
+min.occupancy.sec = 1.0
 timebin.dur.msec = 200
 habit3.days.df = as.data.table(habit3.days.df)
 down.test.si = data.frame()
@@ -206,5 +206,5 @@ for (caimg_result_dir in test_caimg_dirs) {
 }
 
 print("Saving env variables")
-save.image(file="data/2020-12-30-downsampled_smoothed_deconv_bin200msec_nbins20_occupancy07sec_gaussvar2_dist15_shuffle_10s.RData")
+save.image(file="data/2020-12-31-downsampled_smoothed_deconv_bin200msec_nbins20_occupancy1sec_gaussvar2_dist15_shuffle_10s.RData")
 
