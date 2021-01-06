@@ -4,29 +4,38 @@ output: html_notebook
 ---
 
 ```{r}
+library(dplyr)
+library(data.table)
+library(datatrace)
 library(permute)
 
+source('distances.R')
+source('traces_input.R')
+source('locations.R')
+source('plotting_params.R')
+source('fixed_effects.R')
 source('utils.R')
+
 ```
 
 ```{r}
-subset.caimg_result_dirs = caimg_result_dirs[shuffle(caimg_result_dirs)[1:20]]
-
-learning_caimg_result_dirs = Filter(
-  function(caimg_result_dir) { 
-    trial.meta = get.trial.meta.from.path(caimg_result_dir)
-    nrow(rewards.df[animal==trial.meta$animal & date==trial.meta$date, ]) > 0
-  }, 
-  caimg_result_dirs)
+#subset.caimg_result_dirs = caimg_result_dirs[shuffle(caimg_result_dirs)[1:3]]
+subset.caimg_result_dirs = caimg_result_dirs
 
 mouse.meta.df = read.mouse.meta(rootdirs)
 trials.meta.df = read.trials.meta(rootdirs)
+all.locations.df = map_dfr(rootdirs, read_locations)
+rewards.df =  all.locations.df %>%
+  filter(!is_test) %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
 ```
 
 
 
 ```{r}
 xybins = 20
+nbins = 20
 cheeseboard.bin.cm = 120 / xybins
 
 get.max.thr  = function(max.fraction=0.25) {
@@ -45,17 +54,25 @@ prepare.traces = function(data.traces,
                           get.bin.thresholds.fun,
                           filter.running=TRUE,
                           timebin.dur.msec=200) {
-  setorder(data.traces, trial_id, cell_id, timestamp)
-  detect.events(data.traces, deconv.threshold=0.3)
+  data.traces$date = rep(char2date(data.traces$date[1]), nrow(data.traces))
+  setorder(data.traces, exp_title, trial_id, cell_id, timestamp)
+  detect.events(data.traces, deconv.threshold=0.2)
+  # running speed avg > 4 cm/s in 0.5 s window
+  data.traces = add.running.col(data.traces, 3.3, 10)
+  data.traces = gauss.smooth.df.var(data.traces, filter.len=20, sigma=5.0)
+  data.traces[, `:=` (zscored_deconv_trace = zscore(deconv_trace), 
+                      zscored_trace = zscore(trace),
+                      zscored_smooth_deconv_trace = zscore(smoothed_deconv_trace)),
+              by=.(exp_title, cell_id)]
   
   if (filter.running) {
     running.index = isRunning(data.traces, 2, 4, 500) 
-    data.traces.filtered = data.traces[which(running.index), ]
+    data.traces.filtered = data.traces[ x > 0 & y > 0 & is_running, ]
   } else {
-    data.traces.filtered = data.traces
+    data.traces.filtered = data.traces[x > 0 & y > 0,]
   }
   
-  date_str = data.traces$date[1]
+  date_str = format(data.traces$date[1])
   animal_name = data.traces$animal[1]
 
   binned.traces = bin.time.space(data.traces.filtered,
@@ -67,42 +84,43 @@ prepare.traces = function(data.traces,
                                  get.bin.thresholds.fun = get.bin.thresholds.fun,
                                  binned.var=binned.var,
                                  timebin.dur.msec=timebin.dur.msec)
-
-  setorder(binned.traces, time_bin, cell_id)
-  setkey(binned.traces, time_bin, cell_id)
-
   return(binned.traces)
 }
 
-ncells = 50
-nshuffles = 10
-ncells = 0
-nshuffles = 1
-
 many.cells.animals = c('E-BL', 'E-TR', 'F-BL', 'F-TL', 'C-1R', 'D-BR', 'G-BR', 'K-BR')
 
-bayes.spatial.decoder.config = list(
+discrete.bayes.spatial.decoder = list(
   stim.var=quo(bin.xy),
+  value.var=quo(response_bin),
   nstim.bins=xybins^2,
+  train.fun = create.discrete.bayes,
   predict.fun = bayesmax,
   error.fun=bin.distance.error(xybins, xybins)
 )
 
-# eval.config = list(
-#   ncells = 0,
-#   nshuffles = 1,
-#   filter.eval.traces.fun=NULL
-# )
+mfr.bayes.spatial.decoder = list(
+  stim.var=quo(bin.xy),
+  value.var=quo(smoothed_deconv_trace),
+  nstim.bins=xybins^2,
+  train.fun = create.mfr.bayes,
+  predict.fun = bayesmax_mfr,
+  error.fun=bin.distance.error(xybins, xybins)
+)
+```
 
+```{r}
 eval.decoder.same.day = function(caimg_result_dir, 
                                  decoder.config, 
                                  prepare.vars.fun=NULL,
                                  filter.test.traces.fun=NULL,
-                                 min.samples=10) {
+                                 min.samples=10,
+                                 ncells=30, # If ncells == 0, take all cells
+                                 nshuffles=20,
+                                 exp_title='trial') {
   
-  data.traces = read.data.trace(caimg_result_dir, filter_exp_title = 'trial')
+  data.traces = read.data.trace(caimg_result_dir, filter_exp_title = exp_title)
   binned.traces = prepare.traces(data.traces, 
-                                 binned.var='trace',
+                                 binned.var='zscored_trace',
                                  get.bin.thresholds.fun = get.quantiles.fun(c(0.9, 1.0)),
                                  timebin.dur.msec = 200)
   if (nrow(binned.traces) == 0) {
@@ -126,9 +144,9 @@ eval.decoder.same.day = function(caimg_result_dir,
                            nstim.bins=decoder.config$nstim.bins,
                            stim.var=!!decoder.config$stim.var,
                            error.fun=decoder.config$error.fun,
-                           train.fun=create.discrete.bayes,
-                           predict.fun=decoder.config$bayesmax,
-                           value.var=response_bin,
+                           train.fun=decoder.config$train.fun,
+                           predict.fun=decoder.config$predict.fun,
+                           value.var=!!decoder.config$value.var,
                            cv=TRUE,
                            min.samples=min.samples,
                            filter.test.traces.fun=filter.test.traces.fun)
@@ -144,15 +162,6 @@ eval.decoder.same.day = function(caimg_result_dir,
   return(all.shuffles.eval.res)
 }
 
-eval.parts = list()
-for (caimg_result_dir in caimg_result_dirs) {
-  eval.parts[[caimg_result_dir]] = eval.decoder.same.day(
-    caimg_result_dir, 
-    decoder.config=bayes.spatial.decoder.config,
-    min.samples=10)
-  
-}
-spatial.error.df = do.call('rbind', eval.parts)
 
 scale.bins2cm = function(decoding.df) {
   decoding.df$error = decoding.df$error * cheeseboard.bin.cm
@@ -169,8 +178,26 @@ join.meta.dfs = function(df) {
   return(df)
 }
 
+```
+
+
+# Spatial decoder evaluation
+#Evaluate same day on learning and habituation 
+```{r}
+eval.parts = list()
+for (caimg_result_dir in subset.caimg_result_dirs) {
+  eval.parts[[caimg_result_dir]] = eval.decoder.same.day(
+    caimg_result_dir, 
+    decoder.config=discrete.bayes.spatial.decoder,
+    min.samples=10,
+    ncells=30,
+    nshuffles=20)
+}
+
+spatial.error.df = do.call('rbind', eval.parts)
 spatial.error.df = scale.bins2cm(spatial.error.df) %>% join.meta.dfs()
 ```
+
 Utility functions for summarising and plotting the errors
 ```{r}
 create.error.summary = function(df, ...) {
@@ -180,7 +207,9 @@ create.error.summary = function(df, ...) {
     dplyr::summarise(median.error=median(error),
                      sem.error=sem(error),
                      median.random.error=median(random_error),
-                     sem.random.error=sem(random_error))
+                     mean(random_error),
+                     sem.random.error=sem(random_error)) %>%
+    dplyr::mutate(error.fraction = median.error / median.random.error)
 }
 
 group.error.summary = function(df, ...) {
@@ -205,51 +234,33 @@ g.eval.animal.summary = function(error.summary) {
 ```{r spatial_error}
 spatial.error.summary = create.error.summary(spatial.error.df, implant, animal, day_desc) 
 
-group.error.summary(filter(spatial.error.summary, str_starts(day_desc, 'learning')), implant)
+group.error.summary(
+  spatial.error.summary,
+  implant)
 
 spatial.error.summary %>%
   g.eval.animal.summary()
 ```
 
-## Eval excluding the spatial decoder excluding places at the reward
+## Eval the spatial decoder excluding places at the reward
 ```{r}
+bin.size = 100 / nbins
+min.rew.dist.thresh = 15
 spatial.error.df = spatial.error.df %>%
   group_by(implant, animal, date) %>%
   dplyr::mutate(actual.binx=from_1dim(actual.bin.xy, nbins)$x,
                 actual.biny=from_1dim(actual.bin.xy, nbins)$y,
-                min.rew.dist=calc.min.rew.dist(rewards.df, 
-                                               date[1], 
-                                               animal[1], 
+                min.rew.dist=calc.min.rew.dist(filter.rews.df(rewards.df, date[1], animal[1]),
                                                # translate bins to 0-100 coordinates, centre in the middle of the bin
                                                (actual.binx + 0.5) * bin.size,
                                                (actual.biny + 0.5) * bin.size)$rew.dist,
                 is.close2rew = min.rew.dist <= min.rew.dist.thresh)
-
-add.close2rew.fun = function(binned.traces) {
-   date_str = binned.traces$date[1]
-   animal_name = binned.traces$animal[1]
-   binned.traces[, `:=`(
-       closest.location.ordinal=calc.min.rew.dist(rewards.df, date_str, animal_name, x, y)$location.ordinal,
-       min.rew.dist=calc.min.rew.dist(rewards.df, date_str, animal_name, x, y)$rew.dist) 
-     ][, close2rew := as.integer(min.rew.dist <= min.rew.dist.thresh) + 1]
-   binned.traces
- }
-# 
-# exclude.close2rew.fun = function(binned.traces) {
-#   binned.traces[min.rew.dist > min.rew.dist.thresh, ]
-# }
-# 
-# eval.parts = lapply(learning_caimg_result_dirs, eval.decoder.same.day, 
-#                     decoder.config=bayes.spatial.decoder.config,
-#                     prepare.vars.fun=function(df) exclude.close2rew.fun(add.close2rew.fun(df)),
-#                     filter.test.traces.fun=exclude.close2rew.fun)
-# spatial.error.rew.excl = do.call('rbind', eval.parts) %>%
-#   scale.bins2cm() %>% join.meta.dfs()
 ```
 
 ```{r}
 spatial.error.rewdiff.summary = filter(spatial.error.df, !is.na(is.close2rew)) %>%
-  create.eval.summary(implant, animal, day_desc, is.close2rew) %>%
+  #create.eval.summary(implant, animal, day_desc, is.close2rew) %>%
+  create.error.summary(implant, animal, day_desc, is.close2rew) %>%
   dplyr::mutate(close2rew.errorname = ifelse(is.close2rew, 'close2rew.error', 'far2rew.error')) %>%
   reshape2::dcast(implant + animal + day_desc ~ close2rew.errorname, value.var='median.error') %>% 
   dplyr::mutate(median.error.diff = close2rew.error - far2rew.error )
@@ -267,97 +278,231 @@ ggplot(spatial.error.rewdiff.summary, aes(x=day_desc, y=median.error.diff, group
 Is the decoding out of reward constant over days? No, seems a bit better with time.
 ```{r}
 filter(spatial.error.df, !is.close2rew) %>%
-  create.eval.summary(implant, animal, day_desc) %>%
+  create.error.summary(implant, animal, day_desc) %>%
   g.eval.animal.summary()
+```
+
+## Eval beforetest trials
+```{r}
+eval.parts = list()
+for (caimg_result_dir in test_caimg_dirs) {
+  eval.parts[[caimg_result_dir]] = eval.decoder.same.day(
+    caimg_result_dir, 
+    decoder.config=discrete.bayes.spatial.decoder,
+    min.samples=5,
+    ncells=ncells,
+    nshuffles=nshuffles,
+    exp_title='beforetest')
+}
+
+beforetest.spatial.error.df = do.call('rbind', eval.parts)
+beforetest.spatial.error.df = beforetest.spatial.error.df %>% 
+  scale.bins2cm %>%
+  join.meta.dfs()
+```
+
+```{r}
+beforetest.error.summary = create.error.summary(beforetest.spatial.error.df, implant, animal, day_desc)
+
+compare.decoding.error = function(error.summary) {
+  error.model = lmerTest::lmer(error.fraction ~ implant + (1 | animal), 
+                               #median.error ~ implant + (1 | animal), 
+                               data=error.summary,
+                               REML=TRUE)
+  print(summary(error.model))
+  print(anova(error.model, refit=FALSE, ddf='Satterthwaite'))
+  g = plot.model.diagnostics(error.model, error.summary$animal, error.summary$implant)
+  print(g)
+  print(lsmeansLT(error.model))
+  return(error.model)
+}
+habit.error.summary = filter(spatial.error.summary, str_starts(day_desc, 'habituation'))
+print('Compare spatial decoder for habituation')
+compare.decoding.error(habit.error.summary)
+
+learning.error.summary = filter(spatial.error.summary, str_starts(day_desc, 'learning'))
+print('Compare spatial decoder for learning')
+compare.decoding.error(learning.error.summary)
+
+print('Compare spatial decoder for beforetest')
+compare.decoding.error(beforetest.error.summary)
+
+group.error.summary(
+   beforetest.error.summary,
+     implant)
 ```
 
 
 ## Eval on the next day
 ```{r}
-otherday.decoding.df = data.frame()
-
-models = list()
-dates = rep('', length(caimg_result_dirs))
-animal_names = rep('', length(caimg_result_dirs))
-place.cell.db = as.data.table(place.cell.db)
-
-eval.decoder.prev.day = function(caimg_result_dir) {
-  data.traces = read.data.trace(caimg_result_dir, filter_exp_title = 'trial')
-  dates[i] = data.traces$date[i]
-  animal_names[i] = data.traces$animal[i]
-
+# Evaluates the decoders against the test data in caimg_result_dir, create and append a model for the current dir
+eval.decoder.other.day = function(caimg_result_dir, 
+                                  decoder.config,
+                                  trials.meta.df,
+                                  models,
+                                  prepare.vars.fun=NULL,
+                                  filter.training.trace.fun=NULL,
+                                  exp_title='trial',
+                                  max.days.diff=2,
+                                  binned.varname='zscored_trace') {
+  data.traces = read.data.trace(caimg_result_dir, filter_exp_title = exp_title)
+  date_str = format(char2date(data.traces$date[1]))
+  animal_name = data.traces$animal[1]
+  
+  eval.dfs = data.frame()
   binned.traces = prepare.traces(data.traces,
                                  filter.running=TRUE,
-                                 timebin.dur.msec = 500,
-                                 get.bin.thresholds.fun = get.nvenent.thr(0.1),
-                                 binned.var = 'nevents')
+                                 timebin.dur.msec = 200,
+                                 #get.bin.thresholds.fun = get.nvenent.thr(0.1),
+                                 get.bin.thresholds.fun = get.quantiles.fun(c(0.9, 1.0)),
+                                 binned.var=binned.varname)
   
-  if (i > 1 && animal_names[i] == animal_names[i-1] && length(models[[i-1]]) > 0) {
-    model.visited = which(models[[i-1]]$prior > 0)
-    binned.traces.filtered = binned.traces[bin.xy %in% model.visited,]
-    system.time(eval.res <- eval.testdata2(binned.traces.filtered, 
-                                           models[[i-1]], 
-                                           predict.fun=bayes.spatial.decoder.config$predict.fun,
-                                           error.fun=bayes.spatial.decoder.config$error.fun,
-                                           stim.var=!!bayes.spatial.decoder.config$stim.var,
-                                           nstim.bins=bayes.spatial.decoder.config$nstim.bins,
-                                           value.var=response_bin))
-    eval.res$df$test_date = dates[i]
-    eval.res$df$model_date = dates[i-1]
-    eval.res$df$animal = animal_names[i]
-    otherday.decoding.df = bind_rows(otherday.decoding.df, eval.res$df)
+  if (!is.null(prepare.vars.fun)) {
+    binned.traces = prepare.vars.fun(binned.traces)
+  }
+  
+  for (model_date in names(models[[animal_name]])) {
+    model.date.ordinal = filter(trials.meta.df, animal==animal_name, date==model_date) %>% pull(exp_day_ordinal)
+    test.date.ordinal = filter(trials.meta.df, animal==animal_name, date==date_str) %>% pull(exp_day_ordinal)
+    exp.days.diff = test.date.ordinal - model.date.ordinal
+    if (exp.days.diff <= max.days.diff) {
+      tested_model = models[[animal_name]][[model_date]]
+      model.visited = which(tested_model$prior > 0)
+      binned.traces.filtered = binned.traces[get(quo_name(decoder.config$stim.var)) %in% model.visited,]
+      system.time(eval.res <- eval.testdata2(binned.traces.filtered, 
+                                             tested_model, 
+                                             predict.fun=decoder.config$predict.fun,
+                                             error.fun=decoder.config$error.fun,
+                                             stim.var=!!decoder.config$stim.var,
+                                             nstim.bins=decoder.config$nstim.bins,
+                                             value.var=!!decoder.config$value.var))
+      if (nrow(eval.res$df) > 0) {
+        random.classifier.res <- eval.testdata2(binned.traces.filtered, 
+                                                tested_model, 
+                                                predict.fun=random.prior.classifier,
+                                                error.fun=decoder.config$error.fun,
+                                                stim.var=!!decoder.config$stim.var,
+                                                nstim.bins=decoder.config$nstim.bins,
+                                                value.var=!!decoder.config$value.var)
+
+        eval.res$df$random_error = random.classifier.res$df$error
+        eval.res$df$test_date = as.Date(date_str)
+        eval.res$df$model_date = as.Date(model_date)
+        eval.res$df$animal = animal_name
+        eval.res$df$exp_days_diff = exp.days.diff
+        eval.dfs = bind_rows(eval.dfs, eval.res$df)
+      }
+    }
   }
   
   filtered.dfs = filter.sampled(binned.traces, binned.traces[1,], min.samples=10)
-  models[[i]] = create.discrete.bayes(filtered.dfs$train, 
-                                      nstim.bins=xybins^2,
-                                      value.var=response_bin,
-                                      stim.var=bin.xy)
+  if (!is.null(filter.training.trace.fun)) {
+    filtered.dfs$train = filter.training.trace.fun(filtered.dfs$train)  
+  }
+  if (nrow(filtered.dfs$train) > 0) {
+    models[[animal_name]][[format(date_str)]] = decoder.config$train.fun(
+          filtered.dfs$train, 
+          nstim.bins=decoder.config$nstim.bins,
+          value.var=!!decoder.config$value.var,
+          stim.var=!!decoder.config$stim.var)
+  }
+  return(list(df=eval.dfs, models=models))
 }
+```
 
-for (i in 1:length(small.caimg_result_dirs)) {
-  caimg_result_dir = small.caimg_result_dirs[i]
-  eval
+```{r}
+otherday.decoding.df = data.frame()
+models = list()
+#sample.caimg_result_dirs = c(caimg_result_dirs[1:5], caimg_result_dirs[50:55])
+
+for (caimg_result_dir in caimg_result_dirs) {
+  eval.res = eval.decoder.other.day(caimg_result_dir, 
+                                    discrete.bayes.spatial.decoder,
+                                    trials.meta.df,
+                                    models,
+                                    binned.varname = 'zscored_trace')
+  models = eval.res$models
+  otherday.decoding.df = bind_rows(otherday.decoding.df, eval.res$df)
 }
 
 otherday.decoding.df = scale.bins2cm(otherday.decoding.df) %>% 
   left_join(mouse.meta.df, by='animal') %>%
-  left_join(trials.meta.df, by=c("animal", "test_date"="date"))
+  left_join(trials.meta.df, by=c('animal', 'test_date'='date'), suffix=c('', '.test')) %>%
+  left_join(trials.meta.df, by=c('animal', 'model_date'='date'), suffix=c('', '.model'))
 ```
 
 ```{r}
 otherday.decoding.df = data.table(otherday.decoding.df)
 
-data.table(otherday.decoding.df)[,.(med.error=median(error), .N), by=c('implant','animal', 'day_desc')][,.(median(med.error), sem(med.error)), by=c('implant', 'day_desc')]
+data.table(otherday.decoding.df)[exp_days_diff==1,
+                                 .(med.error=median(error), med.random.error=median(random_error), .N), 
+                                 by=c('implant','animal', 'day_desc.model')][,
+                                   .(median(med.error), sem(med.error), median(med.random.error)), by=c('implant', 'day_desc.model')]
 
-data.table(otherday.decoding.df)[,.(med.error=median(error), .N), by=c('implant','animal', 'day_desc')][,.(median(med.error), sem(med.error)), by=c('implant')]
+data.table(otherday.decoding.df)[exp_days_diff==1,
+                                 .(med.error=median(error), med.random.error=median(random_error), .N), 
+                                 by=c('implant','animal', 'day_desc.model')][,
+                                   .(median(med.error), sem(med.error), median(med.random.error)), by=c('implant')]
 
 ```
 
 Plot of decoding summary
 ```{r}
 otherday.eval.summary = otherday.decoding.df %>%
-  group_by(implant, day_desc, animal) %>%
+  filter(exp_days_diff==1) %>%
+  group_by(implant, day_desc.model, animal) %>%
   dplyr::summarise(mean.error=mean(error),
                    median.error=median(error),
                    sd.error=sd(error),
-                   sem.error=sem(error))
+                   sem.error=sem(error),
+                   median.random.error=median(random_error))
 
-ggplot(otherday.eval.summary, aes(x=day_desc, y=median.error, group=animal, color=implant)) +
+ggplot(otherday.eval.summary, aes(x=day_desc.model, y=median.error, group=animal, color=implant)) +
   #geom_point() +
   geom_errorbar(aes(ymin=median.error-sem.error, ymax=median.error+sem.error), width=0.2) +
+  geom_point(aes(y=median.random.error), color='black') +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  ylab('Median error (cm)') + xlab('Prediction day')
+  ylab('Median error (cm)') + xlab('Trained day')
 ```
+
+### Beforetest spatial decoding
+```{r}
+beforetest.otherday.spatial.decoding.df = data.frame()
+models = list()
+for (caimg_result_dir in test_caimg_dirs) {
+  eval.res = eval.decoder.other.day(caimg_result_dir, 
+                                    bayes.spatial.decoder.config,
+                                    trials.meta.df,
+                                    models,
+                                    #filter.training.trace.fun = filter.beforetest.pcs,
+                                    max.days.diff = 6,
+                                    binned.varname = 'zscored_smooth_deconv_trace')
+  models = eval.res$models
+  beforetest.otherday.spatial.decoding.df = bind_rows(beforetest.otherday.spatial.decoding.df, eval.res$df)
+}
+
+beforetest.otherday.spatial.decoding.df = beforetest.otherday.spatial.decoding.df %>%
+  scale.bins2cm() %>% 
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('animal', 'test_date'='date'), suffix=c('', '.test')) %>%
+  left_join(trials.meta.df, by=c('animal', 'model_date'='date'), suffix=c('', '.model'))
+```
+
+```{r}
+create.error.summary(beforetest.otherday.spatial.decoding.df, implant)
+```
+
+
+
 
 Is prediction worse after translocated the reward?
 ```{r}
 tapply(otherday.eval.summary$median.error, otherday.eval.summary$implant, summary)
 
-learning15.eval.sum = subset(otherday.eval.summary, day_desc=='learning1 day#5')
+learning15.eval.sum = subset(otherday.eval.summary, day_desc.model=='learning1 day#5')
 tapply(learning15.eval.sum$median.error, learning15.eval.sum$implant, summary)
 
-learning21.eval.sum = subset(otherday.eval.summary, day_desc=='learning2 day#1')
+learning21.eval.sum = subset(otherday.eval.summary, day_desc.model=='learning2 day#1')
 tapply(learning21.eval.sum$median.error, learning21.eval.sum$implant, summary)
 ```
 
@@ -384,24 +529,20 @@ min.rew.dist = function(day, animal_name, bin.xy) {
               rew.dist=ifelse(min.i==1, dist1, dist2)))
 }
 
-short.decoding.df = decoding.df %>%
-  group_by(date, animal) %>%
+short.decoding.df = spatial.error.df %>%
+  group_by(date, day_desc, implant, animal) %>%
   dplyr::mutate(actual.rew.dist=min.rew.dist(date[1], animal[1], actual.bin.xy)$rew.dist,
                 actual.rew.ordinal=min.rew.dist(date[1], animal[1], actual.bin.xy)$location.ordinal,
                 pred.rew.dist=min.rew.dist(date[1], animal[1], bin.xy)$rew.dist,
                 pred.rew.ordinal=min.rew.dist(date[1], animal[1], bin.xy)$location.ordinal)
-
-
 ```
 Higer error at the reward- maybe doesn't disambiguate
 ```{r}
 short.decoding.df %>%
   filter(actual.rew.dist <= 15) %>%
-  left_join(trials.meta.df) %>%
-  left_join(mouse.meta.df) %>%
   ggplot() +
   #geom_point(aes(x=actual.rew.dist / 5, y=error), alpha=0.1) +
-  geom_violin(aes(x=day_desc, y=error * cheeseboard.bin.cm)) +
+  geom_violin(aes(x=day_desc, y=error)) +
   facet_grid(. ~ implant) +
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
@@ -430,30 +571,42 @@ short.decoding.df %>%
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   ylab('Decoding accuracy')
 ```
-# Decoding if the mouse is at reward
+
+# At reward Decoder
+
+## Eval for same day learning and habituation
 ```{r}
-nshuffles=1
-ncells=0
+nshuffles=20
+ncells=30
 min.rew.dist.thresh = 15
 vca1.animals = subset(mouse.meta.df, implant=='vCA1')$animal %>% as.character()
 
 bayes.atreward.decoder.config = list(
   stim.var = quo(close2rew),
+  value.var = quo(response_bin),
   nstim.bins = 2,
+  train.fun = create.discrete.bayes,
   predict.fun = bayesmax,
   error.fun = function(x,y) {abs(x-y)}
 )
 
-eval.parts = lapply(learning_caimg_result_dirs, eval.decoder.same.day, 
+add.close2rew.var = function(data.trace) {
+  data.trace[, close2rew := as.integer((dist_reward0 <= min.rew.dist.thresh | dist_reward1 <= min.rew.dist.thresh)) + 1]  
+}
+
+eval.parts = lapply(subset.caimg_result_dirs, eval.decoder.same.day, 
                     decoder.config=bayes.atreward.decoder.config,
-                    prepare.vars.fun=add.close2rew.var)
+                    prepare.vars.fun=add.close2rew.var,
+                    min.samples=10,
+                    ncells=ncells,
+                    nshuffles=nshuffles)
 
 close2rew.decoding.df = do.call('rbind', eval.parts) %>%
   join.meta.dfs()
 ```
 
 ```{r}
-data.table(close2rew.decoding.df)[,.(incorrect.pct=mean(error), baseline.pct=mean(random_error)), by=c('animal','day_desc', 'implant')][,.(incorrect.pct=median(incorrect.pct), random.pct=median(baseline.pct)), by=c('implant', 'day_desc')]
+data.table(close2rew.decoding.df)[,.(incorrect.pct=mean(error), baseline.pct=mean(random_error)), by=c('animal','day_desc', 'implant')][,.(incorrect.pct=median(incorrect.pct), random.error.pct=median(baseline.pct)), by=c('implant', 'day_desc')]
 data.table(close2rew.decoding.df)[day_desc=='learning1 day#5',.(incorrect.pct=mean(error), baseline.pct=mean(random_error)), by=c('implant','animal', 'day_desc')][,.(incorrect=median(incorrect.pct), em=sem(incorrect.pct), random=median(baseline.pct)), by='implant']
 ```
 
@@ -471,80 +624,86 @@ ggplot(eval.summary, aes(x=day_desc, group=implant, color=implant)) +
   ylab('Decoding accuracy') + xlab('')
 ```
 
-Eval reward decoder on the next day
+## Eval beforetest trials
 ```{r}
-otherday.rew.decoding.df = data.frame()
 
-rew.models = list()
+mfr.bayes.atreward.decoder.config = list(
+  stim.var = quo(close2rew),
+  value.var = quo(smoothed_deconv_trace),
+  nstim.bins = 2,
+  train.fun = create.mfr.bayes,
+  predict.fun = bayesmax_mfr,
+  error.fun = function(x,y) {abs(x-y)}
+)
 
-dates = rep('', length(learning_caimg_result_dirs))
-animal_names = rep('', length(learning_caimg_result_dirs))
-
-for (i in 1:length(learning_caimg_result_dirs)) {
-  caimg_result_dir = learning_caimg_result_dirs[i]
-  data.traces = read.data.trace(caimg_result_dir, filter_exp_title = 'trial')
-  dates[i] = data.traces$date[i]
-  animal_names[i] = data.traces$animal[i]
-  if (nrow(rewards.df[animal==animal_names[i]& date==dates[i],]) == 0) {
-    next
-  }
-  binned.traces = prepare.traces(data.traces, 
-                                 binned.var='nevents', 
-                                 get.bin.thresholds.fun = get.nvenent.thr(0.1),
-                                 timebin.dur.msec = 200,
-                                 filter.running=TRUE)
-  binned.traces[, `:=`(
-      closest.location.ordinal=calc.min.rew.dist(rewards.df, date[1], animal[1], x, y)$location.ordinal,
-      min.rew.dist=calc.min.rew.dist(rewards.df, date[1], animal[1], x, y)$rew.dist) 
-    ][, close2rew := as.integer(min.rew.dist <= min.rew.dist.thresh) + 1]
-      
-  if (i > 1 && animal_names[i] == animal_names[i-1]) {
-
-    system.time(eval.res <- eval.testdata2(binned.traces, 
-                                           rew.models[[i-1]],
-                                           predict.fun=bayesmax,
-                                           error.fun=function(x,y) {abs(x-y)},
-                                           stim.var=close2rew,
-                                           nstim.bins=2,
-                                           value.var=response_bin)
-    )
-    random.classifier.res <- eval.testdata2(binned.traces, 
-                                        rew.models[[i-1]], 
-                                        predict.fun=random.prior.classifier,
-                                        error.fun=function(x,y) {abs(x-y)},
-                                        stim.var=close2rew,
-                                        nstim.bins=2,
-                                        value.var=response_bin)
-    eval.res$df$random_error = random.classifier.res$df$error
-    eval.res$df$test_date = dates[i]
-    eval.res$df$model_date = dates[i-1]
-    eval.res$df$animal = animal_names[i]
-    otherday.rew.decoding.df = bind_rows(otherday.rew.decoding.df, eval.res$df)
-  }
-  filtered.dfs = filter.sampled(binned.traces, binned.traces[1,], min.samples=10)
-  rew.models[[i]] = create.discrete.bayes(filtered.dfs$train, 
-                                          nstim.bins=2,
-                                          value.var=response_bin,
-                                          stim.var=close2rew)
+eval.parts = list()
+for (caimg_result_dir in test_caimg_dirs) {
+  eval.parts[[caimg_result_dir]] = eval.decoder.same.day(
+    caimg_result_dir, 
+    decoder.config=mfr.bayes.atreward.decoder.config,
+    prepare.vars.fun=add.close2rew.var,
+    min.samples=5,
+    ncells=ncells,
+    nshuffles=nshuffles,
+    exp_title='beforetest')
 }
 
-otherday.rew.decoding.df = otherday.rew.decoding.df %>%
-  left_join(mouse.meta.df, by='animal') %>%
-  left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date'))
-  
-otherday.decoding.df = as.data.table(otherday.decoding.df)
+beforetest.close2rew.df = do.call('rbind', eval.parts)
+beforetest.close2rew.df = beforetest.close2rew.df %>% 
+  join.meta.dfs()
 ```
 
 ```{r}
+beforetest.close2rew.df %>%
+  group_by(implant) %>%
+  dplyr::summarise(mean(error), sem(error), mean(random_error))
+
+data.table(beforetest.close2rew.df)[,.(incorrect.pct=mean(error), baseline.pct=mean(random_error)), by=c('animal','day_desc', 'implant')][,.(incorrect.pct=median(incorrect.pct), random.error.pct=median(baseline.pct)), by=c('implant', 'day_desc')]
+```
+
+
+## Eval reward decoder on another day for beforetest trials
+```{r}
+beforetest.peaks.at.current.rew = as.data.table(beforetest.peaks.at.current.rew)
+filter.beforetest.pcs = function(binned.trace) {
+  beforetest_date = binned.trace$date[1]
+  place_cell_ids = beforetest.peaks.at.current.rew[date == beforetest_date & 
+                                                     animal == binned.trace$animal[1] & 
+                                                     signif.si,
+                                                   (cell_id)]
+  binned.trace[cell_id %in% place_cell_ids, ]
+}
+
+otherday.rew.decoding.df = data.frame()
+models = list()
+for (caimg_result_dir in test_caimg_dirs) {
+  eval.res = eval.decoder.other.day(caimg_result_dir, 
+                                    bayes.atreward.decoder.config,
+                                    trials.meta.df,
+                                    models,
+                                    prepare.vars.fun=add.close2rew.var, 
+                                    filter.training.trace.fun = filter.beforetest.pcs,
+                                    max.days.diff = 6,
+                                    binned.varname = 'zscored_smooth_deconv_trace')
+  models = eval.res$models
+  otherday.rew.decoding.df = bind_rows(otherday.rew.decoding.df, eval.res$df)
+}
+otherday.rew.decoding.df = otherday.rew.decoding.df %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'model_date'='date'), suffix=c('', '.model')) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date'), suffix=c('', '.test'))
+```
+
+
+```{r}
 otherday.rew.decoding.summary = otherday.rew.decoding.df %>%
-  group_by(animal, implant, test_date, day_desc) %>%
+  group_by(animal, implant, day_desc.test, day_desc) %>%
   dplyr::summarise(incorrect.pct=mean(error),
                    random.pct=mean(random_error),
                    incorrect.random.diff = random.pct-incorrect.pct) 
 
 otherday.rew.decoding.summary %>%
   group_by(implant) %>%
-  filter(day_desc=='learning1 day#5') %>%
   dplyr::summarise(mean(incorrect.pct), 
                    sem(incorrect.pct),
                    mean(random.pct),
@@ -566,7 +725,6 @@ tapply(otherday.rew.summary21$incorrect.random.diff, otherday.rew.summary21$impl
 ```
 
 
-
 ```{r}
 otherday.rew.decoding.df %>%
   group_by(animal, implant, test_date, day_desc) %>%
@@ -576,96 +734,6 @@ otherday.rew.decoding.df %>%
   gtheme +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   ylab('Decoding accuracy') + xlab('Decoding day')
-```
-
-
-# Test reward decoder a couple of days later
-```{r}
-model.trials.df = filter(trials.meta.df, day_desc == 'learning1 day#3')
-eval.trials.df = filter(trials.meta.df, day_desc == 'learning2 day#2')
-eval.trials.df = filter(trials.meta.df, day_desc == 'learning3 day#2')
-
-lastday.rew.decoding.df = data.frame()
-
-for (i in 1:nrow(eval.trials.df)) {
-  animal_name = eval.trials.df$animal[i]
-  eval_date_str = eval.trials.df$date[i]
-  eval_caimg_dir = find.caimg.dir(learning_caimg_result_dirs, animal_name, eval_date_str)
-  evaldir.index = which(learning_caimg_result_dirs == eval_caimg_dir)
-  if (length(evaldir.index) == 0) {
-    next
-  }
-  
-  model_date_str = subset(model.trials.df, animal==animal_name)$date
-  model_caimg_dir = find.caimg.dir(learning_caimg_result_dirs, animal_name, model_date_str)
-  modeldir.index = which(learning_caimg_result_dirs == model_caimg_dir)
-  
-  if (length(modeldir.index) == 0) {
-    next
-  }
-  model = rew.models[[modeldir.index]]
-  
-  data.traces = read.data.trace(eval_caimg_dir, filter_exp_title = 'trial')
-
-  if (nrow(rewards.df[animal==animal_name & date==eval_date_str,]) == 0) {
-    next
-  }
-  binned.traces = prepare.traces(data.traces, 
-                                 binned.var='nevents', 
-                                 get.bin.thresholds.fun = get.nvenent.thr(0.1),
-                                 timebin.dur.msec = 500,
-                                 filter.running=TRUE)
-  binned.traces[, `:=`(
-      closest.location.ordinal=calc.min.rew.dist(rewards.df, date[1], animal[1], x, y)$location.ordinal,
-      min.rew.dist=calc.min.rew.dist(rewards.df, date[1], animal[1], x, y)$rew.dist) 
-    ][, close2rew := as.integer(min.rew.dist <= min.rew.dist.thresh) + 1]
-      
-  eval.res <- eval.testdata2(binned.traces, 
-                             model,
-                             predict.fun=bayesmax,
-                             error.fun=function(x,y) {abs(x-y)},
-                             stim.var=close2rew,
-                             nstim.bins=2,
-                             value.var=response_bin)
-  
-  random.classifier.res <- eval.testdata2(binned.traces, 
-                                      model, 
-                                      predict.fun=random.prior.classifier,
-                                      error.fun=function(x,y) {abs(x-y)},
-                                      stim.var=close2rew,
-                                      nstim.bins=2,
-                                      value.var=response_bin)
-  eval.res$df$random_error = random.classifier.res$df$error
-  eval.res$df$test_date = eval_date_str
-  eval.res$df$model_date = model_date_str
-  eval.res$df$animal = animal_name
-  lastday.rew.decoding.df = bind_rows(lastday.rew.decoding.df, eval.res$df)
-    
-}
-
-lastday.rew.decoding.df = lastday.rew.decoding.df %>%
-  left_join(mouse.meta.df, by='animal') %>%
-  left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date'))
-  
-lastday.rew.decoding.df = as.data.table(lastday.rew.decoding.df)
-```
-
-
-```{r}
-lastday.rew.decoding.summary = lastday.rew.decoding.df %>%
-  group_by(animal, implant, day_desc) %>%
-  dplyr::summarise(incorrect.pct=mean(error),
-                   random.pct=mean(random_error),
-                   incorrect.random.diff = random.pct-incorrect.pct) 
-
-lastday.rew.decoding.summary %>%
-  group_by(implant) %>%
-  dplyr::summarise(mean(incorrect.pct), 
-                   sem(incorrect.pct),
-                   mean(random.pct),
-                   sem(random.pct),
-                   n=n()) %>%
-  dplyr::mutate_if(is.double, scales::percent, 1)
 ```
 
 

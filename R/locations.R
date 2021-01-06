@@ -224,6 +224,11 @@ read.trials.meta = function(rootdirs) {
     ifelse(exp == 'habituation', exp, paste0(exp, location_set)), 
     ' day#', 
     day_ordinal))
+  
+  df = df %>% 
+    group_by(animal) %>%
+    arrange(date) %>%
+    dplyr::mutate(exp_day_ordinal = row_number())
   df
 }
 

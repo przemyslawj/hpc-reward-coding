@@ -35,6 +35,14 @@ caimg_result_dirs = Filter(
   function(ca_img_dir) {file.exists(paste(ca_img_dir, 'traces_and_positions.csv', sep='/'))},
   caimg_result_dirs)
 
+test.days.df = map_dfr(rootdirs, read_locations) %>%
+  filter(exp_title == 'beforetest') %>%
+  dplyr::select(animal, date) %>%
+  dplyr::distinct()
+
+test_caimg_dirs = map2(test.days.df$animal, test.days.df$date, ~ find.caimg.dir(caimg_result_dirs, .x, .y))
+test_caimg_dirs = Filter(function(x) !is.na(x), test_caimg_dirs) 
+
 
 prepare.run.dirtraces = function(data.traces, 
                                  nbins, 

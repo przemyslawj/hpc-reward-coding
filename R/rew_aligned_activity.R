@@ -229,14 +229,7 @@ learning_result_dirs = Filter(function(x) {str_detect(x, 'learning')}, caimg_res
 
 mouse.meta.df = read.mouse.meta(rootdirs)
 trials.meta.df = read.trials.meta(rootdirs)
-test.locations.df = map_dfr(rootdirs, read_locations) %>%
-  filter(exp_title == 'beforetest')
-test.days.df = dplyr::select(test.locations.df, animal, date) %>%
-  #filter(animal %in% c('F-BL', 'E-BL')) %>%
-  dplyr::distinct()
 
-test_caimg_dirs = map2(test.days.df$animal, test.days.df$date, ~ find.caimg.dir(caimg_result_dirs, .x, .y))
-test_caimg_dirs = Filter(function(x) !is.na(x), test_caimg_dirs) 
 
 reward.aligned.pop.traces.list = list()
 reward.aligned.pop.traces.by.pc.list = list()
