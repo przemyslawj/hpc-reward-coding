@@ -574,22 +574,35 @@ dist2current.rew.df = bind_rows(
   dplyr::mutate(dist2current.rew.active, group='active'),
   dplyr::mutate(dist2current.rew.inactive, group='inactive'))
 
-# Cells pooled: the rew.active vs inactive have the same distance to the reward
-wilcox.test(min.rew.dist ~ group,
-            dist2current.rew.df,
-            subset = implant=='vCA1' & remapped,
-            paired=FALSE,
-            alternative='less')
 
-rew.dist.model = lmerTest::lmer(log2(2 + min.rew.dist) ~ group + (1 | animal),
+implant_loc = 'dCA1'
+dist2current.rew.df$implant = as.factor(dist2current.rew.df$implant)
+dist2current.rew.df$group = as.factor(dist2current.rew.df$group)
+rew.dist.model = lmerTest::lmer(log(min.rew.dist) ~ group + (1 | animal),
                                 dist2current.rew.df,
                                 REML=TRUE,
-                                subset=implant=='vCA1')
+                                subset=implant==implant_loc)
+
+# The change in vCA1 is partly due to reward-repelled cells
+exp(lsmeansLT(rew.dist.model))
+
+
 plot.model.diagnostics(rew.dist.model,
-                       subset(dist2current.rew.df, implant=='vCA1')$animal,
-                       subset(dist2current.rew.df, implant=='vCA1')$group)
+                       subset(dist2current.rew.df, implant==implant_loc)$animal,
+                       subset(dist2current.rew.df, implant==implant_loc)$group)
 summary(rew.dist.model)
 anova(rew.dist.model, refit=FALSE, ddf='Satterthwaite')
+
+# Bayes factor from Bayesian Information Criterion, formula (10) from http://www.ejwagenmakers.com/2007/pValueProblems.pdf
+rew.dist.model.null = update(rew.dist.model, formula = ~ . -group)
+BF_BIC = exp((BIC(rew.dist.model.null) - BIC(rew.dist.model))/2)
+print(BF_BIC)
+
+# library(BayesFactor)
+# rew.dist.model = BayesFactor::lmBF(val ~ group,
+#                                 data=subset(dist2current.rew.df, implant==implant_loc) %>% mutate(val = log2(2+min.rew.dist)),
+#                                 whichRandom = c('animal'))
+# summary(rew.dist.model)
 
 step.size=20
 dist2current.rew.df %>%
@@ -598,17 +611,19 @@ dist2current.rew.df %>%
   dplyr::summarise(create.hist.tibble(min.rew.dist * perc2dist, seq(0,120,step.size))) %>%
   #filter(remapped) %>%
   ggplot() +
-  geom_step(aes(x=mid-step.size/2, y=pct.count, color=group), alpha=0.6, size=1) +
+  geom_step(aes(x=mid-step.size/2, y=pct.count, color=group, size=group), alpha=1.0) +
   #facet_wrap(animal ~ implant, scales='free') +
-  facet_wrap(. ~ implant, scales='free') +
+  facet_wrap(. ~ implant) +
   geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dashed') +
-  scale_color_manual(values=c('blue', '#999999')) +
+  scale_color_manual(values=c('#0098ff', '#666666')) +
+  scale_size_manual(values=c(1.0, 0.5)) +
   xlab('Distance to reward (cm)') + 
   ylab('Cells (%)') + 
-  labs(linetype='') +
+  labs(linetype='', title='Field distance to reward after translocation') +
   xlim(c(0,100))+
   gtheme
-ggsave('/home/prez/tmp/cheeseboard/reward_active_dist_to_current.svg', width=9, height=4.7, units='cm')
+ggsave('/home/prez/tmp/cheeseboard/reward_active_dist_to_current.pdf', 
+       height=5, width=9, units='cm', device=cairo_pdf, dpi=300)
 
 
 dist2current.rew.df %>%
@@ -647,19 +662,21 @@ g = dist.to.rew.wide.loc2 %>%
                         '<br>rew dist3=', format(min.rew.dist_3 * perc2dist),
                         '<br>animal=', animal,
                         '<br>cell=', cell_id))) +
-  geom_point(shape=1) +
+  geom_point(shape=1, size=0.5, alpha=0.65) +
   facet_grid(. ~ implant) +
   geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dashed') +
   geom_hline(yintercept = goal.cell.max.dist * perc2dist, linetype='dashed') +
-  scale_colour_manual(values = c('blue', '#999999')) +
+  scale_colour_manual(values = c('#0098ff', '#777777')) +
   xlab('Learning 2 distance to reward (cm)') +
   ylab('Learning 3 distance to reward (cm)') +
   ylim(c(0,100)) +
   xlim(c(0,100)) +
+  labs(title="Field's distance to reward after translocations") +
   gtheme
+ggsave('~/tmp/cheeseboard/distance_to_reward_scatterplot.pdf', plot=g, 
+       device = cairo_pdf,
+       units='cm', dpi=300, width=12, height=7)
 ggplotly(g, tooltip = 'text')
-ggsave('~/tmp/cheeseboard/distance_to_reward_scatterplot.svg', plot=g, units='cm',
-       width=14, height=8)
     
 
 beforetest.animal.peaks.notat.rew.pct = dist2current.rew.inactive %>%
@@ -757,39 +774,40 @@ cells.following.pct = cells.comparison.mat %>%
                       names_transform = list(cell_group= ~ str_remove(.x, 'at.rew.pct.')),
                       values_to='at.rew.pct')
 
+implant_loc = 'vCA1'
 t.test(at.rew.pct ~ cell_group,
        data=cells.following.pct,
-       subset=implant=='dCA1',
+       subset=implant==implant_loc,
        paired=TRUE,
        alternative = "less")
 
 # Consider changing to mixed-effects
-t.test(subset(cells.comparison.mat, implant=='dCA1')$mean.dist.reward_cells, 
-       subset(cells.comparison.mat, implant=='dCA1')$mean.dist.other_cells,
+t.test(subset(cells.comparison.mat, implant==implant_loc)$mean.dist.reward_cells, 
+       subset(cells.comparison.mat, implant==implant_loc)$mean.dist.other_cells,
        paired=TRUE)
 
 # dCA1: BF ~= 1/3 - insufficient/modest evidence, strong evidence when BF<1/10
 # vCA1: BF ~= 1/5 - modest evidence
 # Moderate evidence cells which were active are not closer
 library(BayesFactor)
-ttestBF(subset(cells.comparison.mat, implant=='dCA1')$mean.dist.reward_cells, 
-        subset(cells.comparison.mat, implant=='dCA1')$mean.dist.other_cells,
+ttestBF(subset(cells.comparison.mat, implant==implant_loc)$mean.dist.reward_cells, 
+        subset(cells.comparison.mat, implant==implant_loc)$mean.dist.other_cells,
         paired=TRUE,
         rscale=sqrt(2)/2,
         nullInterval=c(-Inf, 0))
-subset(cells.comparison.mat, implant=='dCA1')$med.dist.reward_cells %>% shapiro.test()
-subset(cells.comparison.mat, implant=='dCA1')$med.dist.other_cells %>% shapiro.test()
+subset(cells.comparison.mat, implant==implant_loc)$med.dist.reward_cells %>% shapiro.test()
+subset(cells.comparison.mat, implant==implant_loc)$med.dist.other_cells %>% shapiro.test()
 
 # 
-ttestBF(subset(cells.comparison.mat, implant=='dCA1')$at.rew.pct.reward_cells, 
-        subset(cells.comparison.mat, implant=='dCA1')$at.rew.pct.other_cells,
+ttestBF(subset(cells.comparison.mat, implant==implant_loc)$at.rew.pct.reward_cells, 
+        subset(cells.comparison.mat, implant==implant_loc)$at.rew.pct.other_cells,
         paired=TRUE,
         rscale=sqrt(2)/2,
         nullInterval=c(-Inf, 0))
 
 # Test on quantiles
-t.test(subset(cells.comparison.mat, implant=='dCA1')$quantile30.dist.reward_cells, 
-       subset(cells.comparison.mat, implant=='dCA1')$quantile30.dist.other_cells,
+t.test(subset(cells.comparison.mat, implant==implant_loc)$quantile30.dist.reward_cells, 
+       subset(cells.comparison.mat, implant==implant_loc)$quantile30.dist.other_cells,
        paired=TRUE,
        alternative = "less")
 

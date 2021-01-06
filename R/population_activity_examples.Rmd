@@ -42,17 +42,21 @@ trials.meta.df = read.trials.meta(rootdirs)
 # animal_name = 'G-BR'
 # exp_title='learning'
 # day = '2020-02-10' # learning 3 day2
-#day = '2020-02-05' # learning 1 day5
+
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
+animal_name = 'D-BR'
+exp_title='learning'
+day = '2019-07-29' # learning 2 day2
 
 # root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
 # animal_name = 'O-TR'
 # exp_title='learning'
 # day = '2020_10_17'
 
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
-animal_name = 'N-BR'
-exp_title='learning'
-day = '2020_10_23'
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
+# animal_name = 'N-BR'
+# exp_title='learning'
+# day = '2020_10_23'
 
 caimg_result_dir = find.caimg.dir(caimg_result_dirs, animal_name, day)
 timebin.dur.msec = 200
@@ -138,7 +142,7 @@ wide.behav.traces = behav.traces %>%
 
 Activity raster, cells sorted using t-sne on correlation matix
 ```{r}
-selected.trial = 3
+selected.trial = 1
 
 g.behav = wide.behav.traces %>%
   filter(trial==selected.trial) %>%
@@ -189,7 +193,7 @@ plot_grid(g.raster + xlim(c(0, 80)),
 ggsave('~/tmp/cheeseboard/pop_activity/dca1_sequence.pdf', 
        height=7, width=10, units='cm', device=cairo_pdf, dpi=300)
 
-behav.traces.fragment = behav.traces[trial==selected.trial & timestamp>=9700 & is_running]
+behav.traces.fragment = behav.traces[trial==selected.trial & timestamp>=53000 & is_running]
 behav.traces.fragment$row_id = 1:nrow(behav.traces.fragment)
 ggplot(behav.traces.fragment) +
   geom_path(aes(x=as.integer(x), y=as.integer(100-y), color=row_id)) +
@@ -219,19 +223,21 @@ ggsave('~/tmp/cheeseboard/pop_activity/dca1_sequence2.png',
 Reward centered
 ```{r}
 timebin.dur.msec = 200
+selected.trial=6
 rew.aligned.traces = binned.traces[exp_title=='trial' & trial == selected.trial, 
                                    center.timestamps.around.events(.SD, reward.arriving.bouts[trial == selected.trial], 
                                                                    exp_title[1],
                                                                    padding.after.event=5000/timebin.dur.msec), 
                                    by=.(exp_title, trial_id, cell_id)][aligned_event_id >= 0,]
-rew.aligned.traces.fragment = rew.aligned.traces[timestamp_from_start >= 0 & timestamp_from_end <= 5000]
+rew.aligned.traces.fragment = rew.aligned.traces[timestamp_from_start >= 0 & timestamp_from_end <= 5000 & timestamp_from_end >= -6000]
 gs = plot.approaches(rew.aligned.traces.fragment,
                      rew.aligned.traces.fragment$trial_id[1], 
-                     return.plots = TRUE, cell.active.thr = 0.5, 
+                     return.plots = TRUE, 
+                     cell.active.thr = 0.1, 
                      include.summary.plots = FALSE)
 
 event.ids = unique(rew.aligned.traces.fragment$aligned_event_id)
-event.index = 2
+event.index = 1
 behav.fragment.event = rew.aligned.traces.fragment[aligned_event_id==event.ids[event.index] & timestamp_from_end <= 0 &
                                                    cell_id==rew.aligned.traces.fragment$cell_id[1]]
 
@@ -286,8 +292,10 @@ for (event_id in beforetest.reward.approaches$event_id) {
 
 napproaches = length(g.approaches)
 nrows = ceil(napproaches/3)
-ggsave('/tmp/beforetest_approaches.png',
-      cowplot::plot_grid(plotlist=g.approaches, ncol = 3), height=nrows*7, width=15, units='cm')
+ggsave('beforetest_approaches.png',
+      plot = cowplot::plot_grid(plotlist=g.approaches, ncol = 3), 
+      path = '/tmp',
+      height=nrows*7, width=15, units='cm')
 ```
 
 

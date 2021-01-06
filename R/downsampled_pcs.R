@@ -186,7 +186,7 @@ for (caimg_result_dir in test_caimg_dirs) {
                             ~ sample.spatial.info(shuffle.habit.timestamps, binned.habit.traces.run, .x))
   habit.trials.si$date = binned.habit.traces.run$date[1]
   habit.trials.si$animal = animal_name
-  habit.trials.si$date.test = test.traces$date[1]
+  habit.trials.si$date.test = char2date(test.traces$date[1])
   down.habit.si = bind_rows(down.habit.si, habit.trials.si)
 
   test.trials.si = map_dfr(1:ndownsample_shuffles,
@@ -200,11 +200,12 @@ for (caimg_result_dir in test_caimg_dirs) {
   #                                    nbins=nbins,
   #                                    gaussian.var=2)$df
   #test.trials.si = filter(beforetest.trials.si, animal == animal_name, date == test.traces$date[1])
-  test.trials.si$date = test.traces$date[1]
+  test.trials.si$date = char2date(test.traces$date[1])
   test.trials.si$animal = animal_name
   down.test.si = bind_rows(down.test.si, test.trials.si)
 }
 
+#down.habit.si$date.test = char2date(down.habit.si$date.test)
 print("Saving env variables")
 save.image(file="data/2020-12-31-downsampled_smoothed_deconv_bin200msec_nbins20_occupancy1sec_gaussvar2_dist15_shuffle_10s.RData")
 
