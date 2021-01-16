@@ -2,6 +2,7 @@ library(dplyr)
 library(ggplot2)
 library(rlang)
 library(lmerTest)
+library(BayesFactor)
 
 
 plot.model.diagnostics = function(m, animals, effect_vars) {
@@ -34,6 +35,15 @@ create.animal.summary = function(df, var, ...) {
                      var.sem=sem(!!var))
 }
 
+create.summary = function(df, var, ...) {
+  var = enquo(var)
+  group.vars = enquos(...)
+  group_by(df, !!!group.vars) %>% 
+    dplyr::summarise(var.mean=mean(!!var, na.rm=TRUE),
+                     var.median=median(!!var, na.rm=TRUE),
+                     var.sem=sem(!!var))
+}
+
 plot.val.change.between.groups = function(summary.df, var, group.var) {
   var = enquo(var)
   group.var = enquo(group.var)
@@ -62,8 +72,8 @@ lmer.test.print = function(df,
   fixed.effects = enexpr(fixed.effects)
   diagnostics.groupvar = enquo(diagnostics.groupvar)
   
-  form = glue::glue('{varname} ~ {fixed.effects} + {random.effects}',           
-                    varname=quo_name(var),                                           
+  df = dplyr::mutate(df, yvar = !!var)
+  form = glue::glue('yvar ~ {fixed.effects} + {random.effects}',           
                     fixed.effects=quo_name(fixed.effects),
                     random.effects=randef.str)
   model = lmerTest::lmer(form,
@@ -97,4 +107,54 @@ get.effect.size.t.test = function(t.test.res, estimated.val, p.val.col='Pr(>|t|)
           t.test.res$Estimate / estimated.val * 100,
           t.test.res$lower / estimated.val * 100,
           t.test.res$upper / estimated.val * 100)
+}
+
+#############################################
+### Bayes factor and credibility intervals  #
+#############################################
+# Bayes factor from Bayesian Information Criterion, formula (10) from http://www.ejwagenmakers.com/2007/pValueProblems.pdf
+show.bayes.factor = function(model, null.model) {
+  BF_BIC = exp((BIC(null.model) - BIC(model))/2)
+  #BF_BIC = exp((BIC(model) - BIC(null.model))/2)
+  print(BF_BIC)
+}
+
+create.bayes.lm.pair = function(df, 
+                                formula.full = val ~ 1 + implant + aday,
+                                formula.null = val ~ 1 + aday,
+                                whichRandom='aday',
+                                rscaleRandom='medium',
+                                rscaleFixed='wide',
+                                iterations=1000) {
+  m.full = BayesFactor::lmBF(formula.full, data=df,
+                             whichRandom = whichRandom, 
+                             rscaleRandom = rscaleRandom, 
+                             rscaleFixed = rscaleFixed,
+                             iterations = iterations)
+  m.null = BayesFactor::lmBF(formula.null, data=df,
+                             whichRandom = whichRandom, 
+                             rscaleRandom = rscaleRandom, 
+                             rscaleFixed = rscaleFixed,
+                             iterations = iterations)
+  list(full=m.full, null=m.null)
+}
+
+
+calc.pair.95CI = function(full.model, 
+                          ytransform=function(x) {x}, 
+                          show.percent.change=TRUE,
+                          pair.vars = c('implant-dCA1', 'implant-vCA1')) {
+  samples = BayesFactor::posterior(full.model, iterations = 10000, columnFilter="^aday$")
+  samples.dca1 = ytransform(samples[,'mu'] + samples[, pair.vars[1]])
+  samples.vca1 = ytransform(samples[,'mu'] + samples[, pair.vars[2]])
+  implant.diff.samples = samples.vca1 - samples.dca1
+  out.format = 'Mean diff %.3f CI=[%.3f, %.3f]'
+  if (show.percent.change) {
+    out.format = 'Mean diff %.f pct CI=[%.f, %.f]'
+    implant.diff.samples = samples.vca1 / samples.dca1 * 100 - 100
+  } 
+  conf.inter = quantile(implant.diff.samples, c(0.025, 0.975))
+  sprintf(out.format,
+          mean(implant.diff.samples),
+          conf.inter[1], conf.inter[2]) %>% print
 }

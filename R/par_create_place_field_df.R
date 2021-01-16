@@ -95,7 +95,7 @@ traces2pf = function(binned.traces.run) {
 
 print(paste('Started processing the traces', Sys.time()))
 # balance speed and memory, outfile "" should make the output print display in the console
-cl = makeCluster(3, outfile="")
+cl = makeCluster(2, outfile="")
 registerDoSNOW(cl)
 
 daytraces.pf.list = foreach(caimg_result_dir=caimg_result_dirs,
@@ -153,5 +153,5 @@ beforetest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfavl$beforetest$df)
 aftertest.trials.si = map_dfr(daytraces.pf.list, ~ .x$pfavl$aftertest$df)
 
 print("Saving env variables")
-save.image(file="data/20-12-31-all_pf_smooth_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle20sec_occupancy1sec_gaussvar2.RData")
+save.image(file="data/2021-01-11-all_pf_smooth_deconv_dfs_percentile_95_bin200msec_nbins20_shuffle20sec_occupancy1sec_gaussvar2.RData")
 

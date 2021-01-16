@@ -3,7 +3,7 @@ title: "Cells active between days"
 output: html_notebook
 ---
 
-```{r}
+```{r include=FALSE}
 library(dplyr)
 library(plyr)
 library(pracma)
@@ -13,14 +13,14 @@ library(tibble)
 library(stringr)
 library(DT)
 library(data.table)
+library(datatrace)
 
 library(ggplot2)
 library(cowplot)
 library(plotly)
 library(scales)
 
-gtheme = theme_minimal() + theme_cowplot() + 
-  theme(text = element_text(size=18), axis.text = element_text(size=15))
+
 gxaxis.blank = theme(axis.line.x = element_blank(),
                      axis.title.x = element_blank(),
                      axis.text.x = element_blank(),
@@ -30,25 +30,22 @@ summarise = dplyr::summarise
 summarize = dplyr::summarize
 select = dplyr::select
 
+source('fixed_effects.R')
 source('locations.R')
 source('utils.R')
 source('traces_input.R')
+source('plotting_params.R')
 ```
 
 
 ```{r}
 gen_imgs_dir = '/tmp/'
-```
-
-```{r}
 mouse.meta.df = read.mouse.meta(rootdirs)
 trials.meta.df = read.trials.meta(rootdirs)
 ```
 
 
 ```{r}
-library(datatrace)
-
 fr=20
 cell.trial.activity.df = data.frame()
 cell.trial.mobility.mer = data.frame()
@@ -58,7 +55,10 @@ cell.mobility.mer = data.frame()
 cell.mobility.cors = data.frame()
 timebin.dur.sec = 0.2
 
+behav.summary.df = data.frame()
+
 for (caimg_result_dir in caimg_result_dirs) {
+#for (caimg_result_dir in habit_caimg_dirs) {
   data.traces = read.data.trace(caimg_result_dir)
   data.traces$date = rep(char2date(data.traces$date[1]), nrow(data.traces))
   data.traces = detect.events(data.traces, deconv.threshold=0.3)
@@ -90,6 +90,15 @@ for (caimg_result_dir in caimg_result_dirs) {
   
   cell.trial.activity.df = bind_rows(cell.trial.activity.df, trial.activity.df)
   cell.day.activity.df = bind_rows(cell.day.activity.df, day.activity.df)
+  
+  # Behaviour summary
+  timebinned.traces[, .N]
+  day.behav.summary.df = timebinned.traces[cell_id==timebinned.traces$cell_id[1], 
+                                           .(running_pct = mean(is_running, na.rm=TRUE),
+                                             mean_running_velocity = mean(
+                                               smooth_velocity[which(ifelse(is_running, smooth_velocity, 0) > 0)])),
+                                           by=.(date, animal, exp_title, trial, trial_id)]
+  behav.summary.df = bind_rows(behav.summary.df, day.behav.summary.df)
   
   # MER for mobile vs immobile
   timebinned.traces[, mobile:=ifelse(is_running >= 0.5, 'mobile', 'immobile')]
@@ -143,6 +152,11 @@ cell.trial.mobility.mer = cell.trial.mobility.mer %>%
   left_join(mouse.meta.df, by='animal') %>% 
   left_join(trials.meta.df, by=c('date', 'animal')) %>%
   as.data.table()
+
+behav.summary.df = behav.summary.df %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('date', 'animal')) %>%
+  as.data.table()
 ```
 
 
@@ -174,6 +188,139 @@ g.mer = cell.mobility.mer %>%
   theme(legend.position = 'top')
 g.mer
 ```
+Check for difference in mobility between mice
+```{r}
+trial.behav.summary.df = filter(behav.summary.df, running_pct > 0) %>% # filter trial
+  mutate(aday = paste(animal, day_desc, sep='_'))
+trial.behav.summary.df$aday = as.factor(trial.behav.summary.df$aday) %>% as.integer() %>% as.factor
+g.run.time = trial.behav.summary.df %>%
+  ggplot(aes(y=running_pct, x=implant, text=paste(animal, day_desc))) +
+  geom_jitter(height=0, width=0.3, shape=1, size=0.5, color='#333333') +
+  gtheme +
+  ylab('Time running (%)') + xlab('')
+ggplotly(g.run.time)
+
+g.speed = trial.behav.summary.df %>%
+  ggplot(aes(y=mean_running_velocity * 1.2, x=implant, text=paste(animal, day_desc))) +
+  geom_jitter(height=0, width=0.3, shape=1, size=0.5, color='#333333') +
+  gtheme +
+  ylab('Running speed (cm/s)') + xlab('')
+ggplotly(g.speed)
+
+plot_grid(g.run.time, g.speed)
+ggsave('running_stats.pdf', 
+       path = '/home/prez/tmp/cheeseboard',
+       device=cairo_pdf, units='cm',
+       width=5.5, height=3.3)
+```
+Statistical comparison of time running
+```{r}
+lmer.test.print(trial.behav.summary.df,
+                var = running_pct,
+                fixed.effects = implant,
+                randef.str = '(1 | animal)',
+                diagnostics.groupvar = implant)
+
+models = create.bayes.lm.pair(mutate(trial.behav.summary.df, val=running_pct),
+                              formula.full = val ~ 1 + implant + animal,
+                              formula.null = val ~ 1 + animal,
+                              whichRandom = 'animal',
+                              iterations=100000)
+models$full / models$null
+```
+Statistical comparison of running velocity
+```{r}
+lmer.test.print(trial.behav.summary.df,
+                var = log(mean_running_velocity),
+                fixed.effects = implant,
+                randef.str = '(1 | animal)',
+                diagnostics.groupvar = implant)
+
+models = create.bayes.lm.pair(mutate(trial.behav.summary.df, val=log(mean_running_velocity)),
+                              formula.full = val ~ 1 + implant + animal,
+                              formula.null = val ~ 1 + animal,
+                              whichRandom = 'animal',
+                              iterations = 100000)
+models$full / models$null
+```
+
+
+```{r}
+cell.mobility.mer %>%
+  filter(exp_title == 'trial', exp=='habituation') %>%
+  ggplot(aes(y=event.rate, x=mobile)) +
+  geom_violin(fill=single.colour, color=single.colour) +
+  geom_jitter(shape=16, width=0.4, height=0, size=0.1, alpha=0.15, color='#333333')+
+  stat_summary(fun.y=median, geom="point", shape=23, size=2, color='white') +
+  facet_grid( ~ exp_title + implant) +
+  gtheme +
+  scale_y_log10() +
+  ylab('Event rate (Hz)')
+  #theme(legend.position = 'top')
+
+ggsave('event_rate_stats.pdf', path='/home/prez/tmp/cheeseboard', 
+       width=4.5, height=4.2, units='cm',
+       device=cairo_pdf, dpi=300)
+```
+Statistical comparison
+```{r}
+library(lmerTest)
+habit.mobility.mer = filter(cell.mobility.mer, exp_title == 'trial', exp=='habituation') %>%
+  filter(event.rate > 0) %>%
+  dplyr::mutate(aday = paste(animal, format(date), sep='_'),
+                log.event.rate = log(event.rate))
+habit.mobility.mer$aday = as.factor(habit.mobility.mer$aday) %>% as.integer() %>% as.factor()
+habit.mobility.mer$mobile = as.factor(habit.mobility.mer$mobile)
+
+m = lmerTest::lmer(log(event.rate) ~ implant * mobile + (1 + day_desc | animal),
+                   data=habit.mobility.mer,
+                   REML=TRUE)
+summary(m)
+anova(m, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(m, 
+                       habit.mobility.mer$animal, 
+                       habit.mobility.mer$implant)
+pairwise.post.hoc(m, factor.interaction = c('implant:mobile'))
+
+group_by(habit.mobility.mer, implant, mobile) %>%
+  dplyr::summarise(mean(event.rate), median(event.rate), sem(event.rate))
+
+models = create.bayes.lm.pair(habit.mobility.mer,
+                              formula.full = log.event.rate ~ implant * mobile + aday,
+                              formula.null = log.event.rate ~ implant + mobile + aday,
+                              whichRandom = 'aday', iterations=10000)
+models$full/models$null
+calc.pair.95CI(models$full, pair.vars = c('implant-dCA1', 'implant-vCA1'))
+
+samples = BayesFactor::posterior(models$full, iterations = 10000, columnFilter="^aday$")
+samples.mobile.dca1 = samples[, 'mu'] + samples[, 'implant-dCA1'] + samples[, 'mobile-mobile'] + samples[, 'implant:mobile-dCA1.&.mobile']
+samples.mobile.dca1 = samples[, 'mu'] + samples[, 'implant:mobile-dCA1.&.mobile']
+samples.immobile.dca1 = samples[, 'mu'] + samples[, 'implant-dCA1'] + samples[, 'mobile-immobile'] + samples[, 'implant:mobile-dCA1.&.immobile']
+dca1.mobility.diff = samples[, 'mobile-mobile'] - samples[, 'mobile-immobile'] + 
+  samples[, 'implant:mobile-dCA1.&.immobile'] - samples[, 'implant:mobile-dCA1.&.mobile']
+samples.mobile.vca1 = samples[, 'mu'] + samples[, 'implant-vCA1'] + samples[, 'mobile-mobile'] + samples[, 'implant:mobile-vCA1.&.mobile']
+samples.mobile.vca1 = samples[, 'mu'] + samples[, 'implant:mobile-vCA1.&.mobile']
+samples.immobile.vca1 = samples[, 'mu'] + samples[, 'implant-vCA1'] + samples[, 'mobile-immobile'] + samples[, 'implant:mobile-vCA1.&.immobile']
+
+exp(samples.mobile.dca1 - samples.immobile.dca1) %>% summary
+exp(samples.mobile.vca1 - samples.immobile.vca1) %>% summary
+```
+
+Bayes models not modelling posterior correctly - or does it? check if mean per animal more representative
+```{r}
+models = create.bayes.lm.pair(subset(habit.mobility.mer, implant=='vCA1'),
+                              formula.full = log.event.rate ~ 1 + mobile + aday,
+                              formula.null = log.event.rate ~ 1 + aday,
+                              whichRandom = 'aday', iterations=10000)
+models$full/models$null
+samples = BayesFactor::posterior(models$full, iterations = 10000, columnFilter="^aday$")
+calc.pair.95CI(models$full, pair.vars = c('mobile-mobile', 'mobile-immobile'),
+               ytransform = exp)
+```
+
+
+
+
 Event rates of cells during different experiments on the same day
 ```{r}
 selected.days = c('habituation day#1', 'habituation day#3', 
@@ -187,7 +334,7 @@ filter(cell.mobility.mer, day_desc %in% selected.days) %>%
 ```
 Is the beforetest event rate highest due to running? doesn't explain lower in aftertest
 
-Count of active cells:
+Count of active cells per animal:
 ```{r}
 filter(cell.day.activity.df, exp_title=='trial') %>%
   group_by(animal, date) %>%
@@ -198,6 +345,20 @@ filter(cell.day.activity.df, exp_title=='trial') %>%
   dplyr::mutate_if(is.numeric, round, 0) %>%
   DT::datatable()
 ```
+
+Active cells per implant
+```{r}
+filter(cell.day.activity.df, exp_title=='trial') %>%
+  group_by(implant, animal, date) %>%
+  dplyr::summarise(n=n()) %>%
+  group_by(implant) %>%
+  dplyr::summarise(mean.n=mean(n),
+                   sem.n=sem(n),
+                   animal_n=length(unique(animal))) %>%
+  dplyr::mutate_if(is.numeric, round, 0) %>%
+  DT::datatable()
+```
+
 
 # Cell activity across days and trials
 
@@ -286,7 +447,7 @@ trial.median.eventrate = median(day.mer.df$median.er)
 
 g = trial.mer.df %>%
   filter(exp_title == 'trial', implant=='dCA1', mobile=='mobile') %>%
-  filter(str_starts(day_desc, 'learning1')) %>%
+  #filter(str_starts(day_desc, 'learning1')) %>%
   group_by(trial_name, exp_title, implant, animal) %>%
   dplyr::summarise(group.med.er = median(median.er),
                    group.mean.er = mean(mean.er)) %>%

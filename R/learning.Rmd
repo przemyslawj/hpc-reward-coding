@@ -5,8 +5,9 @@ output:
     df_print: paged
 ---
 
+Before running the notebook run trial_stats.R.
 
-```{r imports}
+```{r imports, include=FALSE}
 library(dplyr)
 library(ggplot2)
 library(cowplot)
@@ -20,6 +21,8 @@ source('crossings.R')
 source('distances.R')
 source('locations.R')
 source('tracking_files.R')
+source('tracking_info.R')
+source('traces_input.R')
 source('plotting_params.R')
 ```
 
@@ -30,53 +33,21 @@ gen_imgs_dir = '~/tmp/cheeseboard/learning/'
 
 df = read_csv(paste0(dir, '/trial_stats.csv'))
 locations.df = map_dfr(rootdirs, read_locations)
+trials.meta.df = read.trials.meta(rootdirs)
+mouse.meta.df = read.mouse.meta(rootdirs)
 
 behav_cam_frame_rate = 24
-```
-
-
-Filter invalid trials (e.g. no reward on the maze..)
-```{r}
-#invalid_df = read_csv(paste0(dir, '/invalid_trials.csv'))
-#df = left_join(df, invalid_df, by = c('date', 'animal', 'trial_n', 'is_test'), suffix=c('', '.y')) %>%
-#  filter(is.na(invalid) || invalid == FALSE)
-```
-
-```{r}
-df = df %>%
-  dplyr::mutate(total_trial_n=6*(learning_day1 - 1) + trial_n) 
+cheeseboard.len.cm = 120
 ```
 
 
 ```{r}
+df = dplyr::mutate(df, total_trial_n = 8*(learning_day1 - 1) + trial_n) %>%
+    filter(!animal %in% c('A-BL', 'C-1R', 'L-TL', 'P-BR'))  # Animals not included
+
 notest.df = filter(df, exp_title == 'trial')
-```
-
-Total distance travelled
-```{r}
 d = notest.df 
 d$learning_day1 = as.factor(d$learning_day1)
-
-gdist = d %>%
-  filter(time_finished > 0) %>%
-  ggplot() +
-  geom_boxplot(aes(x=learning_day1, y=total_dist/100)) +
-  #geom_jitter(aes(x=learning_day1, y=mdist/100, color=animal),height=0, width=0.1, size=1) +
-  geom_point(aes(x=learning_day1, y=total_dist/100, color=animal), size=2) +
-  gtheme +
-  xlab('Training day') +
-  ylim(c(0,20)) +
-  ylab('Total distance') +
-  geom_hline(yintercept=1, linetype="dashed", color = "black") +
-  geom_vline(xintercept=7.5, linetype="dashed", color = "red") +
-  geom_vline(xintercept=11.5, linetype='dashed', color='blue') +
-  geom_vline(xintercept=15.5, linetype='dashed', color='red') +
-  ylim(c(0, 15)) +
-  gtheme+
-  theme(legend.position = 'none')
-gdist
-
-ggsave(paste0(gen_imgs_dir, 'learning_dist.svg'), width=7, height=4)
 ```
 
 
@@ -102,13 +73,6 @@ ggsave(filename='gdist.svg', plot=gdist, width=5)
 ggsave(filename='gdur.svg', plot=gdur, width=5)
 ```
 
-Total number of crossings
-```{r}
-ggplot(d) +
-  geom_boxplot(aes(x=learning_day1, y=crossings_n)) +
-  ylim(c(0,10))
-```
-
 Total distance travelled per mouse
 ```{r}
 d %>% 
@@ -121,7 +85,7 @@ d %>%
 
 ```
 
-Diff from optimal path
+Difference from optimal path
 ```{r}
 path_len = function(points) {
   len = 0
@@ -142,25 +106,90 @@ d2 = d %>%
   dplyr::mutate(min_path1=path_len(list(x=c(start_x, rew1_x, rew2_x), y=c(start_y, rew1_y, rew2_y))),
                 min_path2=path_len(list(x=c(start_x, rew2_x, rew1_x), y=c(start_y, rew2_y, rew1_y))),
                 min_path=ifelse(min_path1<min_path2, min_path1, min_path2),
-                norm_dist=total_dist / min_path * 100)
+                norm_dist=total_dist / min_path)
          
-gdist = d2 %>%
-  ggplot() +
-  geom_boxplot(aes(x=learning_day1, y=norm_dist)) +
-  #geom_jitter(aes(x=learning_day1, y=mdist/100, color=animal),height=0, width=0.1, size=1) +
-  geom_point(aes(x=learning_day1, y=norm_dist, color=animal)) +
+d2 %>%
+  ggplot(aes(x=learning_day1, y=norm_dist)) +
+  geom_violin(fill=single.colour, color=single.colour) +
+  geom_jitter(height=0, width=0.1, size=0.5, shape=1, color='#333333') +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2, color='white', size=2) +
+  #geom_point(aes(x=learning_day1, y=norm_dist)) +
   gtheme +
   xlab('Training day') +
   ylab('Norm. distance') +
   #ylim(c(0,20))+
-  geom_hline(yintercept=100, linetype="dashed", color = "black") +
+  scale_y_log10() +
+  #geom_hline(yintercept=1, linetype="dashed", color = "black") +
   geom_vline(xintercept=5.5, linetype="dashed", color = "red") +
   geom_vline(xintercept=7.5, linetype="dashed", color = "red") +
   geom_vline(xintercept=11.5, linetype='dashed', color='blue') +
-  geom_vline(xintercept=15.5, linetype='dashed', color='red') 
+  geom_vline(xintercept=15.5, linetype='dashed', color='red')
 
-gdist
 ```
+
+Trial mean over time
+```{r}
+alltrial.mean.dist = d2 %>% 
+  filter(time_finished > 0 & time_finished <= 180) %>%
+  mutate(dist_m = total_dist / cheeseboard.len.cm) %>%
+  group_by(total_trial_n) %>%
+  dplyr::summarise(mean.total_dist = mean(dist_m),
+                   sem.total_dist = sem(dist_m))
+ggplot(alltrial.mean.dist, aes(x=as.integer(total_trial_n))) +
+  geom_errorbar(aes(ymin=mean.total_dist-sem.total_dist,
+                  ymax=mean.total_dist+sem.total_dist,
+                  group=1), color='#333333') +
+  geom_vline(xintercept=40.5, linetype="dashed", color = "#444444") +
+  geom_vline(xintercept=56.5, linetype="dashed", color = "#444444") +
+  geom_vline(xintercept=72.5, linetype="dashed", color = "#444444") +
+  scale_x_continuous(limits=c(0,72.5), breaks=seq(1, 72, 8)) +
+  xlab('Trial') +
+  ylab('Distance travelled (m)') +
+  gtheme
+
+ggsave('learning_trials_distance.pdf', path='/home/prez/tmp/cheeseboard', 
+       device = cairo_pdf, units='cm', width=6.5, height=3.6)
+```
+
+
+Daily mean distance per animal
+```{r}
+learning.dist.summary = d2 %>%
+  filter(time_finished > 0 & time_finished <= 180) %>%
+  group_by(learning_day1) %>%
+  dplyr::summarise(mean.norm_dist=median(total_dist, na.rm=TRUE),
+                   sem.norm_dist = sem(total_dist)) 
+
+animal.summary.learning.dist = d2 %>%
+  filter(time_finished > 0 & time_finished <= 180) %>%
+  group_by(animal, learning_day1) %>%
+  dplyr::summarise(mean.norm_dist=mean(total_dist))
+
+g = ggplot() +
+  geom_ribbon(data=learning.dist.summary,
+               mapping=aes(x=as.integer(learning_day1), 
+                           ymin=mean.norm_dist-sem.norm_dist, 
+                           ymax=mean.norm_dist+sem.norm_dist,
+                           group=1),
+               fill='#bbbbbb') +
+  geom_jitter(aes(x=as.integer(learning_day1), y=mean.norm_dist, animal=animal),
+            data=animal.summary.learning.dist,
+            height=0, width=0.1, size=0.5, shape=1, color='#333333') +
+  gtheme +
+  xlab('Training day') +
+  ylab('Norm. distance') +
+  scale_y_log10() +
+  #geom_hline(yintercept=1, linetype="dashed", color = "#333333") +
+  geom_vline(xintercept=5.5, linetype="dashed", color = "#333333") +
+  geom_vline(xintercept=7.5, linetype="dashed", color = "#333333") +
+  geom_vline(xintercept=9.5, linetype='dashed', color='#333333') +
+  geom_vline(xintercept=15.5, linetype='dashed', color='#333333') +
+  xlim(c(1,9)) +
+  scale_x_continuous(limits=c(1,9), breaks=1:9)
+#ggplotly(g)
+g
+```
+
 
 ```{r}
 d2 %>%
@@ -221,20 +250,6 @@ d2 %>%
 ```
 
 
-Time of dwelling at reward
-```{r}
-gdwell = d2 %>%
-  ggplot() +
-  geom_boxplot(aes(x=learning_day1, y=rew_dwell_pct)) +
-  geom_point(aes(x=learning_day1, y=rew_dwell_pct)) +
-  #geom_jitter(aes(x=learning_day1, y=rew_dwell_pct, color=animal),height=0, width=0.1, size=3) +
-  xlab('Training day') +
-  ylab('Time at reward (%)') +
-  geom_vline(xintercept=11.5, linetype="dashed", color = "blue") +
-  gtheme
-gdwell
-ggsave(filename='gdwell.svg', plot=gdwell, width=5)
-```
 Dwell Time in trial tests
 ```{r}
 df %>%
@@ -258,9 +273,9 @@ test.trial.df = df %>%
          crossings_per_min=crossings_n/(total_frames/behav_cam_frame_rate) * 60,
          dist_0_60s = dist_0_30s + dist_30_60s,
          dist_0_120s = dist_0_60s + dist_60_90s + dist_90_120s,
-         norm_crossings_30s=crossings_0_30s * 100.0 / dist_0_30s,
-         norm_crossings_60s=crossings_0_60s * 100.0 / dist_0_60s,
-         norm_crossings_120s=crossings_0_120s * 100.0 / dist_0_120s) %>%
+         norm_crossings_30s=crossings_0_30s / (dist_0_30s / cheeseboard.len.cm),
+         norm_crossings_60s=crossings_0_60s / (dist_0_60s / cheeseboard.len.cm),
+         norm_crossings_120s=crossings_0_120s / (dist_0_120s / cheeseboard.len.cm)) %>%
   filter(exp_title == 'beforetest') 
 
 gcross = test.trial.df %>%
@@ -338,7 +353,7 @@ hab.loc.set.crossings = group_by(hab_loc, filepath, filename, date, animal, tria
                    dist_0_120s = mean(dist_0_120s),
                    total_dist = mean(total_dist),
                    total_frames = mean(total_frames)) %>%
-  dplyr::mutate(norm_crossings = crossings * 100.0/ total_dist)
+  dplyr::mutate(norm_crossings = crossings / (total_dist  / cheeseboard.len.cm))
 
 mhab_loc = hab.loc.set.crossings %>%
   group_by(animal, location_set) %>%
@@ -380,6 +395,54 @@ test.trial.df.joined %>%
   facet_grid(implant ~ day_desc, scales='free') +
   gtheme
 ```
+
+
+```{r}
+g = test.trial.df.joined %>%
+  mutate(animal_day_desc = paste(animal, day_desc, sep='_')) %>%
+  ggplot(aes(x=type, y=norm_crossings, group=animal_day_desc)) +
+  geom_line(size=0.25, color='#333333') +
+  facet_grid(. ~ implant) +
+  ylab('Crossings per m') +
+  gtheme
+#ggplotly(g)
+g
+ggsave('learning_test_performance.pdf', g,
+       path='/home/prez/tmp/cheeseboard', units='cm', device=cairo_pdf,
+       width=4.6, height=3.9)
+```
+LMER
+```{r}
+source('fixed_effects.R')
+m = lmerTest::lmer(norm_crossings ~ type + implant + (1 + day_desc | animal),
+                   test.trial.df.joined,
+                   REML = FALSE)
+summary(m)
+anova(m, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(m, test.trial.df.joined$animal, test.trial.df.joined$implant)
+
+dplyr::group_by(test.trial.df.joined, type) %>%
+  dplyr::summarise(mean(norm_crossings), sem(norm_crossings))
+
+```
+
+```{r}
+test.trial.df.joined = mutate(test.trial.df.joined, 
+                              aday=paste(animal, day_desc, sep='_'))
+test.trial.df.joined$aday = as.factor(test.trial.df.joined$aday) %>% as.integer() %>% as.factor()
+bf.models = create.bayes.lm.pair(test.trial.df.joined,
+                                 formula.full = norm_crossings ~ type + implant + aday,
+                                 formula.null = norm_crossings ~ type + aday,
+                                 whichRandom = c('aday'))
+bf.models$full / bf.models$null
+print('CI for difference between implants')
+calc.pair.95CI(bf.models$full)
+
+print('CI for difference between foraging and test')
+calc.pair.95CI(bf.models$null, pair.vars = c('type-habituation', 'type-test'))
+```
+
+
 Animals and trials when mice did not learn
 ```{r}
 library(reshape2)

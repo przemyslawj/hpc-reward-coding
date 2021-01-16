@@ -545,26 +545,34 @@ for (animal_name in names(run.fields)) {
 Plot selected multi fields during test trials
 ```{r}
 animal_name = 'K-BR'
-g.gbr = map_dfr(c(36, 59, 62, 72, 122), 
+#selected.cells =  c(149, 172, 131, 153, 75)
+#selected.cells =  c(43, 233, 101, 223, 90)
+#selected.cells = c(79, 101, 21, 178, 136, 117)
+selected.cells = c(61, 108, 39, 25, 120, 114)
+g.gbr = map_dfr(selected.cells,
+                #c(36, 59, 62, 72, 122), 
+                #c(122, 72, 39, 111, 102),
+                #c(70, 170),
                 ~ create.animal.days.df(animal_name, .x, beforetest.fields)) %>%
   create.all.day.pf(fields.list=beforetest.fields,
                     occupancies.list=beforetest.occupancies) %>%
-  #filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning3 day#3') %>%
+  filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning4 day#3') %>%
   #filter(day_desc != 'learning3 day#3') %>%
   day.normalize.fields() %>% 
   plot.pf(max.x=nbins, max.y=nbins) +
     facet_grid(cell_id ~ day_desc) +
     geom_rewards(beforetest.rewards.df, animal_name, nbins=nbins, 
                  rew.colours = list('prev_rew'='white', 'current_rew'='white')) +
+  geom_maze_contour(diameter = nbins) +
   theme(legend.position = 'none')
   
 g.gbr
-ggsave('/tmp/pf_kbr.pdf', plot = g.gbr, width = 7, height = 10, units = 'cm', dpi = 300, device = cairo_pdf)
+ggsave('/tmp/pf_k-br.pdf', plot = g.gbr, width = 7, height = 11, units = 'cm', dpi = 300, device = cairo_pdf)
 ```
 
 Choose habit cells
 ```{r}
-animal_name = 'N-BL'
+animal_name = 'F-TL'
 sampled.cells.df = filter(place.cell.db, day_desc == 'habituation day#3', animal == animal_name) %>%
   filter(signif.si) %>%
   arrange(field.size.50) %>%
@@ -576,7 +584,7 @@ sampled.cells = sampled.cells.df$cell_id
 
 Plot selected multi fields during habituation
 ```{r}
-g.gbr = map_dfr(sampled.cells, 
+g.gbr = map_dfr(selected.cells, 
                 ~ create.animal.days.df(animal_name, .x, run.fields)) %>%
   filter(day_desc == 'habituation day#3') %>%
   #filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning3 day#3') %>%
@@ -591,7 +599,7 @@ g.gbr = map_dfr(sampled.cells,
   
 g.gbr
 ggsave(paste0('/tmp/pf_habit_.', animal_name, '.pdf'), 
-       plot = g.gbr, width = 3, height = 12, units = 'cm', dpi = 300, device = cairo_pdf)
+       plot = g.gbr, width = 3, height = 9, units = 'cm', dpi = 300, device = cairo_pdf)
 ```
 
 
@@ -619,40 +627,42 @@ for (i in 1:nrow(animal.cells.df)) {
 
 ## Plot event vectors
 ```{r}
-animal_name = 'N-BL'
+animal_name = 'F-TL'
 exp_title = 'trial'
 
 animal.caimg_dirs = Filter(
   function(caimg_dir) {
-    str_detect(caimg_dir, animal_name) & str_detect(caimg_dir, 'habituation') & str_detect(caimg_dir, '2020_10_12')
+    str_detect(caimg_dir, animal_name) & str_detect(caimg_dir, 'habituation') & str_detect(caimg_dir, '2019-08-29')
   },
   caimg_result_dirs)
 
-paths.df = data.frame()
-binned.events = data.frame()
+paths.df.list = list()
+binned.events.list = list()
 for (caimg_dir in animal.caimg_dirs) {
   data.traces = read.data.trace(caimg_dir, filter_exp_title=exp_title)
   if (nrow(data.traces) > 0) {
     setorder(data.traces, trial_id, cell_id, timestamp)
     detect.events(data.traces, deconv.threshold=0.3, minpeakdistance=10)
     data.traces = add.running.col(data.traces, 3.3, 10)
+    data.traces$date = char2date(data.traces$date[1])
     binned.traces = bin.time.space(data.traces, 
                                    nbins.x = nbins,
                                    nbins.y = nbins,
                                    get.bin.thresholds.fun=get.quantiles.fun(c(0.2, 0.95, 1.0)),
                                    binned.var='deconv_trace',
                                    timebin.dur.msec=200)
-    
-    binned.events = bind_rows(binned.events, binned.traces[nevents >= 0.2, ])
+    binned.events.list[[caimg_dir]] = binned.traces[nevents >= 0.2, ]
     
     cell_name = binned.traces$cell_id[1]
-    paths.df = bind_rows(paths.df, binned.traces[cell_id==cell_name, ])
+    paths.df.list[[caimg_dir]] = binned.traces[cell_id==cell_name, ]
   }
 }
-
-binned.events$date = char2date(binned.events$date)
-paths.df$date = char2date(paths.df$date)
-binned.events = left_join(binned.events, trials.meta.df)
+binned.events = rbindlist(binned.events.list)
+paths.df = rbindlist(paths.df.list)
+trials.meta.df$date = as.IDate(trials.meta.df$date)  # This is a workaround for non-matching types
+#binned.events$date = char2date(binned.events$date)
+#paths.df$date = char2date(paths.df$date)
+binned.events = left_join(binned.events, trials.meta.df, by=c('animal', 'date'))
 paths.df = left_join(paths.df, trials.meta.df)
 binned.events = data.table(binned.events)
 paths.df = data.table(paths.df)

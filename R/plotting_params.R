@@ -13,3 +13,10 @@ gtheme = theme_minimal() + theme_cowplot() +
         axis.title.x = element_text(size=8),
         axis.title.y = element_text(size=8),
         plot.title = element_text(size=8))
+
+#single.colour = c('#e995c9')
+single.colour = '#9ebcda'
+main.two.colours = c('#E78AC3', '#999999')
+side.two.coulours = c('#8856a7', '#598cc0')
+three.colours = c('#88bdf2', '#e78ac3', '#999999')
+low2high.colours = c('#DEEBF7', '#08306B')

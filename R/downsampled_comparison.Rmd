@@ -139,7 +139,7 @@ summary(fem.vca1)
 plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp_title)
 
 summary.df %>%
-  filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
+  #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
   filter(animal != 'C-1R') %>% 
   ggplot(aes(x=exp_title, y=pct.reward, group=animal_beforetest_day)) +
   #geom_point(aes(color=animal)) +
@@ -153,10 +153,8 @@ summary.df %>%
 Fewer pct of cells are place cells during test than in habituation
 ```{r}
 summary.df %>%
-  filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
-  filter(animal != 'C-1R') %>%
+  #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
   ggplot(aes(x=exp_title, y=pct.pcs, group=animal_beforetest_day)) +
-  #geom_point(aes(color=animal)) +
   geom_line() +
   facet_grid(. ~ implant, scales = 'free') +
   xlab('') +
@@ -216,27 +214,59 @@ ggsave('/home/prez/tmp/cheeseboard/downsampled_dist_multifield.pdf',
 ```{r}
 peaks.summary.df = summarize.downrew.pc.pct(down.peaks.dist, dist.threshold=goal.cell.max.dist) %>%
   dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_')) %>%
-  filter(pct.pcs > 0)
+  filter(pct.pcs > 0) %>% 
+  dplyr::ungroup()
 
 peaks.summary.df$exp_title = as.factor(peaks.summary.df$exp_title)
-dca1.rew.pc.pct = subset(peaks.summary.df, implant == 'dCA1')
- #& animal_beforetest_day %in% kept.testtrials$animal_beforetest_day & animal != 'C-1R')
-vca1.rew.pc.pct = subset(peaks.summary.df, implant == 'vCA1')
-  #& animal_beforetest_day %in% kept.testtrials$animal_beforetest_day)
-fem.dca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + day_desc | animal), data=dca1.rew.pc.pct)
-print('Fraction of dCA1 place cells at reward')
-summary(fem.dca1)
-anova(fem.dca1, refit=FALSE, ddf='Satterthwaite')
-plot.model.diagnostics(fem.dca1, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp_title)
-x = lsmeansLT(fem.dca1, pairwise = T)
-print('Percentage change in percent of dCA1 place cells at reward')
-x / lsmeansLT(fem.dca1)['exp_title1_habituation', 'Estimate']
 
-fem.vca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + day_desc | animal), data=vca1.rew.pc.pct)
-print('Fraction of vCA1 place cells did not increase')
-summary(fem.vca1)
-anova(fem.vca1, refit=FALSE, ddf='Satterthwaite')
-plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp_title)
+print('Fraction of dCA1 place cells at reward increased')
+fem.model = lmerTest::lmer(pct.reward ~ exp_title*implant + (1 + exp_title + day_desc | animal), 
+                           data=peaks.summary.df, REML = TRUE)
+plot.model.diagnostics(fem.model, peaks.summary.df$implant, peaks.summary.df$exp_title)
+anova(fem.model, refit=FALSE, ddf='Satterthwaite')
+pairwise.post.hoc(fem.model, factor.interaction=c('exp_title:implant'))
+create.summary(peaks.summary.df, pct.reward, implant, exp_title)
+
+peaks.summary.df$aday = as.factor(peaks.summary.df$animal_beforetest_day) %>% as.integer %>% as.factor
+peaks.summary.df$animal = as.factor(peaks.summary.df$animal)
+
+# dCA1 BF
+dca1.rew.pc.pct = filter(peaks.summary.df, implant == 'dCA1')
+models = create.bayes.lm.pair(dca1.rew.pc.pct, 
+                              formula.full = pct.reward ~ 1 + exp_title + aday + animal,
+                              formula.null = pct.reward ~ 1 + aday + animal,
+                              whichRandom = c('aday', 'animal'),
+                              iterations=10000)
+models$full / models$null
+calc.pair.95CI(models$full, pair.vars = c('exp_title-1_habituation', 'exp_title-2_test'))
+
+# vCA1 BF
+vca1.rew.pc.pct = filter(peaks.summary.df, implant == 'vCA1')
+models = create.bayes.lm.pair(vca1.rew.pc.pct, 
+                              formula.full = pct.reward ~ 1 + exp_title + aday + animal,
+                              formula.null = pct.reward ~ 1 + aday + animal,
+                              whichRandom = c('aday', 'animal'),
+                              iterations=10000)
+models$full / models$null
+calc.pair.95CI(models$full, pair.vars = c('exp_title-1_habituation', 'exp_title-2_test'))
+
+
+# vca1.rew.pc.pct = subset(peaks.summary.df, implant == 'vCA1')
+#   #& animal_beforetest_day %in% kept.testtrials$animal_beforetest_day)
+# fem.dca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + day_desc | animal), data=dca1.rew.pc.pct)
+# print('Fraction of dCA1 place cells at reward')
+# summary(fem.dca1)
+# anova(fem.dca1, refit=FALSE, ddf='Satterthwaite')
+# plot.model.diagnostics(fem.dca1, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp_title)
+# x = lsmeansLT(fem.dca1, pairwise = T)
+# print('Percentage change in percent of dCA1 place cells at reward')
+# x / lsmeansLT(fem.dca1)['exp_title1_habituation', 'Estimate']
+# 
+# fem.vca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + day_desc | animal), data=vca1.rew.pc.pct)
+# print('Fraction of vCA1 place cells did not increase')
+# summary(fem.vca1)
+# anova(fem.vca1, refit=FALSE, ddf='Satterthwaite')
+# plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp_title)
 
 peaks.summary.df %>%
   #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%

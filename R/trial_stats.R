@@ -55,6 +55,9 @@ get_stats = function(tracking_df, animal_locations.df) {
     loc_summary['ncross_prev_rew'] = ncross_prev_rew0 + ncross_prev_rew1
   }
   
+  # ignore tracking jumps from calculation of distance
+  dist_df = mutate(dist_df, dist_trans = ifelse(dist_trans > 5, 0, dist_trans))
+  
   total_dist = sum(dist_df$dist_trans)
   total_frames = dist_df$frame[length(dist_df$frame)] - dist_df$frame[1]
   

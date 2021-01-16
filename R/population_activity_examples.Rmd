@@ -38,15 +38,16 @@ trials.meta.df = read.trials.meta(rootdirs)
 # #day = '2019-09-05'
 # day = '2019-09-07'
 
-# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
-# animal_name = 'G-BR'
-# exp_title='learning'
-# day = '2020-02-10' # learning 3 day2
-
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
-animal_name = 'D-BR'
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
+animal_name = 'G-BR'
 exp_title='learning'
-day = '2019-07-29' # learning 2 day2
+day = '2020-02-10' # learning 3 day2
+
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
+# animal_name = 'D-BR'
+# exp_title='learning'
+# day = '2019-07-29' # learning 2 day2
+#day = '2019-08-01' # learning 3 day2
 
 # root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
 # animal_name = 'O-TR'
@@ -161,7 +162,9 @@ trial.traces = binned.traces[trial == selected.trial,]
 beforetest.traces = binned.traces[exp_title == 'beforetest',]
 
 rew.aligned.traces = binned.traces[exp_title=='trial' & trial == selected.trial, 
-                                   center.timestamps.around.events(.SD, reward.arriving.bouts[trial == selected.trial], 
+                                   center.timestamps.around.events(.SD, 
+                                                                   #reward.arriving.bouts[trial == selected.trial], 
+                                                                   mobility.bouts[trial == selected.trial],
                                                                    exp_title[1],
                                                                    padding.after.event=5000/timebin.dur.msec), 
                                    by=.(exp_title, trial_id, cell_id)][aligned_event_id >= 0,]
@@ -188,12 +191,12 @@ plot_grid(g.raster + xlim(c(0, 80)),
           g.behav + xlim(c(0, 80)), 
           ncol=1, 
           #rel_heights = c(5, 1.4))
-          rel_heights = c(3,2))
+          rel_heights = c(3,1))
 
 ggsave('~/tmp/cheeseboard/pop_activity/dca1_sequence.pdf', 
        height=7, width=10, units='cm', device=cairo_pdf, dpi=300)
 
-behav.traces.fragment = behav.traces[trial==selected.trial & timestamp>=53000 & is_running]
+behav.traces.fragment = behav.traces[trial==selected.trial & is_running]
 behav.traces.fragment$row_id = 1:nrow(behav.traces.fragment)
 ggplot(behav.traces.fragment) +
   geom_path(aes(x=as.integer(x), y=as.integer(100-y), color=row_id)) +

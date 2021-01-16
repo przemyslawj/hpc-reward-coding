@@ -15,6 +15,7 @@ source('locations.R')
 source('utils.R')
 source('traces_input.R')
 source('place_field_utils.R')
+source('fixed_effects.R')
 
 summarise = dplyr::summarise
 summarize = dplyr::summarize
@@ -575,7 +576,7 @@ dist2current.rew.df = bind_rows(
   dplyr::mutate(dist2current.rew.inactive, group='inactive'))
 
 
-implant_loc = 'dCA1'
+implant_loc = 'vCA1'
 dist2current.rew.df$implant = as.factor(dist2current.rew.df$implant)
 dist2current.rew.df$group = as.factor(dist2current.rew.df$group)
 rew.dist.model = lmerTest::lmer(log(min.rew.dist) ~ group + (1 | animal),
@@ -593,43 +594,45 @@ plot.model.diagnostics(rew.dist.model,
 summary(rew.dist.model)
 anova(rew.dist.model, refit=FALSE, ddf='Satterthwaite')
 
-# Bayes factor from Bayesian Information Criterion, formula (10) from http://www.ejwagenmakers.com/2007/pValueProblems.pdf
-rew.dist.model.null = update(rew.dist.model, formula = ~ . -group)
-BF_BIC = exp((BIC(rew.dist.model.null) - BIC(rew.dist.model))/2)
-print(BF_BIC)
+## Bayes factor from Bayesian Information Criterion, formula (10) from http://www.ejwagenmakers.com/2007/pValueProblems.pdf
 
-# library(BayesFactor)
-# rew.dist.model = BayesFactor::lmBF(val ~ group,
-#                                 data=subset(dist2current.rew.df, implant==implant_loc) %>% mutate(val = log2(2+min.rew.dist)),
-#                                 whichRandom = c('animal'))
-# summary(rew.dist.model)
+rew.dist.model.null = update(rew.dist.model, formula = ~ . -group)
+show.bayes.factor(rew.dist.model, rew.dist.model.null)
+
+models = create.bayes.lm.pair(filter(dist2current.rew.df, implant==implant_loc) %>% mutate(val=log(min.rew.dist)),
+                              val ~ 1 + group + animal,
+                              val ~ 1 + animal,
+                              whichRandom = 'animal',
+                              iterations = 10000)
+models$full / models$null
+calc.pair.95CI(models$full, show.percent.change = FALSE,
+               ytransform = exp,
+               pair.vars = c('group-active', 'group-inactive'))
+
 
 step.size=20
 dist2current.rew.df %>%
-  #group_by(implant, group, animal) %>%
   group_by(implant, group) %>%
   dplyr::summarise(create.hist.tibble(min.rew.dist * perc2dist, seq(0,120,step.size))) %>%
-  #filter(remapped) %>%
   ggplot() +
   geom_step(aes(x=mid-step.size/2, y=pct.count, color=group, size=group), alpha=1.0) +
-  #facet_wrap(animal ~ implant, scales='free') +
   facet_wrap(. ~ implant) +
   geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dashed') +
-  scale_color_manual(values=c('#0098ff', '#666666')) +
-  scale_size_manual(values=c(1.0, 0.5)) +
+  scale_color_manual(values=c(side.two.coulours[1], '#999999')) +
+  scale_size_manual(values=c(0.75, 0.5)) +
   xlab('Distance to reward (cm)') + 
   ylab('Cells (%)') + 
   labs(linetype='', title='Field distance to reward after translocation') +
   xlim(c(0,100))+
   gtheme
 ggsave('/home/prez/tmp/cheeseboard/reward_active_dist_to_current.pdf', 
-       height=5, width=9, units='cm', device=cairo_pdf, dpi=300)
+       height=4.57, width=8.3, units='cm', device=cairo_pdf, dpi=300)
 
 
+# Plot histogram of distances per mouse
 dist2current.rew.df %>%
   group_by(implant, group, animal) %>%
   dplyr::summarise(create.hist.tibble(min.rew.dist * perc2dist, seq(0,120,step.size))) %>%
-  #filter(remapped) %>%
   ggplot() +
   geom_step(aes(x=mid-step.size/2, y=pct.count, color=group), alpha=0.6, size=1) +
   facet_wrap(animal ~ implant, scales='free') +
@@ -662,11 +665,13 @@ g = dist.to.rew.wide.loc2 %>%
                         '<br>rew dist3=', format(min.rew.dist_3 * perc2dist),
                         '<br>animal=', animal,
                         '<br>cell=', cell_id))) +
-  geom_point(shape=1, size=0.5, alpha=0.65) +
+  geom_point(aes(size=group), shape=1, alpha=0.9) +
   facet_grid(. ~ implant) +
   geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dashed') +
   geom_hline(yintercept = goal.cell.max.dist * perc2dist, linetype='dashed') +
-  scale_colour_manual(values = c('#0098ff', '#777777')) +
+  #scale_colour_manual(values = c(main.two.colours[1], '#999999')) +
+  scale_color_manual(values=c(side.two.coulours[1], '#999999')) +
+  scale_size_manual(values=c(0.75, 0.5)) +
   xlab('Learning 2 distance to reward (cm)') +
   ylab('Learning 3 distance to reward (cm)') +
   ylim(c(0,100)) +
@@ -675,7 +680,7 @@ g = dist.to.rew.wide.loc2 %>%
   gtheme
 ggsave('~/tmp/cheeseboard/distance_to_reward_scatterplot.pdf', plot=g, 
        device = cairo_pdf,
-       units='cm', dpi=300, width=12, height=7)
+       units='cm', dpi=300, width=9.9, height=5.7)
 ggplotly(g, tooltip = 'text')
     
 

@@ -193,6 +193,9 @@ calc.field.peaks.info = function(day,
   
   map_dfr(cell_names, ~ {
     field.info = cell.field.peaks.info(field.list[[.x]], rew.df, bin.size, max.rew.dist.thr)
+    if (is.null(field.info$closer.rew.angle)) {
+      field.info$closer.rew.angle = -1
+    }
     meta = list(animal=animal_name, date=as.Date(day), cell_id=as.integer(.x))
     return(append(meta, field.info))
   })
@@ -269,12 +272,12 @@ geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20,
        scale_color_manual(values=rew.colours))
 }
 
-geom_maze_contour = function(diameter, npoints=100) {
+geom_maze_contour = function(diameter, npoints=100, offset=0) {
   r = diameter / 2
   center = c(r, r)
   tt = seq(0,2*pi, length.out=npoints)
   xx = center[1] + r * cos(tt)
   yy = center[2] + r * sin(tt)
   circle.df = data.frame(x = xx, y = yy)
-  geom_path(data=circle.df, aes(x=x, y=y), color='#333333')
+  geom_path(data=circle.df, aes(x = x + offset, y = y - offset), color='#333333')
 }

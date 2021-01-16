@@ -2,6 +2,7 @@ library(data.table)
 library(dplyr)
 library(stringr)
 
+source('locations.R')
 source('utils.R')
 
 root_dir07 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
@@ -35,14 +36,17 @@ caimg_result_dirs = Filter(
   function(ca_img_dir) {file.exists(paste(ca_img_dir, 'traces_and_positions.csv', sep='/'))},
   caimg_result_dirs)
 
-test.days.df = map_dfr(rootdirs, read_locations) %>%
+locations.df = map_dfr(rootdirs, read_locations) 
+test.days.df = locations.df %>%
   filter(exp_title == 'beforetest') %>%
+  filter(!animal %in% c('A-BL', 'C-1R', 'L-TL', 'P-BR')) %>%
   dplyr::select(animal, date) %>%
   dplyr::distinct()
 
 test_caimg_dirs = map2(test.days.df$animal, test.days.df$date, ~ find.caimg.dir(caimg_result_dirs, .x, .y))
 test_caimg_dirs = Filter(function(x) !is.na(x), test_caimg_dirs) 
-
+habit_caimg_dirs = Filter(function(x) str_detect(x, 'habit'), caimg_result_dirs)
+learning_caimg_dirs = Filter(function(x) str_detect(x, 'learning'), caimg_result_dirs)
 
 prepare.run.dirtraces = function(data.traces, 
                                  nbins, 
