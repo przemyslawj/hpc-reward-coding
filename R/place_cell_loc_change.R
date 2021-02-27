@@ -519,6 +519,19 @@ dist2current.rew.active = bind_rows(
          animal_cell %in% cells.transloc.rew.active.l4d1t) %>%
     dplyr::mutate(remapped = animal_cell %in% remapped.cells.3to4))
 
+
+dist2current.rew.active.trials = bind_rows(
+  filter(trial.field.dist2current.rew, 
+         day_desc=='learning2 day#1',
+         animal_cell %in% cells.transloc.rew.active.l2d1t),
+  filter(trial.field.dist2current.rew, 
+         day_desc=='learning3 day#1',
+         animal_cell %in% cells.transloc.rew.active.l3d1t),
+  filter(trial.field.dist2current.rew, 
+         day_desc=='learning4 day#1',
+         animal_cell %in% cells.transloc.rew.active.l4d1t))
+
+
 # Summary DF with distance to the current reward filtered to the cells that remapped
 # and were reward-active during the previous beforetest 
 animal.learning2test.rew.following = dist2current.rew.active %>%
@@ -554,61 +567,101 @@ animal.learning2test.rew.following = dist2current.rew.active %>%
 #   arrange(animal, day_desc)
 
 # DF with distance to the current reward, filtered to cells that
-# were reward-inactive during the previous beforetest
+# # were reward-inactive during the previous beforetest
 dist2current.rew.inactive = bind_rows(
-    filter(beforetest.field.dist2current.rew,
-           loc_set_ordinal==2,
-           animal_cell %in% cells.transloc.rew.inactive.l2d1t) %>%
-        dplyr::mutate(remapped=animal_cell %in% remapped.cells.1to2),
-    filter(beforetest.field.dist2current.rew,
-           loc_set_ordinal==3,
-           animal_cell %in% cells.transloc.rew.inactive.l3d1t,
-           animal_cell %in% remapped.cells.2to3) %>%
-        dplyr::mutate(remapped=animal_cell %in% remapped.cells.2to3),
-    filter(beforetest.field.dist2current.rew,
-           loc_set_ordinal==4,
-           animal_cell %in% cells.transloc.rew.inactive.l4d1t,
-           animal_cell %in% remapped.cells.3to4) %>%
-      dplyr::mutate(remapped=animal_cell %in% remapped.cells.3to4))
+  filter(beforetest.field.dist2current.rew,
+         loc_set_ordinal==2,
+         animal_cell %in% cells.transloc.rew.inactive.l2d1t) %>%
+    dplyr::mutate(remapped=animal_cell %in% remapped.cells.1to2),
+  filter(beforetest.field.dist2current.rew,
+         loc_set_ordinal==3,
+         animal_cell %in% cells.transloc.rew.inactive.l3d1t) %>%
+    dplyr::mutate(remapped=animal_cell %in% remapped.cells.2to3),
+  filter(beforetest.field.dist2current.rew,
+         loc_set_ordinal==4,
+         animal_cell %in% cells.transloc.rew.inactive.l4d1t) %>%
+    dplyr::mutate(remapped=animal_cell %in% remapped.cells.3to4))
+
+dist2current.rew.inactive.trials = bind_rows(
+  filter(trial.field.dist2current.rew,
+         day_desc == 'learning2 day#1',
+         animal_cell %in% cells.transloc.rew.inactive.l2d1t),
+  filter(trial.field.dist2current.rew,
+         day_desc == 'learning3 day#1',
+         animal_cell %in% cells.transloc.rew.inactive.l3d1t),
+  filter(trial.field.dist2current.rew,
+         day_desc == 'learning4 day#1',
+         animal_cell %in% cells.transloc.rew.inactive.l4d1t))
 
 dist2current.rew.df = bind_rows(
   dplyr::mutate(dist2current.rew.active, group='active'),
   dplyr::mutate(dist2current.rew.inactive, group='inactive'))
 
+dist2current.rew.trials.df = bind_rows(
+  dplyr::mutate(dist2current.rew.active.trials, group='active'),
+  dplyr::mutate(dist2current.rew.inactive.trials, group='inactive'))
 
-implant_loc = 'vCA1'
-dist2current.rew.df$implant = as.factor(dist2current.rew.df$implant)
-dist2current.rew.df$group = as.factor(dist2current.rew.df$group)
-rew.dist.model = lmerTest::lmer(log(min.rew.dist) ~ group + (1 | animal),
-                                dist2current.rew.df,
-                                REML=TRUE,
-                                subset=implant==implant_loc)
+trialday.closer2rew = filter(trial.field.dist2current.rew, day_ordinal==2 | day_ordinal == 1) %>%
+  filter(npeaks > 0) %>%
+  group_by(implant, animal, cell_id, location_set) %>%
+  dplyr::summarise(min.rew.dist.trial = min(min.rew.dist),
+                   signif.si = signif.si[which.min(min.rew.dist)])
 
-# The change in vCA1 is partly due to reward-repelled cells
-exp(lsmeansLT(rew.dist.model))
+test.trial.activity.df = left_join(
+  dist2current.rew.active,
+  trialday.closer2rew
+    %>% mutate(compared_loc_ordinal=location_set),
+  suffix=c('.test', '.trial'),
+  by=c('implant'='implant', 'animal'='animal', 'cell_id'='cell_id', 
+          'location_set'='compared_loc_ordinal'))  %>%
+  rename(min.rew.dist.test = min.rew.dist) %>%
+  filter(!is.na(min.rew.dist.trial))
 
+test.trial.activity.df %>%
+  group_by(implant, min.rew.dist.test <= goal.cell.max.dist) %>%
+  dplyr::summarise(mean.dist = mean(min.rew.dist.trial * perc2dist), 
+                   rew.cells = sum(min.rew.dist.trial <= goal.cell.max.dist) / n(),
+                   med.dist = median(min.rew.dist.trial * perc2dist), n())
 
-plot.model.diagnostics(rew.dist.model,
-                       subset(dist2current.rew.df, implant==implant_loc)$animal,
-                       subset(dist2current.rew.df, implant==implant_loc)$group)
-summary(rew.dist.model)
-anova(rew.dist.model, refit=FALSE, ddf='Satterthwaite')
+g = test.trial.activity.df %>%
+  filter(npeaks > 0) %>%
+  ggplot(aes(x=min.rew.dist.test * perc2dist, y=min.rew.dist.trial * perc2dist,
+             color=signif.si.trial,
+             animal_cell=paste(animal, cell_id), 
+             day_desc.test=day_desc)) +
+  geom_point(shape=1) +
+  facet_grid(. ~ implant) +
+  xlim(c(0,120)) + ylim(c(0,120)) +
+  xlab('Test distance (cm)') + ylab('Trial distance (cm)') +
+  gtheme
+ggplotly(g)
 
-## Bayes factor from Bayesian Information Criterion, formula (10) from http://www.ejwagenmakers.com/2007/pValueProblems.pdf
-
-rew.dist.model.null = update(rew.dist.model, formula = ~ . -group)
-show.bayes.factor(rew.dist.model, rew.dist.model.null)
-
-models = create.bayes.lm.pair(filter(dist2current.rew.df, implant==implant_loc) %>% mutate(val=log(min.rew.dist)),
-                              val ~ 1 + group + animal,
-                              val ~ 1 + animal,
-                              whichRandom = 'animal',
-                              iterations = 10000)
-models$full / models$null
-calc.pair.95CI(models$full, show.percent.change = FALSE,
-               ytransform = exp,
-               pair.vars = c('group-active', 'group-inactive'))
-
+eval.dist2.current.rew = function(dist2current.rew.df, implant_loc = 'vCA1') {
+  dist2current.rew.df$implant = as.factor(dist2current.rew.df$implant)
+  dist2current.rew.df$group = as.factor(dist2current.rew.df$group)
+  rew.dist.model = lmerTest::lmer(log(min.rew.dist) ~ group + (1 | animal),
+                                  dist2current.rew.df,
+                                  REML=TRUE,
+                                  subset=implant==implant_loc)
+  g = plot.model.diagnostics(rew.dist.model,
+                             subset(dist2current.rew.df, implant==implant_loc)$animal,
+                             subset(dist2current.rew.df, implant==implant_loc)$group)
+  print(g)
+  print(summary(rew.dist.model))
+  print(anova(rew.dist.model, refit=FALSE, ddf='Satterthwaite'))
+  
+  models = create.bayes.lm.pair(filter(dist2current.rew.df, implant==implant_loc) %>% mutate(val=log(min.rew.dist)),
+                                val ~ 1 + group + animal,
+                                val ~ 1 + animal,
+                                whichRandom = 'animal',
+                                iterations = 100000)
+  print(models$full / models$null)
+  calc.pair.95CI(models$full, show.percent.change = FALSE,
+                 ytransform = function(x) { exp(x) *  perc2dist},
+                 pair.vars = c('group-active', 'group-inactive'))
+}
+eval.dist2.current.rew(dist2current.rew.df, 'dCA1')
+eval.dist2.current.rew(dist2current.rew.trials.df, 'vCA1')
 
 step.size=20
 dist2current.rew.df %>%
@@ -628,6 +681,21 @@ dist2current.rew.df %>%
 ggsave('/home/prez/tmp/cheeseboard/reward_active_dist_to_current.pdf', 
        height=4.57, width=8.3, units='cm', device=cairo_pdf, dpi=300)
 
+step.size=20
+dist2current.rew.trials.df %>%
+  group_by(implant, group) %>%
+  dplyr::summarise(create.hist.tibble(min.rew.dist * perc2dist, seq(0,120,step.size))) %>%
+  ggplot() +
+  geom_step(aes(x=mid-step.size/2, y=pct.count, color=group, size=group), alpha=1.0) +
+  facet_wrap(. ~ implant) +
+  geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dashed') +
+  scale_color_manual(values=c(side.two.coulours[1], '#999999')) +
+  scale_size_manual(values=c(0.75, 0.5)) +
+  xlab('Distance to reward (cm)') + 
+  ylab('Cells (%)') + 
+  labs(linetype='', title='Field distance to reward after translocation (trial)') +
+  xlim(c(0,100))+
+  gtheme
 
 # Plot histogram of distances per mouse
 dist2current.rew.df %>%

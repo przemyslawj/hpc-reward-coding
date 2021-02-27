@@ -57,8 +57,8 @@ timebin.dur.sec = 0.2
 
 behav.summary.df = data.frame()
 
-for (caimg_result_dir in caimg_result_dirs) {
-#for (caimg_result_dir in habit_caimg_dirs) {
+#for (caimg_result_dir in caimg_result_dirs) {
+for (caimg_result_dir in habit_caimg_dirs) {
   data.traces = read.data.trace(caimg_result_dir)
   data.traces$date = rep(char2date(data.traces$date[1]), nrow(data.traces))
   data.traces = detect.events(data.traces, deconv.threshold=0.3)
@@ -318,7 +318,62 @@ calc.pair.95CI(models$full, pair.vars = c('mobile-mobile', 'mobile-immobile'),
                ytransform = exp)
 ```
 
+## Cell Event rates for place cells vs other cells
+```{r}
+habituation.mobility.mer.joined = left_join(
+  filter(cell.mobility.mer, exp_title=='trial', exp=='habituation', event.rate > 0),
+  place.cell.db,
+  by=c('animal', 'date', 'cell_id', 'implant', 'exp', 'day_desc')) %>%
+  filter(is.pc) %>%
+  mutate(aday = paste(animal, day_desc, sep='_'))
 
+habituation.mobility.mer.joined$aday = as.factor(habituation.mobility.mer.joined$aday) %>% as.integer() %>% as.factor()
+
+habituation.mobility.mer.joined %>%
+  ggplot(aes(y=event.rate, x=mobile)) +
+  geom_violin(fill=single.colour, color=single.colour) +
+  geom_jitter(shape=16, width=0.4, height=0, size=0.1, alpha=0.15, color='#333333')+
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2, color='white') +
+  facet_grid(. ~ implant + is.pc) +
+  gtheme +
+  scale_y_log10() +
+  ylab('Event rate (Hz)')
+
+group_by(habituation.mobility.mer.joined, implant, mobile) %>%
+  dplyr::summarise(mean(event.rate), median(event.rate), sem(event.rate))
+
+ggsave('event_rate_stats.pdf', path='/home/prez/tmp/cheeseboard', 
+       width=4.5, height=4.3, units='cm',
+       device=cairo_pdf, dpi=300)
+```
+
+Pairwise comparisons lmer
+```{r}
+habituation.mobility.mer.joined$mobile = as.factor(habituation.mobility.mer.joined$mobile)
+habituation.mobility.mer.joined$is.pc = as.factor(habituation.mobility.mer.joined$is.pc)
+habituation.mobility.mer.joined$implant = as.factor(habituation.mobility.mer.joined$implant)
+m = lmerTest::lmer(log(event.rate) ~ implant + mobile + implant:mobile + (1 + day_desc | animal),
+                   #log(event.rate) ~ implant * mobile * is.pc + (1 + day_desc | animal),
+                   data=habituation.mobility.mer.joined,
+                   REML=TRUE)
+summary(m)
+anova(m, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(m, 
+                       habituation.mobility.mer.joined$animal, 
+                       habituation.mobility.mer.joined$implant)
+pairwise.post.hoc(m, factor.interaction = c('implant:mobile'))
+#pairwise.post.hoc(m, factor.interaction = c('mobile:is.pc'))
+#pairwise.post.hoc(m, factor.interaction = c('implant:mobile:is.pc'))
+
+models = create.bayes.lm.pair(habituation.mobility.mer.joined %>% 
+                                mutate(log.event.rate = log(event.rate)) %>%
+                                filter(implant=='vCA1'),
+                              formula.full = log.event.rate ~ mobile + aday,
+                              formula.null = log.event.rate ~ aday,
+                              whichRandom = 'aday', iterations=100000)
+models$full / models$null
+calc.pair.95CI(models$full, exp, show.percent.change = FALSE, pair.vars=c('mobile-immobile', 'mobile-mobile'))
+```
 
 
 Event rates of cells during different experiments on the same day

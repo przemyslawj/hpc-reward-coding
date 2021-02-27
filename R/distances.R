@@ -1,5 +1,7 @@
 library(purrr)
 
+perc2dist = 1.2
+
 vec_dist = function(x, y) {
   dist_x = c(0, diff(x))
   dist_y = c(0, diff(y))

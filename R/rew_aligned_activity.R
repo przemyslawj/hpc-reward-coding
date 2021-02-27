@@ -547,7 +547,7 @@ beforetest.aligned.pop.traces.by.pc.binned = beforetest.aligned.pop.traces.by.pc
   dplyr::mutate(distal.timestamp = (timestamp_from_end <= -4000) & (timestamp_from_end > -5000),
                 proximal.timestamp = (timestamp_from_end > -1000) & (timestamp_from_end <= 0)) %>%
   filter(distal.timestamp | proximal.timestamp) %>%
-  dplyr::mutate(timestamp_from_end_bin = ceil(timestamp_from_end / timebin.width)) %>%
+  dplyr::mutate(timestamp_from_end_bin = ceiling(timestamp_from_end / timebin.width)) %>%
   dplyr::group_by(implant, date, animal, exp, exp_title, trial_id, day_desc, is.pc, timestamp_from_end_bin, aligned_event_id) %>%
   dplyr::summarise_all(mean) %>%
   dplyr::mutate(timestamp_from_end = timestamp_from_end_bin * timebin.width - timebin.width/2)
@@ -558,7 +558,7 @@ beforetest.aligned.pop.traces.by.pc.binned.per.trial = beforetest.aligned.pop.tr
   dplyr::mutate(distal.timestamp = (timestamp_from_end <= -4000) & (timestamp_from_end > -5000),
                 proximal.timestamp = (timestamp_from_end > -1000) & (timestamp_from_end <= 0)) %>%
   filter(distal.timestamp | proximal.timestamp) %>%
-  dplyr::mutate(timestamp_from_end_bin = ceil(timestamp_from_end / timebin.width)) %>%
+  dplyr::mutate(timestamp_from_end_bin = ceiling(timestamp_from_end / timebin.width)) %>%
   dplyr::group_by(implant, date, animal, exp, exp_title, trial_id, day_desc, is.pc, timestamp_from_end_bin) %>%
   dplyr::summarise_all(mean) %>% 
   dplyr::mutate(timestamp_from_end = timestamp_from_end_bin * timebin.width - timebin.width/2)
@@ -567,7 +567,7 @@ beforetest.aligned.pop.traces.by.pc.binned.per.trial$proximal.timestamp =
 beforetest.aligned.pop.traces.by.pc.binned.per.trial$is.pc = 
   as.factor(beforetest.aligned.pop.traces.by.pc.binned.per.trial$is.pc)
 
-implant.loc = 'vCA1'
+implant.loc = 'dCA1'
 beforetest.aligned.pop.traces.by.pc.binned %>%
   filter(implant == implant.loc) %>%
   mutate(bout_id=paste(trial_id, aligned_event_id)) %>%
@@ -692,21 +692,21 @@ reward.aligned.pop.traces.late.by.pc.binned.per.day = filter(reward.aligned.pop.
   dplyr::mutate(distal.timestamp = (timestamp_from_end <= -4000) & (timestamp_from_end > -5000),
                 proximal.timestamp = (timestamp_from_end > -1000) & (timestamp_from_end <= 0)) %>%
   filter(distal.timestamp | proximal.timestamp) %>%
-  dplyr::mutate(timestamp_from_end_bin = ceil(timestamp_from_end / timebin.width)) %>%
+  dplyr::mutate(timestamp_from_end_bin = ceiling(timestamp_from_end / timebin.width)) %>%
   dplyr::group_by(implant, date, animal, exp, exp_title, day_desc, is.pc, proximal.timestamp, timestamp_from_end_bin) %>%
   dplyr::summarise_all(mean) %>% 
   dplyr::mutate(timestamp_from_end = timestamp_from_end_bin * timebin.width - timebin.width/2,
                 aday=paste(animal, day_desc, sep='_'))
-reward.aligned.pop.traces.late.by.pc.binned.per.trial$is.pc = 
-  as.factor(reward.aligned.pop.traces.late.by.pc.binned.per.trial$is.pc)
-reward.aligned.pop.traces.late.by.pc.binned.per.trial$proximal.timestamp = 
-  as.factor(reward.aligned.pop.traces.late.by.pc.binned.per.trial$proximal.timestamp)
+reward.aligned.pop.traces.late.by.pc.binned.per.day$is.pc = 
+  as.factor(reward.aligned.pop.traces.late.by.pc.binned.per.day$is.pc)
+reward.aligned.pop.traces.late.by.pc.binned.per.day$proximal.timestamp = 
+  as.factor(reward.aligned.pop.traces.late.by.pc.binned.per.day$proximal.timestamp)
 
 reward.aligned.pop.traces.late.by.pc.binned = filter(reward.aligned.pop.traces.earlylate.by.pc, is.late.learning) %>%
   dplyr::mutate(distal.timestamp = (timestamp_from_end <= -4000) & (timestamp_from_end > -5000),
                 proximal.timestamp = (timestamp_from_end > -1000) & (timestamp_from_end <= 0)) %>%
   filter(distal.timestamp | proximal.timestamp) %>%
-  dplyr::mutate(timestamp_from_end_bin = ceil(timestamp_from_end / timebin.width)) %>%
+  dplyr::mutate(timestamp_from_end_bin = ceiling(timestamp_from_end / timebin.width)) %>%
   dplyr::group_by(implant, date, animal, exp, exp_title, trial, trial_id, day_desc, is.pc, 
                   proximal.timestamp, timestamp_from_end_bin, aligned_event_id) %>%
   dplyr::summarise_all(mean) %>% 
@@ -741,7 +741,7 @@ group_by(subset(reward.aligned.pop.traces.late.by.pc.binned, implant==implant.lo
   dplyr::summarise(mean(cells.active.pct), sem(cells.active.pct), n())
 pairwise.post.hoc(m.pc.proximal, factor.interaction = c('is.pc:proximal.timestamp'))
 
-models = create.bayes.lm.pair(subset(reward.aligned.pop.traces.late.by.pc.binned, implant==implant.loc & is.pc=='FALSE'),
+models = create.bayes.lm.pair(subset(reward.aligned.pop.traces.late.by.pc.binned, implant==implant.loc & is.pc=='TRUE'),
                               formula.full = cells.active.pct ~ 1 + proximal.timestamp + animal,
                               formula.null = cells.active.pct ~ 1 + animal,
                               whichRandom = 'animal')
@@ -758,7 +758,7 @@ reward.aligned.pop.traces.earlylate.binned = bind_rows(
   dplyr::mutate(distal.timestamp = (timestamp_from_end <= -4000) & (timestamp_from_end > -5000),
                 proximal.timestamp = (timestamp_from_end > -1000) & (timestamp_from_end <= 0)) %>%
   filter(distal.timestamp | proximal.timestamp) %>%
-  dplyr::mutate(timestamp_from_end_bin = ceil(timestamp_from_end / timebin.width)) %>%
+  dplyr::mutate(timestamp_from_end_bin = ceiling(timestamp_from_end / timebin.width)) %>%
   dplyr::group_by(implant, date, animal, exp, exp_title, trial, trial_id, day_desc, 
                   proximal.timestamp, bout, aligned_event_id) %>%
   dplyr::summarise_all(mean) %>% 
@@ -772,7 +772,7 @@ reward.aligned.pop.traces.earlylate.binned.per.day = bind_rows(
   dplyr::mutate(distal.timestamp = (timestamp_from_end <= -4000) & (timestamp_from_end > -5000),
                 proximal.timestamp = (timestamp_from_end > -1000) & (timestamp_from_end <= 0)) %>%
   filter(distal.timestamp | proximal.timestamp) %>%
-  dplyr::mutate(timestamp_from_end_bin = ceil(timestamp_from_end / timebin.width)) %>%
+  dplyr::mutate(timestamp_from_end_bin = ceiling(timestamp_from_end / timebin.width)) %>%
   dplyr::group_by(implant, date, animal, exp, exp_title, day_desc, proximal.timestamp, bout) %>%
   dplyr::summarise_all(mean) %>% 
   dplyr::mutate(timestamp_from_end = timestamp_from_end_bin * timebin.width - timebin.width/2,
@@ -816,10 +816,10 @@ models = create.bayes.lm.pair(
     mutate(val = log(1.0 + zscored_deconv_trace.mean)),
   formula.full = zscored_deconv_trace.mean ~ 1 + proximal.timestamp + animal,
   formula.null = zscored_deconv_trace.mean ~ 1 + animal,
-  whichRandom = 'animal', iterations = 10000)
+  whichRandom = 'animal', iterations = 50000)
 models$full / models$null
 calc.pair.95CI(models$full, pair.vars = c('proximal.timestamp-FALSE', 'proximal.timestamp-TRUE'),
-               ytransform = function(x) {exp(x) - 1 }, show.percent.change = TRUE)
+               ytransform = function(x) {exp(x) - 1 }, show.percent.change = FALSE)
 
 day.mean.on.arrival = reward.aligned.pop.traces %>%
   filter(aligned_event_id >= 0, timestamp_from_start >= 0, timestamp_from_end >= -5000) %>%
