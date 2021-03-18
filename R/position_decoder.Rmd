@@ -672,7 +672,9 @@ eval.decoder.all.other.days = function(decoder.config,
                                        filter.train.traces.fun=NULL,
                                        filter.test.traces.fun=NULL,
                                        test.day.indecies=c(1,2,3),
-                                       min.ncells.for.eval=10) {
+                                       min.ncells.for.eval=10,
+                                       timebin.dur.msec=200,
+                                       binned.var='zscored_trace') {
   ndays = 3  # Number of the first beforetest days to use
   eval.dfs = data.frame()
   for (animal_name in unique(test.days.df$animal)) {
@@ -685,9 +687,9 @@ eval.decoder.all.other.days = function(decoder.config,
     })
     binned.traces = prepare.traces(data.traces,
                                    filter.running=TRUE,
-                                   timebin.dur.msec = 200,
+                                   timebin.dur.msec = timebin.dur.msec,
                                    get.bin.thresholds.fun = get.quantiles.fun(c(0.9, 1.0)),
-                                   binned.var='zscored_trace')
+                                   binned.var=binned.var)
     traces.dates = char2date(unique(data.traces$date))
     cells.present = binned.traces[, (1), by=.(date, cell_id)][, .(ntimes=.N), by=.(cell_id)][
         ntimes == ndays, cell_id]
@@ -1135,8 +1137,8 @@ avg.pop.activity = function(binned.traces) {
   joined.data.traces[, close2rew := as.integer(min.rew.dist <= min.rew.dist.thresh) + 1]  
 
   pop.traces.rew.cells = joined.data.traces[(npresent == 3) & (rew.cell.group != 1), 
-                                            .(avg.val = mean(smoothed_deconv_trace)),
-                                            #.(avg.val = mean(response_bin)-1),
+                                            #.(avg.val = mean(smoothed_deconv_trace)),
+                                            .(avg.val = mean(response_bin)-1),
                                             by=list(animal, date, exp_title, trial_id, trial, x, y,
                                                     close2rew, min.rew.dist, timestamp, time_bin, rew.cell.group)]
   #pop.traces.rew.cells$cell_id = cell.db[npresent==3, cell_id][1]
@@ -1149,11 +1151,11 @@ avg.pop.activity = function(binned.traces) {
 
 pop.bayes.atreward.decoder.config = mfr.bayes.atreward.decoder.config
 pop.bayes.atreward.decoder.config$predictor.var = quo(avg.val)
-beforetest.pop.oneydayout.reward = eval.decoder.all.other.days.debug(
+beforetest.pop.oneydayout.reward = eval.decoder.all.other.days(
   pop.bayes.atreward.decoder.config, 
   test.days.df,
   equal.prior = TRUE,
-  prepare.vars.fun = avg.pop.activity.debug,
+  prepare.vars.fun = avg.pop.activity,
   filter.train.traces.fun = function(binned.traces) {
     binned.traces[min.rew.dist <= 15/perc2dist | min.rew.dist >= 40 / perc2dist, ]
   },
@@ -1171,7 +1173,7 @@ beforetest.pop.oneydayout.reward.summary = beforetest.pop.oneydayout.reward %>%
   dplyr::summarise(mean.error=mean(error), sem.error=sem(error), 
                    mean.rand.error=mean(random_error), sem.rand.error=sem(random_error)) %>%  
   dplyr::mutate(mean.rand.diff=mean.rand.error-mean.error)
-  
+    
 beforetest.pop.oneydayout.reward.summary %>% 
   group_by(implant) %>%
   dplyr::summarise(mean(mean.error), sem(mean.error), 
@@ -1236,7 +1238,7 @@ animal.caimg_dirs = find.caimg.dir(test_caimg_dirs, 'G-BR', '2020-02-08')
 data.traces = read.data.trace(animal.caimg_dirs, filter_exp_title = 'beforetest')
 binned.traces = prepare.traces(data.traces,
                                filter.running=TRUE,
-                               timebin.dur.msec = 200,
+                               timebin.dur.msec = 400,
                                get.bin.thresholds.fun = get.quantiles.fun(c(0.9, 1.0)),
                                binned.var='zscored_trace')
 binned.traces = add.close2rew.fun(goal.cell.max.dist)(binned.traces)
@@ -1251,7 +1253,8 @@ wide.traces.df = tidyr::pivot_wider(
   id_cols=c(animal, date, trial, timestamp, time_bin, close2rew),
   names_from='cell_id',
   names_prefix='cell_',
-  values_from='zscored_smooth_deconv_trace')
+  #values_from='smoothed_deconv_trace')
+  values_from='deconv_trace')
 
 inTraining <- 1: round(0.7 * nrow(wide.traces.df))
 
@@ -1262,27 +1265,163 @@ testing  <- wide.traces.df[-inTraining,-id.cols]
 fitControl <- trainControl(## 5-fold CV
                            method = "repeatedcv",
                            number = 5,
-                           repeats = 1,
-                           # Estimate class probabilities
-                           classProbs = TRUE,
-                           ## Evaluate performance using 
-                           ## the following function
-                           summaryFunction = twoClassSummary)
-gbmFit1 <- train(close2rew ~ ., 
-                 #close2rew ~ response_bin * cell_id,
-                 data = training, 
+                           repeats = 3,
+                           classProbs = TRUE)
+                           #summaryFunction = twoClassSummary)
+
+training.data.recipe = recipes::recipe(close2rew ~ .,
+                                       training) %>%
+  recipes::step_center(contains('cell_')) %>%
+  recipes::step_scale(contains('cell_')) %>%
+  recipes::step_pca(contains('cell_'), prefix = 'principal_comp_',  threshold = .9) 
+
+library(pROC)
+gbmFit1 <- train(#close2rew ~ ., 
+                 #data = training,
+                 training.data.recipe, training,
                  method = 'svmLinear',
+                 #method='LogitBoost',
                  #method = 'gbm', 
                  trControl = fitControl,
-                 tuneGrid=data.frame(C=c(0.25, 0.5, 1.0, 10.0)),
+                 metric='ROC',
+                 #tuneGrid=data.frame(C=c(0.25, 0.5, 1.0, 10.0)),
                  #trControl = trainControl('none'),
                  ## This last option is actually one
                  ## for gbm() that passes through
                  verbose = FALSE)
+predictors(gbmFit1)
 summary(gbmFit1)
+#plot(gbmFit1)
 PredictedTest <- predict(gbmFit1, testing)
 #Accuracy(PredictedTest, testTrainData$label)
 mean(PredictedTest == testing$close2rew )
+table(PredictedTest, testing$close2rew) / length(testing$close2rew)
 mean(as.integer(PredictedTest))
 ```
-TODO: write eval.decoder.other.days.on.traces using carat
+
+
+```{r}
+pivot.traces.wide = function(binned.traces,
+                             predictor.var,
+                             predicted.var) {
+  predicted.var = enquo(predicted.var)
+  predictor.var = enquo(predictor.var)
+  predicted.varname = quo_name(predicted.var)
+  predictor.varname = quo_name(predictor.var)
+  #binned.traces$response_bin = as.factor(binned.traces$response_bin)
+  id.cols = c('animal', 'date', 'trial', 'timestamp', 'time_bin')
+  if (predicted.varname %in% colnames(binned.traces)) {
+    id.cols = c(id.cols, predicted.varname)
+  }
+  res = tidyr::pivot_wider(
+    binned.traces,
+    id_cols=id.cols,
+    names_from='cell_id',
+    names_prefix='cell_',
+    values_from=predictor.varname) %>%
+    dplyr::select(!!predicted.var, starts_with('cell'))
+  res[[predicted.varname]] = as.factor(paste0('class_', res[[predicted.varname]]))
+  res
+}
+
+caret.svm.train = function(binned.traces,
+                           nclasses, 
+                           predictor.var,
+                           predicted.var) {
+  predictor.var = enquo(predictor.var)
+  predicted.var = enquo(predicted.var)
+  predicted.varname = quo_name(predicted.var)
+  wide.traces.df = pivot.traces.wide(binned.traces, !!predictor.var, !!predicted.var)
+  classifier.formula = as.formula(paste(predicted.varname, '~ .'))
+  
+  training.data.recipe = recipes::recipe(classifier.formula, wide.traces.df) %>%
+    #recipes::step_center(contains('cell_')) %>%
+    #recipes::step_scale(contains('cell_')) %>%
+    recipes::step_pca(contains('cell_'), prefix = 'principal_comp_',  threshold = .9) 
+  
+  svmFit <- train(#classifier.formula,
+                  #data = wide.traces.df, 
+                  training.data.recipe, wide.traces.df,
+                  method = 'svmLinear',
+                  #metric='ROC',
+                  #tuneGrid=data.frame(C=c(0.25)),
+                  #trControl = trainControl('none', classProbs = TRUE),
+                  trControl = trainControl('none')
+                  #method = 'LogitBoost',
+                  #method='gbm',
+                  #trControl = fitControl,
+                  #verbose=FALSE
+                  )
+  
+  sprintf('Created %d predictors from %d cells', length(predictors(svmFit)), ncol(wide.traces.df)-1) %>% print()
+  prior.table = table(wide.traces.df[[predicted.varname]]) / nrow(wide.traces.df)
+  prior.vec = as.vector(prior.table)
+  list(prior=prior.vec, likelihood=svmFit)
+}
+
+caret.svm.predict = function(prior, svmFit, predictor.vals, nclasses=2) {
+  testing.wide.df = data.frame(t(predictor.vals))
+  colnames(testing.wide.df) = paste0('cell_', names(predictor.vals))
+  predicted <- predict(svmFit, testing.wide.df)
+  list(s=as.integer(predicted),
+       density=rep(1/nclasses, nclasses),
+       prob=1)
+}
+
+caret.atreward.decoder.config = list(
+  predicted.var = quo(close2rew),
+  #predictor.var = quo(smoothed_deconv_trace),
+  #predictor.var = quo(zscored_trace),
+  predictor.var = quo(response_bin),
+  nclasses = 2,
+  train.fun = caret.svm.train,
+  predict.fun = caret.svm.predict,
+  error.fun = function(x,y) {abs(x-y)}
+)
+```
+
+```{r include=FALSE}
+beforetest.onedayout.reward.svm = eval.decoder.all.other.days(
+  caret.atreward.decoder.config, 
+  test.days.df,
+  ncells = 0,
+  nshuffles = 1,
+  equal.prior = TRUE,
+  prepare.vars.fun = add.close2rew.fun(goal.cell.max.dist),
+  filter.train.traces.fun = function(binned.traces) {
+    binned.traces[pmin(dist_reward0, dist_reward1) <= 15/perc2dist | pmin(dist_reward0, dist_reward1) >= 40 / perc2dist, ]
+  },
+  filter.test.traces.fun = filter.at.present.or.future.rew,
+  test.day.indecies=c(1,3),
+  timebin.dur.msec = 200)
+```
+
+```{r}
+beforetest.onedayout.reward.svm.summary = beforetest.onedayout.reward.svm %>%
+  left_join(mouse.meta.df) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date')) %>%
+  group_by(implant, animal, test_date) %>%
+  dplyr::summarise(mean.error=mean(error), sem.error=sem(error), 
+                   mean.rand.error=mean(random_error), sem.rand.error=sem(random_error)) %>%  
+  dplyr::mutate(mean.rand.diff=mean.rand.error-mean.error)
+  
+beforetest.onedayout.reward.svm.summary %>% 
+  group_by(implant) %>%
+  dplyr::summarise(mean(mean.error), sem(mean.error), 
+                   mean(mean.rand.diff), sem(mean.rand.diff),
+                   mean(mean.rand.error), sem(mean.rand.error))
+```
+```{r}
+g = ggplot(beforetest.onedayout.reward.svm.summary, 
+           aes(text=animal, test_day=test_date)) +
+  geom_jitter(aes(x=implant, y=100*mean.rand.diff, color=implant),
+              shape=1, height=0, width=0.15, size=0.5) +
+  geom_hline(yintercept = 0, linetype='dashed') +
+  scale_color_manual(values=main.two.colours) +
+  gtheme +
+  theme(legend.position = 'none') +
+  xlab('') + ylab('Accuracy above random (%)') + ylim(c(-50,50)) + ggtitle('Population decoder')
+
+ggplotly(g)
+```
+
