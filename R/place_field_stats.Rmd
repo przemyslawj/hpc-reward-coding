@@ -421,9 +421,6 @@ test.rewards.df = all.locations.df %>%
 ##During the test trial vs during the habituation
 
 ```{r}
-perc2dist = 1.2
-goal.cell.max.dist = 20 / perc2dist
-
 beforetest.rewards.df = filter(test.rewards.df, exp_title == 'beforetest')
 beforetest.rewards.df = data.table(beforetest.rewards.df)
 merged.run.trials.pc = left_join(run.trials.pc, locations.df, by=c('animal', 'date', 'location_set'))

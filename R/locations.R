@@ -3,7 +3,9 @@ library(purrr)
 library(stringr)
 
 source('utils.R')
-rew_zone_radius = 15
+perc2dist = 1.2
+goal.cell.max.dist = 20 / perc2dist
+rew_zone_radius = goal.cell.max.dist
 
 is.date <- function(x) !is.na(char2date(x))
 

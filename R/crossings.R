@@ -1,4 +1,6 @@
-get_crossings_n = function(zone_dist, zone_radius=10, frame_rate=24) {
+source('locations.R')
+
+get_crossings_n = function(zone_dist, zone_radius=rew_zone_radius, frame_rate=24) {
   is_inside = zone_dist < zone_radius
   min_frames_inside = 0.25  * frame_rate
   inside_diff = diff(is_inside) 
@@ -12,7 +14,7 @@ get_crossings_n = function(zone_dist, zone_radius=10, frame_rate=24) {
   return(crossings_n)
 }
 
-crossings4positions = function(pos_x, pos_y, zone_x, zone_y, zone_radius=10) {
+crossings4positions = function(pos_x, pos_y, zone_x, zone_y, zone_radius=rew_zone_radius) {
   zone_dist = sqrt((pos_x - zone_x)^2 + (pos_y - zone_y)^2)
   return(get_crossings_n(zone_dist, zone_radius=zone_radius))
 }

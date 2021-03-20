@@ -272,12 +272,32 @@ geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20,
        scale_color_manual(values=rew.colours))
 }
 
-geom_maze_contour = function(diameter, npoints=100, offset=0) {
-  r = diameter / 2
-  center = c(r, r)
+geom_circle = function(center, r, npoints=100, offset=0) {
   tt = seq(0,2*pi, length.out=npoints)
   xx = center[1] + r * cos(tt)
   yy = center[2] + r * sin(tt)
   circle.df = data.frame(x = xx, y = yy)
-  geom_path(data=circle.df, aes(x = x + offset, y = y - offset), color='#333333')
+  geom_path(data=circle.df, aes(x = x + offset, y = y - offset), color='#333333')  
+}
+
+geom_maze_contour = function(diameter, npoints=100, offset=0) {
+  r = diameter / 2
+  center = c(r, r)
+  geom_circle(center, r, npoints, offset)
+}
+
+geom_reward_zone = function(rewards.df, subject=NULL, day=NULL, nbins=100, r=16.67) {
+  dayreward.df = rewards.df
+  if (!is.null(subject)) {
+    dayreward.df = filter(rewards.df, animal==subject)
+  }
+  if (!is.null(day)) {
+    dayreward.df = filter(dayreward.df, date==char2date(day))
+  }
+  
+  bin.size = 100 / nbins
+  dayreward.df$center_x = dayreward.df$trans_x / bin.size
+  dayreward.df$center_y = (100 - dayreward.df$trans_y) / bin.size
+  list(geom_circle(c(dayreward.df$center_x[1], dayreward.df$center_y[1]), r),
+       geom_circle(c(dayreward.df$center_x[2], dayreward.df$center_y[2]), r))
 }

@@ -69,8 +69,8 @@ gdur = d %>%
   ylab('Trial time (sec)') +
   ylim(c(0,200))
 gdur
-ggsave(filename='gdist.svg', plot=gdist, width=5)
-ggsave(filename='gdur.svg', plot=gdur, width=5)
+# ggsave(filename='gdist.svg', plot=gdist, width=5)
+# ggsave(filename='gdur.svg', plot=gdur, width=5)
 ```
 
 Total distance travelled per mouse
@@ -388,12 +388,14 @@ test.trial.df.joined$location_set = as.factor(test.trial.df.joined$location_set)
 ```
 
 ```{r}
-test.trial.df.joined %>%
+library(plotly)
+g = test.trial.df.joined %>%
   ggplot(aes(x=type, y=norm_crossings, group=animal)) +
   geom_line() +
   geom_point(aes(color=animal)) +
   facet_grid(implant ~ day_desc, scales='free') +
   gtheme
+ggplotly(g)
 ```
 
 
@@ -426,6 +428,7 @@ dplyr::group_by(test.trial.df.joined, type) %>%
 
 ```
 
+
 ```{r}
 test.trial.df.joined = mutate(test.trial.df.joined, 
                               aday=paste(animal, day_desc, sep='_'))
@@ -438,8 +441,13 @@ bf.models$full / bf.models$null
 print('CI for difference between implants')
 calc.pair.95CI(bf.models$full)
 
+bf.models = create.bayes.lm.pair(test.trial.df.joined,
+                                 formula.full = norm_crossings ~ type + aday,
+                                 formula.null = norm_crossings ~ aday,
+                                 whichRandom = c('aday'))
+bf.models$full / bf.models$null
 print('CI for difference between foraging and test')
-calc.pair.95CI(bf.models$null, pair.vars = c('type-habituation', 'type-test'))
+calc.pair.95CI(bf.models$full, pair.vars = c('type-habituation', 'type-test'))
 ```
 
 
@@ -467,6 +475,41 @@ df=filter(test.trial.df.joined, location_set==2) %>% filter(animal %in% animal.i
 wilcox.test(norm_crossings ~ type, data=df, paired=TRUE)
 ```
 
+# Example of paths during beforetest 120s
+
+Prepare traces
+```{r}
+source('utils.R')
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
+animal_name = 'K-BR'
+exp_title='learning'
+day = '2020-02-06' # learning 2 day1
+caimg_result_dir = find.caimg.dir(caimg_result_dirs, animal_name, day)
+beforetest.traces = read.data.trace(caimg_result_dir, 'beforetest')
+```
+
+```{r}
+behav.traces.fragment = filter(beforetest.traces, 
+                               cell_id == beforetest.traces$cell_id[1]) %>%
+  filter(timestamp <= 120 * 1000) %>%
+  arrange(timestamp)
+behav.traces.fragment$row_id = 1:nrow(behav.traces.fragment)
+behav.traces.fragment %>%
+  ggplot() +
+  geom_path(aes(x=x, y=100-y), size=0.5, colour='#666666') +
+  geom_rewards.current(filter(test.rewards.df, exp_title=='beforetest'), 
+               beforetest.traces$animal[1], beforetest.traces$date[1], nbins = 100, 
+               rew.size=4, stroke.size=1) +
+  geom_reward_zone(filter(test.rewards.df, exp_title=='beforetest'), 
+               beforetest.traces$animal[1], beforetest.traces$date[1]) +
+  geom_maze_contour(100) +
+  scale_color_continuous(low='#b8e2ff', high='#222222') +
+  theme_void() +
+  theme(legend.position='none')
+ggsave('test_trial_path.pdf', path='/home/prez/tmp/cheeseboard', 
+       device = cairo_pdf, units='cm', width=3.7, height=3.6)
+```
+
 ```{r}
 # Paired comparisons of crossings counts
 gcross.paired.absolute = test.trial.df.joined %>%
@@ -482,16 +525,6 @@ gcross.paired.absolute = test.trial.df.joined %>%
   gtheme 
 
 gcross.paired.absolute
-```
-
-```{r}
-cg.stats=plot_grid(gdist, gdwell, 
-                   labels=c('A', 'B'), 
-                   ncol=2,
-                   label_size=25,
-                   label_fontface='bold')
-cg.stats
-ggsave(filename='gstats.svg', plot=cg.stats, width=10, height=3.5)
 ```
 
 
