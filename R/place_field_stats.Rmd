@@ -253,8 +253,8 @@ plot.pc.stat = function(metric, facet.exp_title=FALSE) {
     # ungroup() %>%
     ggplot(aes(x=implant, y=!!metric)) +
     geom_violin(fill=single.colour, color=single.colour) +
+    geom_violin(fill='transparent', colour='white', draw_quantiles=0.5, size=1) +
     geom_jitter(shape=16, width=0.4, height=0, size=0.1, alpha=0.15, color='#333333')+
-    stat_summary(fun.y=median, geom="point", shape=23, size=2, color='white') +
     gtheme +
     xlab('') +
     #gxaxis.blank +

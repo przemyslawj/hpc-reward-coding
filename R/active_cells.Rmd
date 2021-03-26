@@ -197,14 +197,14 @@ g.run.time = trial.behav.summary.df %>%
   ggplot(aes(y=running_pct, x=implant, text=paste(animal, day_desc))) +
   geom_jitter(height=0, width=0.3, shape=1, size=0.5, color='#333333') +
   gtheme +
-  ylab('Time running (%)') + xlab('')
+  ylab('Time running (%)') + xlab('') + ylim(c(0, 0.7))
 ggplotly(g.run.time)
 
 g.speed = trial.behav.summary.df %>%
   ggplot(aes(y=mean_running_velocity * 1.2, x=implant, text=paste(animal, day_desc))) +
   geom_jitter(height=0, width=0.3, shape=1, size=0.5, color='#333333') +
   gtheme +
-  ylab('Running speed (cm/s)') + xlab('')
+  ylab('Running speed (cm/s)') + xlab('') + ylim(c(0,25))
 ggplotly(g.speed)
 
 plot_grid(g.run.time, g.speed)

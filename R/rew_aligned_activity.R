@@ -422,7 +422,7 @@ reward.aligned.pop.traces.earlylate.by.pc = reward.aligned.pop.traces.by.pc %>%
   dplyr::filter(is.early.learning | is.late.learning) %>%
   dplyr::mutate(bout=ifelse(is.early.learning, 'early', 'late'))
 
-# No ramping of activity before mobility, possibly synchronous events present not visible in the mean
+# vCA1: no ramping of activity before mobility, possibly synchronous events present not visible in the mean
 immobility.aligned.pop.traces %>%
   filter(exp_title == 'trial', 
          aligned_event_id >= 0, timestamp_from_start >= 0, timestamp_from_end >= -5000) %>%
@@ -658,6 +658,36 @@ reward.pop.traces.aligned.comparison %>%
   theme(legend.position = 'top')
 ggsave('~/tmp/cheeseboard/pop_activity/reward_approach.svg', 
        height=6.5, width=8, units='cm')
+
+## Ramping activity
+# Correlation of ramping activity per running bout
+#reward.aligned.pop.traces.earlylate %>% 
+reward.aligned.pop.traces %>%
+  filter(exp_title == 'trial', aligned_event_id >= 0) %>%
+  filter(location_set == 1) %>%
+  filter(timestamp_from_end >= -3000 & timestamp_from_end <= -200) %>%
+  #filter(implant == 'vCA1') %>%
+  group_by(exp, exp_title, trial_id, implant, animal, date, trial, day_ordinal, aligned_event_id) %>%
+  dplyr::summarise(ramping.r = cor(timestamp_from_end, zscored_smooth_deconv_trace.mean), .groups='drop') %>%
+  #dplyr::summarise(ramping.r = cor(dist_approached_rew, zscored_smooth_deconv_trace.mean), .groups='drop) %>%
+  ggplot(aes(x=as.factor(day_ordinal), y=ramping.r)) +
+  #geom_violin(aes(fill=day_ordinal, colour=day_ordinal), alpha=0.6) +  
+  geom_violin(fill=single.colour, colour=single.colour) +
+  geom_jitter(#aes(color=animal), 
+              height=0.0, width=0.2, shape=1, size=0.4, alpha=0.5, colour='#444444') +
+  geom_hline(yintercept = 0, linetype='dashed', colour='#333333') +
+  geom_violin(fill='transparent', colour='white', draw_quantiles = 0.5, size=0.5) +
+  #stat_summary(fun=median, geom="point", shape=23, size=2, color='white') +
+  facet_grid(. ~ implant) +
+  #scale_fill_manual(values=three.colours) +
+  #scale_color_manual(values=three.colours) +
+  ylab('Ramping R') +
+  xlab('Learning day') +
+  gtheme
+
+ggsave('~/tmp/cheeseboard/pop_activity/reward_approach_ramping.pdf', 
+       device = cairo_pdf,
+       height=4.2, width=7, units='cm')
 
 
 # Activity at reward bouts in place vs non-place cells, trials after learnt
