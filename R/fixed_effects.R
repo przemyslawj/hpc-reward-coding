@@ -61,7 +61,6 @@ plot.val.change.between.groups = function(summary.df, var, group.var) {
     gtheme
 }
 
-
 lmer.test.print = function(df, 
                            var = log(1.0 + zscored_deconv_trace.mean), 
                            fixed.effects = is.early.learning,

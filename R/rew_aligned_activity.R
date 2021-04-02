@@ -403,32 +403,35 @@ beforetest.aligned.pop.traces.by.pc = join.meta.df(rbindlist(beforetest.aligned.
 seq.cell.timestamp.var = join.meta.df(rbindlist(seq.cell.timestamp.var.list))
 #all.cells.fr.outside.seq = join.meta.df(rbindlist(all.cells.fr.outside.seq.list))
 
-save.image(file="data/rew_aligned_pop_activity10.RData")
+save.image(file="data/rew_aligned_pop_activity11.RData")
 
 early.learning.days = c('learning1 day#1')
 late.learning.days = c('learning1 day#5', 'learning2 day#2', 'learning3 day#2', 'learning4 day#2')
 
+add.early.late.col = function(df, filter.early.and.late=FALSE) {
+  df = df %>%
+    dplyr::mutate(is.early.learning = day_desc %in% early.learning.days,
+                  is.late.learning = day_desc %in% late.learning.days) %>%
+    dplyr::mutate(bout=ifelse(is.early.learning, 'early', ifelse(is.late.learning, 'late', NA)))
+  if (filter.early.and.late) {
+    df = filter(df, (is.early.learning | is.late.learning))
+  }
+  df
+}
+
 reward.aligned.pop.traces.earlylate = reward.aligned.pop.traces %>%
   filter(exp_title == 'trial', aligned_event_id >= 0, timestamp_from_start >= 0, timestamp_from_end >= -5000) %>%
-  dplyr::mutate(is.early.learning = day_desc %in% early.learning.days,
-                is.late.learning = day_desc %in% late.learning.days) %>%
-  dplyr::filter(is.early.learning | is.late.learning) %>%
-  dplyr::mutate(bout=ifelse(is.early.learning, 'early', 'late'))
+  add.early.late.col(filter.early.and.late = TRUE)
 
 reward.aligned.pop.traces.earlylate.by.pc = reward.aligned.pop.traces.by.pc %>%
   filter(exp_title == 'trial', aligned_event_id >= 0, timestamp_from_start >= 0, timestamp_from_end >= -5000) %>%
-  dplyr::mutate(is.early.learning = day_desc %in% early.learning.days,
-                is.late.learning = day_desc %in% late.learning.days) %>%
-  dplyr::filter(is.early.learning | is.late.learning) %>%
-  dplyr::mutate(bout=ifelse(is.early.learning, 'early', 'late'))
+  add.early.late.col(filter.early.and.late = TRUE)
 
 # vCA1: no ramping of activity before mobility, possibly synchronous events present not visible in the mean
 immobility.aligned.pop.traces %>%
   filter(exp_title == 'trial', 
          aligned_event_id >= 0, timestamp_from_start >= 0, timestamp_from_end >= -5000) %>%
-  dplyr::mutate(is.early.learning = day_desc %in% early.learning.days,
-                is.late.learning = day_desc %in% late.learning.days) %>%
-  dplyr::filter(is.early.learning | is.late.learning) %>%
+  add.early.late.col(filter.early.and.late = TRUE) %>%
   group_by(implant, is.early.learning, timestamp_from_end) %>%
   dplyr::summarise(
     zscored_deconv_trace.sem=sem(zscored_smooth_deconv_trace.mean),
@@ -662,25 +665,171 @@ ggsave('~/tmp/cheeseboard/pop_activity/reward_approach.svg',
 ## Ramping activity
 # Correlation of ramping activity per running bout
 #reward.aligned.pop.traces.earlylate %>% 
-reward.aligned.pop.traces %>%
+get.ramping.quant = function(timestamps, activity, min.timestamp=-3000, avg.window=0, var.prefix='activity.') {
+  if (avg.window > 0) {
+    activity.movavg = movavg(activity, avg.window)
+  } else {
+    activity.movavg = activity
+  }
+  timestamp.indecies = which(timestamps >= min.timestamp)
+  lm.res = lm(y ~ x, data.frame(x=timestamps[timestamp.indecies]/1000, y=activity[timestamp.indecies]))
+  ramping.r.varname = paste0(var.prefix, 'ramping.r')
+  ramping.gradient.varname = paste0(var.prefix, 'ramping.gradient')
+  tibble(
+    {{ramping.r.varname}} := cor(timestamps[timestamp.indecies], activity.movavg[timestamp.indecies]),
+    {{ramping.gradient.varname}} := unname(lm.res$coefficients['x'])
+  )
+}
+
+min.poptrace.cells = 5
+reward.aligned.meanpop.traces = reward.aligned.pop.traces %>%
   filter(exp_title == 'trial', aligned_event_id >= 0) %>%
+  filter(ncells >= min.poptrace.cells) %>%
+  filter(timestamp_from_end >= -5000 & timestamp_from_end <= -200) %>%
+  group_by(exp, exp_title, implant, animal, date, day_desc, day_ordinal, exp_day_ordinal, location_set, 
+           timestamp_from_end) %>%
+  dplyr::summarise(mean.activity = mean(zscored_smooth_deconv_trace.mean), 
+                   mean.cells.active.pct = mean(cells.active.pct),
+                   .groups='drop') %>%
+  arrange(exp, exp_title, implant, animal, date, day_desc, day_ordinal, exp_day_ordinal, location_set, 
+          timestamp_from_end)
+
+ramping.reward.aligned.pop.traces.by.day = reward.aligned.meanpop.traces %>%
+  group_by(exp, exp_title, implant, animal, date, day_desc, day_ordinal, exp_day_ordinal, location_set) %>%
+  dplyr::summarise(get.ramping.quant(timestamp_from_end, mean.activity),
+                   get.ramping.quant(timestamp_from_end, mean.cells.active.pct, var.prefix='cells.'), 
+                   ntimestamps=n(), 
+                   .groups='drop') %>%
+  filter(ntimestamps > 10) # longer than 2s
+
+ramping.reward.aligned.pop.traces.by.day %>%
+  filter(day_desc %in% late.learning.days) %>%
+  filter(implant == 'vCA1') %>% pull(activity.ramping.r) -> x
+t.test(x)
+
+# ramping.reward.aligned.pop.traces = reward.aligned.pop.traces %>%
+#   filter(exp_title == 'trial', aligned_event_id >= 0) %>%
+#   filter(timestamp_from_end >= -5000 & timestamp_from_end <= -200) %>%
+#   group_by(exp, exp_title, trial_id, implant, animal, date, day_desc, trial, day_ordinal, location_set, aligned_event_id) %>%
+#   dplyr::summarise(get.ramping.quant(timestamp_from_end, zscored_smooth_deconv_trace.mean),
+#                    get.ramping.quant(timestamp_from_end, cells.active.pct, var.prefix='cells.'), 
+#                    ntimestamps=n(), 
+#                    .groups='drop') %>%
+#   filter(ntimestamps > 10) # longer than 2s
+
+example.animal = 'D-BR'
+#example.animal = 'O-TR'
+#example.animal = 'F-BL'
+
+example.reward.aligned.pop.traces = reward.aligned.pop.traces %>%
+  filter(exp_title == 'trial', aligned_event_id >= 0) %>%
+  filter(timestamp_from_end >= -5000 & timestamp_from_end <= 2000) %>%
+  filter(animal == example.animal) %>%
+  filter(day_desc %in% c('learning1 day#2', 'learning1 day#3', 'learning1 day#5')) %>%
+  filter(location_set == 1)
+
+example.ramping.reward.aligned.pop.traces.by.day = ramping.reward.aligned.pop.traces.by.day %>%
+  filter(animal == example.animal) %>%
+  filter(day_desc %in% c('learning1 day#2', 'learning1 day#3', 'learning1 day#5')) %>%
+  filter(location_set == 1)
+
+# g0 = example.reward.aligned.pop.traces %>%
+#   ggplot(aes(x=timestamp_from_end / 1000, y=as.integer(event_seq_no))) +
+#   geom_raster(aes(fill=pmin(40, velocity))) +
+#   scale_fill_gradient(low='white', high='#333333') +
+#   geom_vline(xintercept = 0, linetype='dashed') +
+#   facet_wrap(. ~ day_desc, ncol=5) +
+#   xlab('Timestamp (s)') + ylab('Approach') + labs(fill='Velocity') +
+#   scale_y_reverse() +
+#   gtheme +
+#   theme(legend.position = 'top')
+
+g1 = example.reward.aligned.pop.traces %>%
+  group_by(exp, exp_title, implant, day_desc, day_ordinal, location_set, timestamp_from_end) %>%
+  dplyr::summarise(mean.val = mean(pmin(30, velocity)),
+                   sem.val = sem(pmin(30, velocity)),
+                   .groups = 'drop') %>%
+  ggplot(aes(x=timestamp_from_end/1000)) +
+  geom_vline(xintercept = 0, linetype='dashed') +
+  geom_ribbon(aes(ymin=mean.val-sem.val, ymax=mean.val+sem.val), color='#555555', fill='#555555') +
+  facet_wrap(. ~ day_desc, ncol=5) +
+  xlab('Timestamp (s)') + ylab('Velocity') +
+  gtheme
+
+
+g2 = example.reward.aligned.pop.traces %>%
+  ggplot(aes(x=timestamp_from_end / 1000, y=as.integer(event_seq_no))) +
+  geom_raster(aes(fill=pmin(1, zscored_smooth_deconv_trace.mean))) +
+  scale_fill_gradient(low='white', high='#333333') +
+  geom_vline(xintercept = 0, linetype='dashed') +
+  facet_wrap(. ~ day_desc, ncol=5) +
+  xlab('Timestamp (s)') + ylab('Approach') + labs(fill='Population z-score') +
+  scale_y_reverse() +
+  gtheme +
+  theme(legend.position = 'top')
+
+g3 = example.reward.aligned.pop.traces %>%
+  group_by(exp, exp_title, implant, day_desc, day_ordinal, location_set, timestamp_from_end) %>%
+  dplyr::summarise(mean.val = mean(zscored_smooth_deconv_trace.mean),
+                   sem.val = sem(zscored_smooth_deconv_trace.mean),
+                   .groups = 'drop') %>%
+  ggplot(aes(x=timestamp_from_end/1000)) +
+  geom_vline(xintercept = 0, linetype='dashed') +
+  geom_ribbon(aes(ymin=mean.val-sem.val, ymax=mean.val+sem.val), color='#555555', fill='#555555') +
+  geom_text(data=example.ramping.reward.aligned.pop.traces.by.day,
+            mapping=aes(x=1.1, y=0.1, label=paste('R', round(activity.ramping.r, 2))),
+            size=3) +
+  facet_wrap(. ~ day_desc, ncol=5) +
+  xlab('Timestamp (s)') + ylab('Population z-score') +
+  gtheme
+  
+plot_grid(g2, g3, g1, ncol=1, rel_heights = c(1.8, 1, 1))
+ggsave('examaple_rew_aligned_activity-vca1-2.pdf', 
+       device=cairo_pdf,
+       path = '~/tmp/cheeseboard/pop_activity/',
+       units='cm', width=9, height=8.5)
+
+
+# ramping.reward.aligned.pop.traces.by.pc = reward.aligned.pop.traces.by.pc %>%
+#   filter(exp_title == 'trial', aligned_event_id >= 0) %>%
+#   filter(timestamp_from_end >= -5000 & timestamp_from_end <= -200) %>%
+#   group_by(exp, exp_title, trial_id, implant, animal, date, day_desc, trial, day_ordinal, event_seq_no, is.pc) %>%
+#   dplyr::summarise(get.ramping.quant(timestamp_from_end, zscored_smooth_deconv_trace.mean),
+#                    get.ramping.quant(timestamp_from_end, cells.active.pct, var.prefix='cells.'), 
+#                    ntimestamps=n(), 
+#                    .groups='drop') %>%
+#   filter(ntimestamps > 10)
+
+
+reward.aligned.meanpop.traces.by.pc = reward.aligned.pop.traces.by.pc %>%
+  filter(exp_title == 'trial', aligned_event_id >= 0) %>%
+  filter(ncells >= min.poptrace.cells) %>%
+  filter(timestamp_from_end >= -5000 & timestamp_from_end <= -200) %>%
+  group_by(exp, exp_title, implant, animal, date, day_desc, day_ordinal, exp_day_ordinal, location_set, 
+           is.pc, timestamp_from_end) %>%
+  dplyr::summarise(mean.activity = mean(zscored_smooth_deconv_trace.mean), 
+                   mean.cells.active.pct = mean(cells.active.pct),
+                   .groups='drop') 
+
+ramping.reward.aligned.pop.traces.by.pc.day = reward.aligned.meanpop.traces.by.pc %>%
+  group_by(exp, exp_title, implant, animal, date, day_desc, day_ordinal, exp_day_ordinal, location_set, is.pc) %>%
+  dplyr::summarise(get.ramping.quant(timestamp_from_end, mean.activity), 
+                   get.ramping.quant(timestamp_from_end, mean.cells.active.pct, var.prefix='cells.'), 
+                   ntimestamps=n(), 
+                   .groups='drop') %>%
+  filter(ntimestamps > 10)
+
+ramping.reward.aligned.pop.traces.by.pc.day %>%
   filter(location_set == 1) %>%
-  filter(timestamp_from_end >= -3000 & timestamp_from_end <= -200) %>%
-  #filter(implant == 'vCA1') %>%
-  group_by(exp, exp_title, trial_id, implant, animal, date, trial, day_ordinal, aligned_event_id) %>%
-  dplyr::summarise(ramping.r = cor(timestamp_from_end, zscored_smooth_deconv_trace.mean), .groups='drop') %>%
-  #dplyr::summarise(ramping.r = cor(dist_approached_rew, zscored_smooth_deconv_trace.mean), .groups='drop) %>%
-  ggplot(aes(x=as.factor(day_ordinal), y=ramping.r)) +
-  #geom_violin(aes(fill=day_ordinal, colour=day_ordinal), alpha=0.6) +  
-  geom_violin(fill=single.colour, colour=single.colour) +
-  geom_jitter(#aes(color=animal), 
-              height=0.0, width=0.2, shape=1, size=0.4, alpha=0.5, colour='#444444') +
+  #filter(location_set == 1 | day_desc %in% (late.learning.days)) %>%
+  ggplot(aes(x=day_ordinal, y=cells.ramping.r)) +
+  # geom_jitter(aes(colour=implant),
+  #             height=0.0, width=0.1, shape=1, size=1) +
+  geom_line(aes(group=animal), color='#aaaaaa') +
   geom_hline(yintercept = 0, linetype='dashed', colour='#333333') +
-  geom_violin(fill='transparent', colour='white', draw_quantiles = 0.5, size=0.5) +
-  #stat_summary(fun=median, geom="point", shape=23, size=2, color='white') +
-  facet_grid(. ~ implant) +
-  #scale_fill_manual(values=three.colours) +
-  #scale_color_manual(values=three.colours) +
+  #stat_cor(method = 'pearson', size=3) +
+  facet_grid(is.pc ~ implant) +
+  scale_colour_manual(values=main.two.colours) +
   ylab('Ramping R') +
   xlab('Learning day') +
   gtheme
@@ -688,6 +837,342 @@ reward.aligned.pop.traces %>%
 ggsave('~/tmp/cheeseboard/pop_activity/reward_approach_ramping.pdf', 
        device = cairo_pdf,
        height=4.2, width=7, units='cm')
+
+# reward.aligned.pop.traces.by.pc %>%
+#   filter(exp_title == 'trial', aligned_event_id >= 0) %>%
+#   filter(day_desc %in% late.learning.days) %>%
+#   #filter(abs_timestamp <= 120000) %>%
+#   filter(timestamp_from_end >= -5000 & timestamp_from_end <= 1000) %>%
+#   filter(is.pc == FALSE) %>%
+#   filter(implant == 'vCA1') %>%
+#   ggplot(aes(x=timestamp_from_end/1000)) +
+#   geom_line(aes(y=zscored_smooth_deconv_trace.mean, group=event_seq_no), color='#aaaaaa') +
+ggplot() +
+  geom_line(data=filter(reward.aligned.meanpop.traces.by.pc, 
+                        is.pc == FALSE, implant=='vCA1', 
+                        day_desc %in% c(early.learning.days, late.learning.days)), 
+            mapping=aes(x=timestamp_from_end/1000, y=mean.activity), color='#333333') +
+  facet_wrap(. ~ animal + day_desc, ncol=6, scales='free_y' ) +
+  geom_vline(xintercept = 0, linetype='dashed') +
+  labs(title='Non-place cell activity') +
+  gtheme
+
+ggplot() +
+  geom_line(data=filter(reward.aligned.meanpop.traces, 
+                        implant=='vCA1', day_desc %in% c(early.learning.days, late.learning.days)), 
+            mapping=aes(x=timestamp_from_end/1000, y=mean.activity), color='#333333') +
+  facet_wrap(. ~ animal + day_desc, ncol=6, scales='free_y' ) +
+  geom_vline(xintercept = 0, linetype='dashed') +
+  labs(title='Population activity') +
+  gtheme
+
+ramping.reward.aligned.pop.traces.by.pc.day %>%
+  add.early.late.col(filter.early.and.late = TRUE) %>%
+  ggplot(aes(x=bout, y=activity.ramping.r)) +
+  stat_summary(fun=mean, geom='bar', mapping=aes(fill=bout), alpha=0.6) +
+  geom_jitter(height=0.0, width=0.2, shape=1, size=0.5, alpha=1, colour='#aaaaaa') +
+  geom_hline(yintercept = 0, linetype='dashed', colour='#333333') +
+  facet_grid(. ~ implant + is.pc) +
+  scale_fill_manual(values=three.colours) +
+  scale_color_manual(values=three.colours) +
+  ylab('Ramping R') +
+  xlab('') + 
+  scale_y_continuous(breaks = c(-1, 0, 1)) +
+  gtheme + theme(legend.position = 'none')
+ggsave('~/tmp/cheeseboard/pop_activity/reward_approach_ramping_early_late.pdf', 
+       device = cairo_pdf,
+       height=4.2, width=7.0, units='cm')
+
+
+m.activity.ramping.interactions = lmerTest::lmer(
+  activity.ramping.r ~ 1 + is.late.learning + implant + is.pc +
+    is.late.learning:implant + implant:is.late.learning + (1 | animal),
+                                              data = ramping.reward.aligned.pop.traces.by.pc.day %>% 
+                                                add.early.late.col(filter.early.and.late = TRUE) %>%
+                                                 mutate(is.pc = as.factor(is.pc),
+                                                        is.late.learning = as.factor(is.late.learning)),
+                                              REML=TRUE)
+summary(m.activity.ramping.interactions)
+anova(m.activity.ramping.interactions, refit=FALSE, ddf='Satterthwaite')
+pairwise.post.hoc(m.activity.ramping.interactions, factor.interaction = c('is.late.learning:implant'))
+
+m.activity.ramping.late.vca1 = lmerTest::lmer(activity.ramping.r ~ 1 + is.late.learning + (1 | animal),
+                   data = ramping.reward.aligned.pop.traces.by.day %>% 
+                     add.early.late.col(filter.early.and.late = TRUE) %>%
+                     mutate(is.late.learning = as.factor(is.late.learning)),
+                   subset=implant == 'vCA1' , 
+                   REML=TRUE)
+summary(m.activity.ramping.late.vca1)
+anova(m.activity.ramping.late.vca1, refit=FALSE, ddf='Satterthwaite')
+lsmeansLT(m.activity.ramping.late.vca1)
+
+m.activity.ramping.late.dca1 = lmerTest::lmer(activity.ramping.r ~ 1 + is.late.learning + is.pc + (1 | animal),
+                                              data = ramping.reward.aligned.pop.traces.by.pc.day %>% 
+                                                add.early.late.col(filter.early.and.late = TRUE) %>%
+                                                mutate(is.late.learning = as.factor(is.late.learning)),
+                                              subset=implant == 'dCA1', 
+                                              REML=TRUE)
+summary(m.activity.ramping.late.dca1)
+anova(m.activity.ramping.late.dca1, refit=FALSE, ddf='Satterthwaite')
+lsmeansLT(m.activity.ramping.late.dca1)
+
+m.activity.ramping.late.vca1 = lmerTest::lmer(activity.ramping.r ~ 1 + is.late.learning + (1 | animal),
+                                              data = ramping.reward.aligned.pop.traces.by.pc.day %>% 
+                                                add.early.late.col(filter.early.and.late = TRUE) %>%
+                                                mutate(is.late.learning = as.factor(is.late.learning)),
+                                              subset=implant == 'vCA1' & is.pc==FALSE, 
+                                              REML=TRUE)
+summary(m.activity.ramping.late.vca1)
+anova(m.activity.ramping.late.vca1, refit=FALSE, ddf='Satterthwaite')
+lsmeansLT(m.activity.ramping.late.vca1)
+# 
+# x = filter(ramping.reward.aligned.pop.traces.by.pc.day,
+#            implant =='vCA1', is.pc==FALSE) %>%
+#   add.early.late.col(filter.early.and.late = TRUE)
+# 
+# wilcox.test(subset(x, is.pc==FALSE)$activity.ramping.r)
+# ttestBF(subset(x, is.pc==FALSE)$activity.ramping.r)
+
+m.b = create.bayes.lm.pair(filter(ramping.reward.aligned.pop.traces.by.pc.day,
+                                  implant =='vCA1', is.pc==FALSE) %>% 
+                                  add.early.late.col(filter.early.and.late = TRUE),
+                           formula.full = activity.ramping.r ~ 1 + is.late.learning + animal,
+                           formula.null = activity.ramping.r ~ 1 + animal,
+                           whichRandom = 'animal')
+m.b$full / m.b$null
+
+
+
+### Correlation of ramping with performance
+
+df = read.csv(file.path('/mnt/DATA/Prez/cheeseboard', 'trial_stats.csv'))
+df$date = as.Date(df$date)
+
+d = filter(df, exp_title == 'trial')
+d.day = d %>%
+  group_by(animal, date, exp, exp_title, day_ordinal, day_desc) %>%
+  dplyr::summarise(mean.logdist = log(total_dist*perc2dist/100) %>% mean)
+
+ramping.learning.perf.cor.by.day = ramping.reward.aligned.pop.traces.by.day %>%
+  left_join(d.day,
+            by=c('animal', 'date', 'exp', 'exp_title', 'day_ordinal', 'day_desc'))
+
+ramping.learning.perf.cor.by.pc.day = ramping.reward.aligned.pop.traces.by.pc.day %>%
+  left_join(d.day,
+            by=c('animal', 'date', 'exp', 'exp_title', 'day_ordinal', 'day_desc')) 
+
+# test.trial.df = filter(df, exp_title == 'beforetest') %>%
+#   mutate(dist_0_120s = dist_0_30s + dist_30_60s + dist_60_90s + dist_90_120s,
+#          crossings_0_120s = crossings_0_30s + crossings_30_60s + crossings_60_90s + crossings_90_120s,
+#          norm_crossings_120s = crossings_0_120s / dist_0_120s * perc2dist * 100)
+# 
+# beforetest.aligned.meanpop.traces.by.pc = beforetest.aligned.pop.traces.by.pc %>%
+#   filter(exp_title == 'beforetest', aligned_event_id >= 0) %>%
+#   filter(ncells >= min.poptrace.cells) %>%
+#   #filter(abs_timestamp <= 120000) %>%
+#   filter(timestamp_from_end >= -5000 & timestamp_from_end <= -200) %>%
+#   group_by(exp, exp_title, trial_id, implant, animal, date, day_desc, trial, exp_day_ordinal, day_ordinal, 
+#            location_set, timestamp_from_end, is.pc) %>%
+#   dplyr::summarise(mean.activity = mean(zscored_smooth_deconv_trace.mean), 
+#                    mean.cells.active.pct = mean(cells.active.pct),
+#                    .groups='drop') 
+#   
+# ramping.beforetest.by.pc.day = beforetest.aligned.meanpop.traces.by.pc  %>%
+#   group_by(exp, exp_title, implant, animal, date, day_desc, exp_day_ordinal, day_ordinal, location_set, is.pc) %>%
+#   dplyr::summarise(get.ramping.quant(timestamp_from_end, mean.activity, min.timestamp = -3000),
+#                    get.ramping.quant(timestamp_from_end, mean.cells.active.pct, min.timestamp = -3000, var.prefix='cells.'), 
+#                    ntimestamps=n(), 
+#                    .groups='drop') %>%
+#   filter(ntimestamps > 10) # longer than 2s
+# 
+# beforetest.aligned.pop.traces.by.pc %>%
+#   filter(exp_title == 'beforetest', aligned_event_id >= 0) %>%
+#   #filter(abs_timestamp <= 120000) %>%
+#   filter(timestamp_from_end >= -5000 & timestamp_from_end <= 1000) %>%
+#   filter(is.pc == TRUE) %>%
+#   filter(implant == 'dCA1') %>%
+#   ggplot(aes(x=timestamp_from_end)) +
+#   geom_line(aes(y=cells.active.pct, group=event_seq_no), color='#aaaaaa') +
+#   geom_line(data=filter(beforetest.aligned.meanpop.traces.by.pc, is.pc == TRUE, implant=='dCA1'), 
+#             aes(y=mean.cells.active.pct), color='#333333') +
+#   facet_wrap(. ~ animal + day_desc, ncol=6, scales='free_y' ) +
+#   geom_vline(xintercept = 0, linetype='dashed') +
+#   gtheme
+# 
+# ramping.beforetest.perf.by.day = left_join(
+#   ramping.beforetest.by.pc.day,
+#   test.trial.df,
+#   by=c('animal', 'date', 'exp', 'exp_title', 'day_ordinal', 'day_desc'))
+# 
+# library(ggpubr)
+# ramping.beforetest.perf.by.day %>%
+#   #filter(is.pc == FALSE) %>%
+#   #filter(implant == 'vCA1') %>%
+#   ggplot(aes(x=norm_crossings_120s, y=activity.ramping.r)) +
+#              #text=paste(animal, date))) +
+#   geom_smooth(method = 'lm') +
+#   geom_point(shape=1, aes(color=animal)) +
+#   facet_wrap(is.pc ~ implant) + 
+#   ylim(c(-1,1)) +
+#   stat_cor(method='pearson') +
+#   gtheme
+# 
+# lmerTest::lmer(activity.ramping.r ~ norm_crossings_120s + (1 | animal),
+#                ramping.beforetest.perf.by.day,
+#                subset = is.pc == TRUE & implant == 'dCA1') %>% summary()
+
+# ramping.learning.perf.cor = ramping.reward.aligned.pop.traces %>%
+#   group_by(implant, animal, date, exp, exp_title, trial, day_ordinal, trial_id) %>%
+#   dplyr::summarise(mean.activity.ramping.r = mean(activity.ramping.r), 
+#                    mean.activity.ramping.gradient = mean(activity.ramping.gradient),
+#                    mean.cells.ramping.r = mean(cells.ramping.r), 
+#                    mean.cells.ramping.gradient = mean(cells.ramping.gradient),
+#                    .groups='drop') %>%
+#   left_join(
+#     rename(d, trial=trial_n) %>% dplyr::select(-c('trial_id')),
+#     by=c('animal', 'date', 'exp', 'exp_title', 'trial', 'day_ordinal')) 
+
+# ramping.learning.perf.cor.by.pc = ramping.reward.aligned.pop.traces.by.pc %>%
+#   group_by(implant, animal, date, exp, exp_title, trial, day_ordinal, trial_id, is.pc) %>%
+#   dplyr::summarise(mean.activity.ramping.r = mean(activity.ramping.r), 
+#                    mean.activity.ramping.gradient = mean(activity.ramping.gradient),
+#                    mean.cells.ramping.r = mean(cells.ramping.r), 
+#                    mean.cells.ramping.gradient = mean(cells.ramping.gradient),
+#                    .groups='drop') %>%
+#   left_join(
+#     rename(d, trial=trial_n) %>% dplyr::select(-c('trial_id')),
+#     by=c('animal', 'date', 'exp', 'exp_title', 'trial', 'day_ordinal')) 
+# 
+# ramping.learning.perf.cor %>%
+#   filter(time_finished > 0) %>%
+#   filter((day_desc %in% late.learning.days) | (day_desc %in% early.learning.days)) %>%
+#   ggplot(aes(x=log(total_dist*perc2dist/100), 
+#              #x=log(time_finished),
+#              #x=mvelocity,
+#              y=mean.cells.ramping.r)) +#, 
+#              #trial_id=trial_id)) +
+#   geom_smooth(method='lm', color=single.colour) +
+#   geom_point(aes(colour=implant), shape=1, size=0.5) +#aes(color=exp_day_ordinal)) +
+#   facet_wrap(. ~ implant + animal, scales='free_x', ncol=4) +
+#   scale_colour_manual(values=main.two.colours) +
+#   stat_cor(method = 'pearson', size=3) +
+#   ylab('Ramping R') + xlab('Log distance run (m)') +
+#   gtheme +
+#   theme(legend.position='none') 
+# ggplotly()
+# 
+# ggsave('~/tmp/cheeseboard/pop_activity/ramping_perf_cor.pdf', 
+#        device = cairo_pdf,
+#        height=15, width=15, units='cm')
+
+
+# Ramping up correlation with performance
+ramping.learning.perf.cor.by.pc.day.tested = ramping.learning.perf.cor.by.pc.day %>%
+  #filter(day_desc != 'learning3 day#3', day_desc != 'learning4 day#3')
+  filter(day_desc %in% c(early.learning.days, late.learning.days))
+
+lmer.test.ramping = function(df) {
+  m = lmerTest::lmer(cells.ramping.r ~ mean.logdist + (1 | animal),
+                 data = df,
+                 REML = TRUE)
+ print(summary(m))
+ print(anova(m, refit=FALSE, ddf='Satterthwaite'))
+ list(model=m,
+      effect=Effect(c('mean.logdist'), m))
+}
+
+m.ramping.day.perf.cor.vca1.nonpc = lmer.test.ramping(
+  filter(ramping.learning.perf.cor.by.pc.day.tested, implant=='vCA1', !is.pc))
+m.ramping.day.perf.cor.vca1.pc = lmer.test.ramping(
+  filter(ramping.learning.perf.cor.by.pc.day.tested, implant=='vCA1', is.pc))
+m.ramping.day.perf.cor.dca1.nonpc = lmer.test.ramping(
+  filter(ramping.learning.perf.cor.by.pc.day.tested, implant=='dCA1', !is.pc))
+m.ramping.day.perf.cor.dca1.pc = lmer.test.ramping(
+  filter(ramping.learning.perf.cor.by.pc.day.tested, implant=='dCA1', is.pc))
+
+m.ramping.day.perf.cor.effects = bind_rows(
+  as.data.frame(m.ramping.day.perf.cor.vca1.nonpc$effect) %>% mutate(implant='vCA1', is.pc=FALSE),
+  as.data.frame(m.ramping.day.perf.cor.vca1.pc$effect) %>% mutate(implant='vCA1', is.pc=TRUE),
+  as.data.frame(m.ramping.day.perf.cor.dca1.nonpc$effect) %>% mutate(implant='dCA1', is.pc=FALSE),
+  as.data.frame(m.ramping.day.perf.cor.dca1.pc$effect) %>% mutate(implant='dCA1', is.pc=TRUE),
+)
+
+
+ramping.learning.perf.cor.by.pc.day.tested %>%
+  ggplot(aes(x=-mean.logdist)) +
+  geom_ribbon(data=m.ramping.day.perf.cor.effects,
+              mapping=aes(ymin=lower, ymax=upper),
+              alpha=0.2, fill='#aaaaaa') +
+  geom_point(aes(y=cells.ramping.r), shape=1, size=1) +
+  geom_hline(yintercept = 0, linetype='dashed') +
+  xlab('Trial performance (-log mean run distance (m))') +
+  ylab('Ramping R') +
+  facet_grid(. ~ implant + is.pc) +
+  scale_y_continuous(limits = c(-1.4, 1.4), breaks=c(-1, 0, 1)) +
+  gtheme
+
+lmer.test.print(
+  filter(ramping.learning.perf.cor.by.pc.day.tested, implant=='vCA1', is.pc==FALSE),
+  var = cells.ramping.r,
+  fixed.effects = mean.logdist,
+  randef.str = '(1 | animal)',
+  diagnostics.groupvar = day_desc)
+
+m.ramping.day.perf.cor.vca1.pc = lmer.test.print(
+  filter(ramping.learning.perf.cor.by.pc.day.tested, implant=='vCA1', is.pc),
+  var = cells.ramping.r,
+  fixed.effects = mean.logdist,
+  randef.str = '(1 | animal)',
+  diagnostics.groupvar = day_desc)
+
+
+
+
+ggplotly()
+# dCA1 ramping up
+ramping.learning.perf.cor.by.pc.day.tested.dca1 = ramping.learning.perf.cor.by.pc.day %>%
+  filter(implant == 'dCA1', is.pc==FALSE) #%>%
+  filter(day_desc %in% c(early.learning.days, late.learning.days))
+
+m.ramping.day.perf.cor.dca1 = lmerTest::lmer(
+  cells.ramping.r ~ mean.logdist + (1 | animal),
+  ramping.learning.perf.cor.by.pc.day.tested.dca1,
+  REML=TRUE) 
+summary(m.ramping.day.perf.cor.dca1)
+anova(m.ramping.day.perf.cor.dca1, refit=FALSE, ddf='Satterthwaite')
+
+ramping.learning.perf.cor.by.pc.day.tested.dca1 %>%
+  ggplot(aes(x=-mean.logdist)) +
+  geom_ribbon(data=as.data.frame(Effect(c('mean.logdist'), m.ramping.day.perf.cor.dca1)),
+              mapping=aes(ymin=lower, ymax=upper),
+              alpha=0.2, fill='#aaaaaa') +
+  geom_point(aes(y=cells.ramping.r), shape=1, size=1) +
+  geom_hline(yintercept = 0, linetype='dashed') +
+  xlab('Trial performance (-log mean run distance (m))') +
+  ylab('Cells ramping R') +
+  #facet_wrap(. ~ is.pc) +
+  ggtitle('dCA1') +
+  scale_y_continuous(limits = c(-1.4, 1.4), breaks=c(-1, 0, 1)) +
+  gtheme
+
+ramping.learning.perf.cor.by.pc.day %>%
+  #filter(day_desc != 'learning3 day#3') %>%
+  filter(day_desc %in% c(early.learning.days, late.learning.days)) %>%
+  ggplot(aes(x=-mean.logdist, y=cells.ramping.r)) +
+  #geom_smooth(method='lm', colour=single.colour) +
+  geom_point(aes(y=cells.ramping.r), shape=1, size=1) +
+  facet_wrap(is.pc ~ implant, scales='free_x') +
+  stat_cor(method='pearson') +
+  xlab('Trial performance (-log mean run distance (m))') +
+  ylab('Ramping R') +
+  gtheme
+
+
+
+
+ggsave('~/tmp/cheeseboard/pop_activity/ramping-perf-corr-place-cells.pdf', 
+       device = cairo_pdf,
+       height=10, width=12, units='cm')
 
 
 # Activity at reward bouts in place vs non-place cells, trials after learnt
@@ -744,7 +1229,7 @@ reward.aligned.pop.traces.late.by.pc.binned = filter(reward.aligned.pop.traces.e
 reward.aligned.pop.traces.late.by.pc.binned$is.pc = as.factor(reward.aligned.pop.traces.late.by.pc.binned$is.pc)
 reward.aligned.pop.traces.late.by.pc.binned$proximal.timestamp = as.factor(reward.aligned.pop.traces.late.by.pc.binned$proximal.timestamp)
 
-implant.loc = 'vCA1'
+implant.loc = 'dCA1'
 reward.aligned.pop.traces.late.by.pc.binned %>%
   filter(implant == implant.loc) %>%
   ggplot(aes(x=proximal.timestamp, y=cells.active.pct)) +
@@ -850,45 +1335,6 @@ models = create.bayes.lm.pair(
 models$full / models$null
 calc.pair.95CI(models$full, pair.vars = c('proximal.timestamp-FALSE', 'proximal.timestamp-TRUE'),
                ytransform = function(x) {exp(x) - 1 }, show.percent.change = FALSE)
-
-day.mean.on.arrival = reward.aligned.pop.traces %>%
-  filter(aligned_event_id >= 0, timestamp_from_start >= 0, timestamp_from_end >= -5000) %>%
-  group_by(day_desc, exp_title, implant, animal, timestamp_from_end) %>%
-  summarise(zscored_deconv_trace.sem=sem(zscored_smooth_deconv_trace.mean),
-            zscored_deconv_trace.mean=mean(zscored_smooth_deconv_trace.mean),
-            zscored_trace.sem=sem(zscored_trace.mean),
-            zscored_trace.mean=mean(zscored_trace.mean))
-
-day.mean.on.arrival %>%
-  filter(day_desc %in% c('learning2 day#2', 'learning3 day#2', 'learning4 day#2')) %>%
-  #filter(day_desc %in% c('learning1 day#1', 'learning2 day#1')) %>%
-  ggplot() +
-  geom_line(aes(x=timestamp_from_end / 1000, y=zscored_deconv_trace.mean, group=day_desc)) +
-  facet_wrap(animal + implant ~ ., scales='free') +
-  gtheme
-
-### Plot data for a single date
-#reward.aligned.pop.traces[, zscored.trace := pmin(10, zscore(smooth_deconv_trace)),
-#                         by=.(date, animal, exp_title, trial_id)]
-reward.aligned.pop.traces %>%
-  filter(day_desc == 'learning2 day#2', implant=='dCA1') %>%
-  filter(aligned_event_id >= 0, timestamp_from_start > 0) %>%
-  dplyr::mutate(timestamp_from_end_sec = timestamp_from_end / 1000.0) %>% 
-  ggplot() +
-  geom_tile(aes(x=timestamp_from_end_sec, 
-                y=event_seq_no, 
-                fill=zscored_deconv_trace.mean,
-                width=timebin.dur.msec / 1000, height=1)) +
-  #geom_tile(aes(x=round(bin.moved_distance  * max.moved.dist / dist.nbins), y=-2, color=atReward)) +
-  xlab('Time (s)') +
-  ylab('Trial') +
-  gtheme +
-  #theme(legend.position = 'none') +
-  facet_wrap(implant + animal ~ .) +
-  scale_fill_gradient(low='white', high = 'black') +
-  scale_color_manual(values=c('#0098ffff', 'white')) +
-  xlim(c(-5,0)) +
-  scale_y_reverse()
 
 # # Lower correlations can be explained by lower FR
 # all.cors.df = join.meta.df(all.cors.df)

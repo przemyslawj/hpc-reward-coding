@@ -38,16 +38,17 @@ trials.meta.df = read.trials.meta(rootdirs)
 # #day = '2019-09-05'
 # day = '2019-09-07'
 
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
-animal_name = 'G-BR'
-exp_title='learning'
-day = '2020-02-10' # learning 3 day2
-
-# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
-# animal_name = 'D-BR'
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
+# animal_name = 'G-BR'
 # exp_title='learning'
+# day = '2020-02-10' # learning 3 day2
+
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
+animal_name = 'D-BR'
+exp_title='learning'
+day = '2019-07-23' # learning 1 day1
 # day = '2019-07-29' # learning 2 day2
-#day = '2019-08-01' # learning 3 day2
+# day = '2019-08-01' # learning 3 day2
 
 # root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
 # animal_name = 'O-TR'

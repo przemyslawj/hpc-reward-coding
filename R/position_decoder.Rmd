@@ -193,6 +193,7 @@ eval.parts = list()
 shuffle.configs.df = data.frame(ncells=c(0, 60, 30), nshuffles=c(1, 30, 30))
 
 for (caimg_result_dir in habit_caimg_dirs) {
+#for (caimg_result_dir in test_caimg_dirs) {
   for (config_i in nrow(shuffle.configs.df)) {
     out.name = paste(caimg_result_dir, config_i, sep='_')
     res.df = eval.decoder.same.day(
@@ -202,7 +203,7 @@ for (caimg_result_dir in habit_caimg_dirs) {
       min.samples=10,
       ncells=shuffle.configs.df$ncells[config_i],
       nshuffles=shuffle.configs.df$nshuffles[config_i])
-    res.df$decoder_ncells = ncells[config_i]
+    res.df$decoder_ncells = shuffle.configs.df$ncells[config_i]
     eval.parts[[out.name]] = res.df
   }
 }
@@ -304,14 +305,21 @@ filter(spatial.error.df, !is.close2rew) %>%
 ```{r include=FALSE}
 eval.parts = list()
 for (caimg_result_dir in test_caimg_dirs) {
-  eval.parts[[caimg_result_dir]] = eval.decoder.same.day(
-    caimg_result_dir, 
-    decoder.config = discrete.bayes.spatial.decoder,
-    #decoder.config=mfr.bayes.spatial.decoder,
-    min.samples=5,
-    ncells=ncells,
-    nshuffles=nshuffles,
-    exp_title='beforetest')
+  for (config_i in nrow(shuffle.configs.df)) {
+    out.name = paste(caimg_result_dir, config_i, sep='_')
+    res.df = eval.decoder.same.day(
+      caimg_result_dir, 
+      decoder.config=discrete.bayes.spatial.decoder,
+      #decoder.config=mfr.bayes.spatial.decoder,
+      min.samples=10,
+      ncells=shuffle.configs.df$ncells[config_i],
+      nshuffles=shuffle.configs.df$nshuffles[config_i],
+      exp_title='beforetest')
+    if (nrow(res.df) > 0) {
+      res.df$decoder_ncells = shuffle.configs.df$ncells[config_i]
+      eval.parts[[out.name]] = res.df
+    }
+  }
 }
 
 beforetest.spatial.error.df = do.call('rbind', eval.parts)
@@ -323,6 +331,22 @@ beforetest.spatial.error.df = beforetest.spatial.error.df %>%
 ```{r}
 beforetest.error.summary = create.error.summary(beforetest.spatial.error.df, implant, animal, day_desc)
 beforetest.error.summary
+
+beforetest.spatial.error.hist.df = filter(beforetest.spatial.error.df, str_starts(day_desc, 'learning')) %>%
+  group_by(implant, animal, day_desc, decoder_ncells) %>%
+  dplyr::summarise(create.hist.tibble(error, hist.breaks=seq(0,130,10)), nsamples=n())
+
+beforetest.spatial.error.hist.df %>%
+  group_by(implant, decoder_ncells, mid) %>%
+  dplyr::summarise(mean.pct.count=mean(pct.count), sem.pct.count=sem(pct.count)) %>%
+  ggplot(aes(y=mean.pct.count, x=mid-5, color=implant)) +
+  geom_step(position = 'identity', alpha=1.0) +
+  geom_errorbar(aes(x=mid, ymin=mean.pct.count-sem.pct.count, ymax=mean.pct.count+sem.pct.count), 
+                width=4, size=0.25) +
+  ylab('%') + xlab('Error (cm)') +
+  scale_color_manual(values=two.colours) +
+  facet_grid(. ~ decoder_ncells) +
+  gtheme
 ```
 
 ```{r}
@@ -1085,21 +1109,63 @@ beforetest.onedayout.loc = eval.decoder.all.other.days(discrete.bayes.spatial.de
                                                           nshuffles = 1,
                                                           equal.prior = TRUE,
                                                           prepare.vars.fun = NULL,
-                                                          filter.test.traces.fun = filter.at.present.or.future.rew,
+                                                          #filter.test.traces.fun = filter.at.present.or.future.rew,
                                                           test.day.indecies=c(1,3))
 ```
 
 ```{r}
-beforetest.onedayout.loc %>%
+beforetest.onedayout.loc.summary = beforetest.onedayout.loc %>%
   scale.bins2cm() %>%
   left_join(mouse.meta.df) %>%
   left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date')) %>%
   group_by(implant, animal, test_date) %>%
-  dplyr::summarise(mean.error=mean(error), sem.error=sem(error), mean.rand.error=mean(random_error)) %>%  
-  dplyr::mutate(mean.rand.diff=mean.rand.error-mean.error) %>% 
-  #filter(test_date != '2020-02-11') %>%
+  dplyr::summarise(mean.error=mean(error),
+                   median.error=median(error),
+                   sem.error=sem(error), 
+                   median.rand.error=median(random_error)) %>%
+  dplyr::mutate(median.rand.diff=median.rand.error-median.error) 
+
+beforetest.onedayout.loc.summary %>%
   group_by(implant) %>%
-  dplyr::summarise(mean(mean.error), sem(mean.error), mean(mean.rand.error), mean(mean.rand.diff))
+  dplyr::summarise(mean(median.error), sem(mean.error), mean(median.rand.error), mean(median.rand.diff))
+
+m = lmer.test.print(
+  beforetest.onedayout.loc.summary,
+  var=median.error,
+  fixed.effects = implant,
+  randef.str = '(1 | animal)',
+  diagnostics.groupvar = implant)
+
+ggplot(beforetest.onedayout.loc.summary, aes(text=animal, test_day=test_date)) +
+  geom_jitter(aes(x=implant, y=median.error, color=implant),
+              shape=1, height=0, width=0.15, size=0.5) +
+  geom_hline(yintercept = 57, linetype='dashed') +
+  scale_color_manual(values=main.two.colours) +
+  gtheme +
+  theme(legend.position = 'none') +
+  xlab('') + ylab('Median error (cm)') + ylim(c(0, 60))
+ggsave('spatial_decoder_other_day.pdf', device=cairo_pdf,
+       path='/home/prez/tmp/cheeseboard/', units='cm', width=3.0, height=3.2)
+
+beforetest.onedayout.loc.hist.df = beforetest.onedayout.loc %>%
+  scale.bins2cm() %>%
+  left_join(mouse.meta.df) %>%
+  group_by(implant, animal, test_date) %>%
+  dplyr::summarise(create.hist.tibble(error, hist.breaks=seq(0,130,10)), nsamples=n()) 
+
+beforetest.onedayout.loc.hist.df %>%
+  group_by(implant, mid) %>%
+  dplyr::summarise(mean.pct.count=mean(pct.count), sem.pct.count=sem(pct.count)) %>%
+  ggplot(aes(y=mean.pct.count, x=mid-5, color=implant)) +
+  geom_step(position = 'identity', alpha=1.0) +
+  geom_errorbar(aes(x=mid, ymin=mean.pct.count-sem.pct.count, ymax=mean.pct.count+sem.pct.count), 
+                width=4, size=0.25) +
+  ylab('%') + xlab('Error (cm)') + labs(colour='') +
+  scale_color_manual(values=main.two.colours) +
+  gtheme +
+  theme(legend.position='top')
+ggsave('spatial_decoder_other_day_hist.pdf', device=cairo_pdf,
+       path='/home/prez/tmp/cheeseboard/', units='cm', width=3.0, height=4.3)
 ```
 
 # Decoding if at reward on other beforetest day from mean population activity
