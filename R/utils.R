@@ -105,7 +105,7 @@ create.partial.df = function(fieldList, occupancyList, animal_name, day, cell_na
 }
 
 create.hist.tibble = function(vals, hist.breaks) {
-  h = hist(vals, breaks=hist.breaks, plot=FALSE) 
+  h = hist(vals, breaks=hist.breaks, plot=FALSE, right=FALSE) 
   ncells = sum(h$counts)
   tibble(count=h$counts, mid=h$mids, pct.count=count/ncells * 100)
 }

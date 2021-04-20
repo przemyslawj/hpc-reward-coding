@@ -1581,9 +1581,10 @@ Model of cell randomly assigned at distances following observed distribution
 
 ```{r}
 pc.ids = dplyr::group_by(beforetest.peaks.at.current.rew, implant, animal, cell_id) %>%
-  dplyr::summarise(nsignif=sum(signif.si), n=n()) %>%
+  dplyr::summarise(nsignif=sum(signif.si), 
+                   n=n()) %>%
+  dplyr::filter(n > 1) %>%
   dplyr::filter(nsignif/n >= 0.5) %>%
-  #dplyr::filter(nsignif/n >= 1) %>%
   dplyr::mutate(animal_cell = paste(animal, cell_id, sep='_')) 
 
 cell.dist.df = beforetest.peaks.at.current.rew %>%
@@ -1593,10 +1594,24 @@ cell.dist.df = beforetest.peaks.at.current.rew %>%
 
 nsamplings = 1000
 set.seed(42)
+
+shuffle.fun = function(v) {
+  if (length(v) == 1) {
+    return(v)
+  }
+  shuffled.indecies = seq_along(v)
+  # check not the same order as current
+  while (all(diff(shuffled.indecies) == 1)) {
+    shuffled.indecies = permute::shuffle(length(v))
+  }
+  v[shuffled.indecies]
+}
+
 shuffled.cell.dist.df = map_dfr(
   1:nsamplings, ~ dplyr::mutate(cell.dist.df, 
                                 shuffle.id=.x,
-                                shuffle.cell_id = cell_id[permute::shuffle(length(cell_id))]))
+                                shuffle.cell_id = shuffle.fun(cell_id))) %>%
+  filter(!is.na(shuffle.cell_id))
 
 shuffled.cell.dist.summary = shuffled.cell.dist.df %>%
   group_by(implant, animal, shuffle.cell_id, shuffle.id) %>%
@@ -1638,7 +1653,6 @@ cell.rew.distance.summary = beforetest.peaks.at.current.rew %>%
                    var.dist=var(min.rew.dist) / (n),  # biased estimate for variance
                    at.rew.times=sum(min.rew.dist <= goal.cell.max.dist),
                    rew.peaks.count=sum(rew.peaks.count)) %>%
-  filter(n > 1) %>%
   dplyr::mutate(group='actual', line_g=group)
 
 cell.rew.distance.hist.summary = cell.rew.distance.summary %>%
@@ -1679,8 +1693,9 @@ shuffled.pct.atrew.95p = shuffled.cell.atrew.hist %>%
   dplyr::group_by(implant, shuffle.id, few_fields, many_fields) %>%
   dplyr::summarise(cell.pct=sum(pct.count)) %>% 
   dplyr::group_by(implant, few_fields, many_fields) %>%
-  dplyr::summarise(cell.pct.05p = quantile(cell.pct, 0.05)[1],
-                   cell.pct.95p = quantile(cell.pct, 0.95)[1])
+  dplyr::summarise(cell.pct.05p = stats::quantile(cell.pct, 0.05)[1],
+                   cell.pct.95p = stats::quantile(cell.pct, 0.95)[1],
+                   z=list(sort(cell.pct)))
 
 shuffled.cell.atrew.hist.summary = shuffled.cell.atrew.hist %>%
   group_by(implant, mid) %>%
@@ -1693,14 +1708,14 @@ cell.rew.atrew.hist = cell.rew.distance.summary %>%
   group_by(implant) %>%
   dplyr::summarise(create.hist.tibble(rew.peaks.pct, seq(0,100,rew.peaks.pct.step)),
                    pct.count.cumsum = cumsum(pct.count))
-X = filter(shuffled.pct.atrew.95p, few_fields) %>% left_join(
-  filter(cell.rew.atrew.hist, mid < few.fields.thr)) 
-print(dplyr::select(X, implant, cell.pct.05p, cell.pct.95p, pct.count.cumsum))
 
-X = filter(shuffled.pct.atrew.95p, many_fields) %>% left_join(
-  dplyr::filter(cell.rew.atrew.hist, mid < many.fields.thr)) %>%
-  dplyr::mutate(pct.count.cumsum=100 - pct.count.cumsum)
-print(dplyr::select(X, implant, cell.pct.05p, cell.pct.95p, pct.count.cumsum))
+vca1.freq.rew.fields = 100 - max(subset(cell.rew.atrew.hist, implant == 'vCA1' & mid < many.fields.thr)$pct.count.cumsum)
+print('vCA1 Frequent rewards percentile')
+mean(subset(shuffled.pct.atrew.95p, implant=='vCA1' & many_fields)$z[[1]] < vca1.freq.rew.fields)
+
+dca1.freq.rew.fields = 100 - max(subset(cell.rew.atrew.hist, implant == 'dCA1' & mid < many.fields.thr)$pct.count.cumsum)
+print('dCA1 Frequent rewards percentile')
+mean(subset(shuffled.pct.atrew.95p, implant=='dCA1' & many_fields)$z[[1]] < dca1.freq.rew.fields)
 
 cell.rew.atrew.hist.summary = cell.rew.distance.summary %>%
   group_by(implant) %>%
@@ -1710,8 +1725,6 @@ g = shuffled.cell.atrew.hist.summary %>%
   ggplot(aes(x=mid)) +
   geom_bar(aes(y=m.count),  stat='identity', position='dodge', width=rew.peaks.pct.step,
            fill='white', color='#666666', size=0.5) +
-  #geom_step(aes(y=m.count, x=mid-rew.peaks.pct.step/2), 
-  #         fill='white', color='#666666', size=0.5) +
   geom_errorbar(aes(ymin=m.count-sd.count, ymax=m.count+sd.count), 
                 width=rew.peaks.pct.step / 3, 
                 color='#666666') +
