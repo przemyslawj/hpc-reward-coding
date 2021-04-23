@@ -714,7 +714,7 @@ eval.decoder.all.other.days = function(decoder.config,
                                    timebin.dur.msec = timebin.dur.msec,
                                    get.bin.thresholds.fun = get.quantiles.fun(c(0.9, 1.0)),
                                    binned.var=binned.var)
-    traces.dates = char2date(unique(data.traces$date))
+    traces.dates = char2date(unique(data.traces$date)) %>% sort()
     cells.present = binned.traces[, (1), by=.(date, cell_id)][, .(ntimes=.N), by=.(cell_id)][
         ntimes == ndays, cell_id]
     sprintf('%d cells present on all days for animal=%s', length(cells.present), animal_name)
@@ -742,7 +742,7 @@ eval.decoder.all.other.days = function(decoder.config,
           test.traces = filter.test.traces.fun(test.traces, train.traces)
         }
         if (nrow(test.traces) == 0) {
-          print('Test traces empty, skipping')
+          print(sprintf('Test traces empty for test date %s, skipping', traces.dates[i]))
           next
         }
         model = train.decoder.model(train.traces, decoder.config)
@@ -1027,21 +1027,27 @@ filter.at.present.or.future.rew = function(test.traces, train.traces,
 ```
 
 ```{r include=FALSE}
-beforetest.onedayout.reward = eval.decoder.all.other.days(
+beforetest.onedayout.reward = eval.decoder.all.other.days.debug(
   bayes.atreward.decoder.config, 
   test.days.df,
-  ncells = 0,
-  nshuffles = 1,
+  #ncells = 0,
+  #nshuffles = 1,
   equal.prior = TRUE,
   prepare.vars.fun = add.close2rew.fun(goal.cell.max.dist),
+  # prepare.vars.fun = function(df) {
+  #   add.close2.rew = add.close2rew.fun(goal.cell.max.dist)
+  #   add.close2.rew(df[timestamp <= 120000])
+  # },
   filter.train.traces.fun = function(binned.traces) {
     binned.traces[pmin(dist_reward0, dist_reward1) <= 15/perc2dist | pmin(dist_reward0, dist_reward1) >= 40 / perc2dist, ]
   },
   filter.test.traces.fun = filter.at.present.or.future.rew,
+  min.ncells.for.eval = 10,
+  min.present.times = 3,
   test.day.indecies=c(1,3))
 ```
 
-TODO: compare against eval on trained data
+
 
 ```{r}
 beforetest.onedayout.reward.summary = beforetest.onedayout.reward %>%
@@ -1178,13 +1184,18 @@ beforetest.cell.db = as.data.table(beforetest.cell.db)
 avg.pop.activity = function(binned.traces) {
   min.times_rew_cell = 1
   trace.dates = unique(binned.traces$date) %>% char2date()
+  cell.db.daily =  beforetest.field.dist2current.rew[
+    (date %in% trace.dates & animal == binned.traces$animal[1]), 
+    .(animal, date, cell_id, signif.si)]
   cell.db = beforetest.field.dist2current.rew[
     (date %in% trace.dates & animal == binned.traces$animal[1]), 
     .(animal, date, cell_id, 
+      signif.si,
       is.rew.cell = min.rew.dist <= min.rew.dist.thresh,
       is.signif.rew.cell = signif.si & (min.rew.dist <= min.rew.dist.thresh) )][
       ,.(times_signif_rew_cell = sum(is.signif.rew.cell),
          times_rew_cell = sum(is.rew.cell),
+         times_signif_cell = sum(signif.si),
          npresent = .N,
          times_signif_rew_cell_pct = sum(is.signif.rew.cell) / .N),
       .(animal, cell_id)]
@@ -1194,31 +1205,40 @@ avg.pop.activity = function(binned.traces) {
           nrow(cell.db[npresent == 3 & times_signif_rew_cell >= min.times_rew_cell]) ) %>% print
   sprintf('# reward cells amongst them: %d',
           nrow(cell.db[npresent == 3 & times_rew_cell >= 2]) ) %>% print
-  joined.data.traces = merge(binned.traces, cell.db, by=c('animal','cell_id'), all.x = TRUE)
+  #joined.data.traces = merge(binned.traces, cell.db, by=c('animal','cell_id'), all.x = TRUE)
+  joined.data.traces = merge(binned.traces, cell.db.daily, by=c('animal','cell_id', 'date'), all.x = TRUE)
   joined.data.traces[, min.rew.dist := pmin(dist_reward0, dist_reward1)]
-  joined.data.traces[, is.rew.cell := (times_signif_rew_cell >= min.times_rew_cell)]
-  joined.data.traces[, rew.cell.group := pmin(times_signif_rew_cell, 2)]
+  #joined.data.traces[, is.rew.cell := (times_signif_rew_cell >= min.times_rew_cell)]
+  #joined.data.traces[, rew.cell.group := 0]
+  #joined.data.traces[, rew.cell.group := pmin(times_signif_rew_cell, 2)]
   #joined.data.traces[, rew.cell.group := as.integer(times_signif_rew_cell_pct >= 0.5)]
   #joined.data.traces[, rew.cell.group := pmin(pmin(1, times_signif_rew_cell) * times_rew_cell, 2)]
+  #joined.data.traces[, rew.cell.group := (times_signif_cell / npresent >= 0.5)]
+  joined.data.traces[, rew.cell.group := as.integer(signif.si)]
   joined.data.traces[, close2rew := as.integer(min.rew.dist <= min.rew.dist.thresh) + 1]  
+  joined.data.traces[, cell.active := zscored_smooth_deconv_trace >= 0.5]
 
-  pop.traces.rew.cells = joined.data.traces[(npresent == 3) & (rew.cell.group != 1), 
+  pop.traces.rew.cells = joined.data.traces[,#(npresent == 3) & (rew.cell.group != 1), 
                                             #.(avg.val = mean(smoothed_deconv_trace)),
                                             .(avg.val = mean(response_bin)-1),
+                                            #.(avg.val = mean(cell.active)),
                                             by=list(animal, date, exp_title, trial_id, trial, x, y,
                                                     close2rew, min.rew.dist, timestamp, time_bin, rew.cell.group)]
   #pop.traces.rew.cells$cell_id = cell.db[npresent==3, cell_id][1]
     # workaround to use existing cell ids
-  cell.group.cell.id = joined.data.traces[(npresent == 3), .(fst.cell_id=cell_id[1]), by=list(rew.cell.group)]
-  pop.traces.rew.cells = pop.traces.rew.cells[cell.group.cell.id, on=.(rew.cell.group)]
-  pop.traces.rew.cells$cell_id = pop.traces.rew.cells$fst.cell_id
-  pop.traces.rew.cells
+  #cell.group.cell.id = joined.data.traces[,#(npresent == 3), 
+  #                                        .(fst.cell_id=cell_id[1]), by=list(rew.cell.group)]
+  #pop.traces.rew.cells = pop.traces.rew.cells[cell.group.cell.id, on=.(rew.cell.group)]
+  #pop.traces.rew.cells$cell_id = pop.traces.rew.cells$fst.cell_id
+  pop.traces.rew.cells$cell_id = pop.traces.rew.cells$rew.cell.group
+  pop.traces.rew.cells[timestamp <= 120000, ]
 }
 
 pop.bayes.atreward.decoder.config = mfr.bayes.atreward.decoder.config
 pop.bayes.atreward.decoder.config$predictor.var = quo(avg.val)
-beforetest.pop.oneydayout.reward = eval.decoder.all.other.days(
+beforetest.pop.oneydayout.reward = eval.decoder.all.other.days.debug(
   pop.bayes.atreward.decoder.config, 
+  #filter(test.days.df, animal %in% c('E-BL', 'E-TR', ''),
   test.days.df,
   equal.prior = TRUE,
   prepare.vars.fun = avg.pop.activity,
@@ -1227,7 +1247,8 @@ beforetest.pop.oneydayout.reward = eval.decoder.all.other.days(
   },
   filter.test.traces.fun = filter.at.present.or.future.rew,
   test.day.indecies=c(1,3),
-  min.ncells.for.eval=1)
+  min.ncells.for.eval=1,
+  min.present.times=3)
 ```
 
 
@@ -1237,20 +1258,18 @@ beforetest.pop.oneydayout.reward.summary = beforetest.pop.oneydayout.reward %>%
   left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date')) %>%
   group_by(implant, animal, test_date) %>%
   dplyr::summarise(mean.error=mean(error), sem.error=sem(error), 
-                   mean.rand.error=mean(random_error), sem.rand.error=sem(random_error)) %>%  
+                   mean.rand.error=mean(random_error)) %>%  
   dplyr::mutate(mean.rand.diff=mean.rand.error-mean.error)
     
 beforetest.pop.oneydayout.reward.summary %>% 
   group_by(implant) %>%
   dplyr::summarise(mean(mean.error), sem(mean.error), 
-                   mean(mean.rand.diff), sem(mean.rand.diff),
-                   mean(mean.rand.error), sem(mean.rand.error))
+                   mean(mean.rand.diff), sem(mean.rand.diff))
 
 beforetest.pop.oneydayout.reward.summary %>% 
   group_by(implant, animal) %>%
   dplyr::summarise(mean(mean.error), sem(mean.error), 
-                   mean(mean.rand.diff), sem(mean.rand.diff),
-                   mean(mean.rand.error), sem(mean.rand.error)) %>% View
+                   mean(mean.rand.diff), sem(mean.rand.diff)) %>% View
 ```
 
 
@@ -1263,12 +1282,31 @@ g = ggplot(beforetest.pop.oneydayout.reward.summary,
   scale_color_manual(values=main.two.colours) +
   gtheme +
   theme(legend.position = 'none') +
-  xlab('') + ylab('Accuracy above random (%)') + ylim(c(-50,50)) + ggtitle('Population decoder')
+  xlab('') + ylab('Accuracy (%)') + ylim(c(-50,50)) + ggtitle('Population decoder')
 #ggsave('at_rew_classifier_pop_activity.pdf', g, device=cairo_pdf,
 #       path='/home/prez/tmp/cheeseboard/', units='cm', width=3.0, height=3.2)
 ggplotly(g)
 ggsave('at_rew_pop_classifier.pdf', g, device=cairo_pdf,
-       path='/home/prez/tmp/cheeseboard/', units='cm', width=3.0, height=3.8)
+       path='/home/prez/tmp/cheeseboard/', units='cm', width=3.0, height=3.7)
+
+m = lmer.test.print(
+  filter(beforetest.pop.oneydayout.reward.summary, implant=='dCA1'),
+  var=mean.rand.diff,
+  fixed.effects = 1,
+  randef.str = '(1 | animal)',
+  diagnostics.groupvar = implant)
+
+m.full = BayesFactor::lmBF(mean.rand.diff ~ 1 + animal, 
+                           data=filter(beforetest.pop.oneydayout.reward.summary, implant=='dCA1'),
+                           whichRandom = 'animal', 
+                           #rscaleRandom = rscaleRandom, 
+                           #rscaleFixed = rscaleFixed,
+                           iterations = 10000)
+m.full
+m.full = BayesFactor::ttestBF(subset(beforetest.pop.oneydayout.reward.summary, implant=='dCA1')$mean.rand.diff)
+
+samples = BayesFactor::posterior(m.full, iterations = 10000)
+quantile(samples[, 'mu'], c(0.025, 0.975))
 ```
 
 
@@ -1311,6 +1349,7 @@ binned.traces = add.close2rew.fun(goal.cell.max.dist)(binned.traces)
 ```
 Issue with unbalanced data: assigns the same class
 ```{r}
+library(caret)
 setorder(binned.traces, animal, date, trial, time_bin, timestamp)
 binned.traces$close2rew = factor(binned.traces$close2rew, labels = c('not.at.rew', 'at.rew'))
 
@@ -1320,13 +1359,17 @@ wide.traces.df = tidyr::pivot_wider(
   names_from='cell_id',
   names_prefix='cell_',
   #values_from='smoothed_deconv_trace')
-  values_from='deconv_trace')
+  values_from='response_bin')
 
 inTraining <- 1: round(0.7 * nrow(wide.traces.df))
 
 id.cols = 1:5
 training <- wide.traces.df[ inTraining,-id.cols]
 testing  <- wide.traces.df[-inTraining,-id.cols]
+
+up.train.data = upSample(x = dplyr::select(training, -close2rew),
+                           y = training$close2rew,
+                           yname = 'close2rew')
 
 fitControl <- trainControl(## 5-fold CV
                            method = "repeatedcv",
@@ -1338,20 +1381,21 @@ fitControl <- trainControl(## 5-fold CV
 training.data.recipe = recipes::recipe(close2rew ~ .,
                                        training) %>%
   recipes::step_center(contains('cell_')) %>%
-  recipes::step_scale(contains('cell_')) %>%
-  recipes::step_pca(contains('cell_'), prefix = 'principal_comp_',  threshold = .9) 
+  recipes::step_scale(contains('cell_')) 
+  #recipes::step_pca(contains('cell_'), prefix = 'principal_comp_',  threshold = .9) 
 
 library(pROC)
 gbmFit1 <- train(#close2rew ~ ., 
                  #data = training,
                  training.data.recipe, training,
-                 method = 'svmLinear',
+                 #method = 'svmLinear',
                  #method='LogitBoost',
                  #method = 'gbm', 
-                 trControl = fitControl,
-                 metric='ROC',
+                 method='lssvmRadial',
+                 #trControl = fitControl,
+                 #metric='ROC',
                  #tuneGrid=data.frame(C=c(0.25, 0.5, 1.0, 10.0)),
-                 #trControl = trainControl('none'),
+                 trControl = trainControl('none'),
                  ## This last option is actually one
                  ## for gbm() that passes through
                  verbose = FALSE)
@@ -1387,6 +1431,7 @@ pivot.traces.wide = function(binned.traces,
     values_from=predictor.varname) %>%
     dplyr::select(!!predicted.var, starts_with('cell'))
   res[[predicted.varname]] = as.factor(paste0('class_', res[[predicted.varname]]))
+  
   res
 }
 
@@ -1398,19 +1443,29 @@ caret.svm.train = function(binned.traces,
   predicted.var = enquo(predicted.var)
   predicted.varname = quo_name(predicted.var)
   wide.traces.df = pivot.traces.wide(binned.traces, !!predictor.var, !!predicted.var)
+  
+  # upsample classes
+  class.values = wide.traces.df[[predicted.varname]]
+  up.train.data = upSample(x = dplyr::select(wide.traces.df, -c(!!predicted.var)),
+                           y = class.values,
+                           yname = predicted.varname)
+  
   classifier.formula = as.formula(paste(predicted.varname, '~ .'))
   
-  training.data.recipe = recipes::recipe(classifier.formula, wide.traces.df) %>%
-    #recipes::step_center(contains('cell_')) %>%
-    #recipes::step_scale(contains('cell_')) %>%
-    recipes::step_pca(contains('cell_'), prefix = 'principal_comp_',  threshold = .9) 
+  training.data.recipe = recipes::recipe(classifier.formula, up.train.data) %>%
+    recipes::step_center(contains('cell_')) %>%
+    recipes::step_scale(contains('cell_')) 
+    #recipes::step_pca(contains('cell_'), prefix = 'principal_comp_',  threshold = .9) 
   
   svmFit <- train(#classifier.formula,
                   #data = wide.traces.df, 
-                  training.data.recipe, wide.traces.df,
+                  training.data.recipe, 
+                  up.train.data,
                   method = 'svmLinear',
+                  #method='lssvmRadial',
+                  #method = 'gbm', 
                   #metric='ROC',
-                  #tuneGrid=data.frame(C=c(0.25)),
+                  tuneGrid=data.frame(C=c(0.25)),
                   #trControl = trainControl('none', classProbs = TRUE),
                   trControl = trainControl('none')
                   #method = 'LogitBoost',
@@ -1428,8 +1483,9 @@ caret.svm.train = function(binned.traces,
 caret.svm.predict = function(prior, svmFit, predictor.vals, nclasses=2) {
   testing.wide.df = data.frame(t(predictor.vals))
   colnames(testing.wide.df) = paste0('cell_', names(predictor.vals))
-  predicted <- predict(svmFit, testing.wide.df)
-  list(s=as.integer(predicted),
+  predicted = predict(svmFit, testing.wide.df)
+  predicted.class.index = as.integer(substr(as.character(predicted), 7, 100))
+  list(s=predicted.class.index,
        density=rep(1/nclasses, nclasses),
        prob=1)
 }
@@ -1439,27 +1495,97 @@ caret.atreward.decoder.config = list(
   #predictor.var = quo(smoothed_deconv_trace),
   #predictor.var = quo(zscored_trace),
   predictor.var = quo(response_bin),
+  #predictor.var = quo(avg.val),
   nclasses = 2,
   train.fun = caret.svm.train,
-  predict.fun = caret.svm.predict,
+  predict.fun = caret.svm.predict.debug,
   error.fun = function(x,y) {abs(x-y)}
 )
 ```
 
+#Decoding if at reward from cell activity
 ```{r include=FALSE}
-beforetest.onedayout.reward.svm = eval.decoder.all.other.days(
+beforetest.onedayout.cell.reward.svm = eval.decoder.all.other.days.debug(
   caret.atreward.decoder.config, 
   test.days.df,
-  ncells = 0,
-  nshuffles = 1,
   equal.prior = TRUE,
   prepare.vars.fun = add.close2rew.fun(goal.cell.max.dist),
+  # prepare.vars.fun = function(df) {
+  #   add.close2.rew = add.close2rew.fun(goal.cell.max.dist)
+  #   add.close2.rew(df[timestamp <= 120000])
+  # },
   filter.train.traces.fun = function(binned.traces) {
     binned.traces[pmin(dist_reward0, dist_reward1) <= 15/perc2dist | pmin(dist_reward0, dist_reward1) >= 40 / perc2dist, ]
   },
   filter.test.traces.fun = filter.at.present.or.future.rew,
+  min.ncells.for.eval = 10,
+  min.present.times = 3,
+  test.day.indecies=c(1,3))
+```
+
+```{r}
+beforetest.onedayout.cell.reward.svm.summary = beforetest.onedayout.cell.reward.svm %>%
+  left_join(mouse.meta.df) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date')) %>%
+  group_by(implant, animal, test_date) %>%
+  dplyr::summarise(mean.error=mean(error), sem.error=sem(error), 
+                   mean.rand.error=0.5) %>%  
+  dplyr::mutate(mean.rand.diff=mean.rand.error-mean.error)
+  
+beforetest.onedayout.cell.reward.svm.summary %>% 
+  group_by(implant) %>%
+  dplyr::summarise(mean(mean.error), sem(mean.error), 
+                   mean(mean.rand.diff), sem(mean.rand.diff))
+```
+```{r}
+g = ggplot(beforetest.onedayout.cell.reward.svm.summary, 
+           aes(text=animal, test_day=test_date)) +
+  geom_jitter(aes(x=implant, y=100*mean.rand.diff, color=implant),
+              shape=1, height=0, width=0.15, size=0.5) +
+  geom_hline(yintercept = 0, linetype='dashed') +
+  scale_color_manual(values=main.two.colours) +
+  gtheme +
+  theme(legend.position = 'none') +
+  xlab('') + ylab('Accuracy above random (%)') + ylim(c(-50,50)) + ggtitle('SVM cell decoder')
+
+ggplotly(g)
+```
+
+
+#Decoding if at reward from population activity
+```{r include=FALSE}
+beforetest.onedayout.reward.svm = eval.decoder.all.other.days.debug(
+  caret.atreward.decoder.config, 
+  test.days.df,
+  #ncells = 0,
+  #nshuffles = 1,
+  equal.prior = TRUE,
+  prepare.vars.fun = avg.pop.activity,
+  # prepare.vars.fun = function(df) {
+  #   df[, min.rew.dist := pmin(dist_reward0, dist_reward1)]
+  #   df[, close2rew := as.integer(min.rew.dist <= goal.cell.max.dist) + 1]
+  #   df
+  # },
+  # prepare.vars.fun = function(df) {
+  #   df = df[timestamp <= 120000, ]
+  #   df[, min.rew.dist := pmin(dist_reward0, dist_reward1)]
+  #   avg.df = avg.pop.activity(df)
+  #   avg.df$cell_id = avg.df$cell_id + 1000
+  #   df[, avg.val := response_bin-1]
+  #   df[, close2rew := as.integer(min.rew.dist <= goal.cell.max.dist) + 1]
+  #   df = df[, .(animal, date, exp_title, trial_id, trial, x, y, close2rew, min.rew.dist, timestamp, time_bin, avg.val, cell_id)]
+  #   df$rew.cell.group = FALSE
+  #   res = data.table::rbindlist(list(df, avg.df), fill=TRUE)
+  #   res
+  # },
+  filter.train.traces.fun = function(binned.traces) {
+    #binned.traces[pmin(dist_reward0, dist_reward1) <= 15/perc2dist | pmin(dist_reward0, dist_reward1) >= 40 / perc2dist, ]
+    binned.traces[min.rew.dist <= 15/perc2dist | min.rew.dist >= 40 / perc2dist, ]
+  },
+  filter.test.traces.fun = filter.at.present.or.future.rew,
   test.day.indecies=c(1,3),
-  timebin.dur.msec = 200)
+  min.ncells.for.eval = 1,
+  min.present.times = 3)
 ```
 
 ```{r}
@@ -1476,6 +1602,12 @@ beforetest.onedayout.reward.svm.summary %>%
   dplyr::summarise(mean(mean.error), sem(mean.error), 
                    mean(mean.rand.diff), sem(mean.rand.diff),
                    mean(mean.rand.error), sem(mean.rand.error))
+
+beforetest.onedayout.reward.svm.summary %>% 
+  group_by(implant, animal, test_date) %>%
+  dplyr::summarise(mean(mean.error), sem(mean.error), 
+                   mean(mean.rand.diff), sem(mean.rand.diff),
+                   mean(mean.rand.error), sem(mean.rand.error)) %>% View
 ```
 ```{r}
 g = ggplot(beforetest.onedayout.reward.svm.summary, 
@@ -1489,5 +1621,29 @@ g = ggplot(beforetest.onedayout.reward.svm.summary,
   xlab('') + ylab('Accuracy above random (%)') + ylim(c(-50,50)) + ggtitle('Population decoder')
 
 ggplotly(g)
+
+m = lmer.test.print(
+  filter(beforetest.onedayout.reward.svm.summary, implant=='dCA1'),
+  var=mean.rand.diff,
+  fixed.effects = 1,
+  randef.str = '(1 | animal)',
+  diagnostics.groupvar = implant)
+
+m.full = BayesFactor::lmBF(mean.rand.diff ~ 1 + animal, 
+                           data=filter(beforetest.onedayout.reward.svm.summary, implant=='dCA1'),
+                           whichRandom = 'animal', 
+                           #rscaleRandom = rscaleRandom, 
+                           #rscaleFixed = rscaleFixed,
+                           iterations = 10000)
+m.full
+BayesFactor::ttestBF(subset(beforetest.onedayout.reward.svm.summary, implant=='dCA1')$mean.rand.diff)
+
+models = create.bayes.lm.pair(beforetest.onedayout.reward.svm.summary,
+                     formula.full = mean.rand.diff ~ 1 + animal,
+                     formula.null = mean.rand.diff ~ 1 + animal,
+                     whichRandom = 'animal',
+                     iterations = 100000)
+models$full / models$null
+calc.pair.95CI(models$full, show.percent.change = FALSE)
 ```
 

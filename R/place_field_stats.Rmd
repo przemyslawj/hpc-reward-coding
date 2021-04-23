@@ -236,7 +236,7 @@ Sparsity not different between vCA1 and dCA1, possibly larger fields in vCA1
 compared.pcs.df = 
   bind_rows(
     filter(place.cell.db, exp=='habituation') %>% mutate(exp_title='habituation')
-    #beforetest.cell.db %>% mutate(exp_title = 'test')) %>%
+    #beforetest.cell.db %>% mutate(exp_title = 'test')
   ) %>%
   left_join(trials.meta.df) %>%
   left_join(mouse.meta.df) %>%
@@ -261,7 +261,7 @@ plot.pc.stat = function(metric, facet.exp_title=FALSE) {
     theme(axis.title.x = element_blank(),
           legend.position = 'top')
   if (facet.exp_title) {
-    #g = g + facet_grid(. ~ exp_title)
+    g = g + facet_grid(. ~ exp_title)
   }
   g
 }
@@ -392,8 +392,7 @@ models$full/models$null
 calc.pair.95CI(models$full, show.percent.change = FALSE)
 
 ```
-
-
+    
 
 # Pct of place cells within goal
 Load reward locations
