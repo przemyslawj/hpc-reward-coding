@@ -283,3 +283,54 @@ ggsave('/home/prez/tmp/cheeseboard/downsampled_dist_multifield_stat.pdf',
        height=6, width=6, units='cm', device=cairo_pdf, dpi=300)
 ```
 
+Change in the field size
+```{r}
+summarize.shuffle = function(df) {
+  df %>%
+    dplyr::select(date, day_desc, animal, implant, exp, exp_title, cell_id, 
+                  field.size.50, signif.si, field.max, field.mean, npeaks.at.rew, min.rew.dist) %>%
+    group_by(date, day_desc, animal, implant, exp, exp_title, cell_id) %>%
+    dplyr::summarise(across(.fns=~ mean(.x, na.rm=TRUE)),
+                     .groups='drop')
+}
+down.peaks.shuffle.mean = summarize.shuffle(down.peaks.dist) 
+```
+
+```{r}
+down.peaks.shuffle.mean.pcs = down.peaks.shuffle.mean %>%
+  filter(signif.si > 0.5) %>%
+  mutate(field.size = field.size.50 / nbins/nbins * 100,
+         aday = paste(animal, format(date), sep='_'))
+down.peaks.shuffle.mean.pcs$aday = as.factor(down.peaks.shuffle.mean.pcs$aday) %>% as.integer() %>% as.factor()
+
+down.peaks.shuffle.mean.pcs %>%
+  ggplot(aes(x=exp_title, y=field.size)) +
+  geom_violin(fill=single.colour, color=single.colour) +
+  geom_violin(fill='transparent', colour='white', draw_quantiles=0.5, size=1) +
+  geom_jitter(shape=16, width=0.4, height=0, size=0.5, alpha=0.15, color='#333333') +
+  facet_grid(. ~ implant) +
+  xlab('') + ylab('% of maze') +
+  gtheme
+```
+
+```{r}
+lmer.test.print(
+  df = filter(down.peaks.shuffle.mean.pcs, implant=='vCA1'),
+  var = log(field.size),
+  fixed.effects = exp_title,
+  randef.str = '(1 + day_desc | animal)',
+  diagnostics.groupvar = exp_title)
+
+models = create.bayes.lm.pair(
+  filter(down.peaks.shuffle.mean.pcs, implant=='vCA1') %>% mutate(val=log(field.size)),
+  formula.full = val ~ 1 + aday + exp_title,
+  formula.null = val ~ 1 + aday)
+models$full/models$null
+calc.pair.95CI(models$full, ytransform = function(x) {exp(x) * 100}, 
+               pair.vars = c('exp_title-1_habituation', 'exp_title-2_test'),
+               show.percent.change = TRUE)
+  
+```
+
+
+

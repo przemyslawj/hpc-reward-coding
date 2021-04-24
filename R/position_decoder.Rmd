@@ -1287,7 +1287,7 @@ g = ggplot(beforetest.pop.oneydayout.reward.summary,
 #       path='/home/prez/tmp/cheeseboard/', units='cm', width=3.0, height=3.2)
 ggplotly(g)
 ggsave('at_rew_pop_classifier.pdf', g, device=cairo_pdf,
-       path='/home/prez/tmp/cheeseboard/', units='cm', width=3.0, height=3.7)
+       path='/home/prez/tmp/cheeseboard/', units='cm', width=3.0, height=3.75)
 
 m = lmer.test.print(
   filter(beforetest.pop.oneydayout.reward.summary, implant=='dCA1'),
