@@ -310,7 +310,8 @@ sprintf('Estimated ratio (log model) by %.0f pct (%.0f; %.0f)',
         exp(x$Estimate) * 100,
         exp(x$lower) * 100,
         exp(x$upper) * 100)
-create.summary(compared.pcs.df, field.size.50, implant)
+create.summary(mutate(compared.pcs.df, field.size=field.size.50/nbins/nbins*100), 
+               field.size, implant)
 
 # library(bayestestR)
 # library(brms)
@@ -347,6 +348,8 @@ anova(pc.count.model, refit=FALSE, ddf='Satterthwaite')
 plot.model.diagnostics(pc.count.model, 
                        summary.compared.pcs.df$animal, 
                        summary.compared.pcs.df$implant)
+group_by(summary.compared.pcs.df, implant) %>%
+  dplyr::summarise(mean(pc.pct), sem(pc.pct))
 dplyr::summarise(ungroup(summary.compared.pcs.df), mean(pc.pct), sem(pc.pct))
 
 # full.bf = BayesFactor::lmBF(pc.pct ~ 1 + implant + animal, 
@@ -360,7 +363,7 @@ models = create.bayes.lm.pair(summary.compared.pcs.df,
                               formula.null = pc.pct ~ 1 + animal,
                               whichRandom = 'animal')
 models$full/models$null
-calc.pair.95CI(models$full)
+calc.pair.95CI(models$full, show.percent.change = FALSE)
 ```
 
 ```{r}
@@ -376,9 +379,11 @@ plot.model.diagnostics(spatial.info.model,
 models = create.bayes.lm.pair(mutate(compared.pcs.df, val=log(0.2 + spatial.info.corrected)))
 models$full/models$null
 calc.pair.95CI(models$full, function(x) {(exp(x) - 0.2)})
+create.summary(compared.pcs.df, spatial.info.corrected, implant)
 
 print('Day-stability not statistically different')
 create.summary(compared.pcs.df, early.late.cor)
+create.summary(compared.pcs.df, early.late.cor, implant)
 early.late.cors.model = lmerTest::lmer(early.late.cor ~ implant + (1 | aday), 
                                        data=subset(compared.pcs.df, exp_title=='habituation'), 
                                        REML=TRUE)
@@ -1399,26 +1404,46 @@ ggsave('npeaks.pdf', path='/tmp',
 ```
 
 ```{r}
-multifield.summary = npeaks.summary %>%
-  filter(mid > 1) %>%
-  filter(exp=='habituation') %>%
-  filter(ncells >= 5) %>% # Only include samples with >= 5 cells
+npeaks.habituation = filter(trial.peaks.at.fst.moved, exp == 'habituation') %>%
+  filter(signif.si, npeaks>0) %>%
   group_by(implant, exp, animal, day_desc) %>%
-  dplyr::summarise(pct.multifield=sum(pct.count))
-multifield.summary$exp = as.factor(multifield.summary$exp)
-multifield.model = lmerTest::lmer(pct.multifield ~ implant + (1 | animal),
-                                  data=multifield.summary,
-                                  REML=TRUE)
-summary(multifield.model)
-anova(multifield.model, ddf='Satterthwaite')
-plot.model.diagnostics(multifield.model, multifield.summary$animal, multifield.summary$exp)
+  dplyr::summarise(mean.peaks = mean(npeaks))
 
-models = create.bayes.lm.pair(multifield.summary,
-                              formula.full = pct.multifield ~ 1 + implant + animal,
-                              formula.null = pct.multifield ~ 1 + animal,
+npeaks.habituation %>%
+  create.summary(mean.peaks, implant)
+
+lmer.test.print(npeaks.habituation, 
+                var = mean.peaks,
+                fixed.effects = implant,
+                randef.str = '(1 | animal)',
+                diagnostics.groupvar = implant)
+models = create.bayes.lm.pair(npeaks.habituation,
+                              formula.full = mean.peaks ~ 1 + implant + animal,
+                              formula.null = mean.peaks ~ 1 + animal,
                               whichRandom = 'animal')
 models$full / models$null
 calc.pair.95CI(models$full)
+
+# multifield.summary = npeaks.summary %>%
+#   filter(mid > 1) %>%
+#   filter(exp=='habituation') %>%
+#   filter(ncells >= 5) %>% # Only include samples with >= 5 cells
+#   group_by(implant, exp, animal, day_desc) %>%
+#   dplyr::summarise(pct.multifield=sum(pct.count))
+# multifield.summary$exp = as.factor(multifield.summary$exp)
+# multifield.model = lmerTest::lmer(pct.multifield ~ implant + (1 | animal),
+#                                   data=multifield.summary,
+#                                   REML=TRUE)
+# summary(multifield.model)
+# anova(multifield.model, ddf='Satterthwaite')
+# plot.model.diagnostics(multifield.model, multifield.summary$animal, multifield.summary$exp)
+# 
+# models = create.bayes.lm.pair(multifield.summary,
+#                               formula.full = pct.multifield ~ 1 + implant + animal,
+#                               formula.null = pct.multifield ~ 1 + animal,
+#                               whichRandom = 'animal')
+# models$full / models$null
+# calc.pair.95CI(models$full)
 # x = pairwise.post.hoc(multifield.model, factor.interaction=c('implant:exp'))
 # 
 # # Effect change in percentage points

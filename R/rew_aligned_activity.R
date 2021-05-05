@@ -13,10 +13,12 @@ source('fixed_effects.R')
 timebin.dur.msec = 200
 plot.sequences = FALSE
 
-prepare.binned.traces = function(caimg_result_dir, timebin.dur.msec=200) {
+prepare.binned.traces = function(caimg_result_dir, 
+                                 timebin.dur.msec=200,
+                                 # running speed avg > 4 cm/s in 0.5 s window
+                                 mean.run.velocity=3.3) {
   data.traces = read.data.trace(caimg_result_dir)
-  # running speed avg > 4 cm/s in 0.5 s window
-  data.traces = add.running.col(data.traces, 3.3, 10)
+  data.traces = add.running.col(data.traces, mean.run.velocity, 10)
   data.traces$date = rep(char2date(data.traces$date[1]), nrow(data.traces))
   setorder(data.traces, exp_title, trial_id, cell_id, timestamp)
   detect.events(data.traces, deconv.threshold=0.2)
