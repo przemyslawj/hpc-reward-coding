@@ -151,7 +151,8 @@ place.cell.db = run.trials.pc %>%
   dplyr::select(date, day_desc, exp, animal, cell_id, implant, is.pc,
                 spatial.information, si.shuffle.mean, 
                 mutual.info, mutual.info.bias,
-                sparsity, field.size.50, field.size.25,
+                sparsity, field.size.50, field.size.25, 
+                field.max, field.mean, trace.mean,
                 early.late.cor, signif.mi, signif.si) %>%
   ungroup()
 
@@ -1623,9 +1624,10 @@ shuffle.fun = function(v) {
   if (length(v) == 1) {
     return(v)
   }
+  org.indecies = seq_along(v)
   shuffled.indecies = seq_along(v)
-  # check not the same order as current
-  while (all(diff(shuffled.indecies) == 1)) {
+  # check no cell in the same order as current
+  while (any((shuffled.indecies - org.indecies) == 0)) {
     shuffled.indecies = permute::shuffle(length(v))
   }
   v[shuffled.indecies]
@@ -1704,12 +1706,40 @@ ggplot(shuffled.cell.dist.hist.summary) +
 
 Number of fields at reward per cell compared to the number after the cell identities randomly shuffled 
 ```{r}
-rew.peaks.pct.step = 20
+rew.peaks.pct.step = 10
 few.fields.thr = 20
-many.fields.thr = 60
+many.fields.thr = 50
+shuffled.cell.dist.summary = mutate(shuffled.cell.dist.summary,
+                                  rew.peaks.pct = rew.peaks.count / (n * 2) * 100)
+shuffled.cell.dist.summary = as.data.table(shuffled.cell.dist.summary)
+
+vca1.shuffle.ecdfs = map(unique(shuffled.cell.dist.summary$line_g), 
+                         ~ ecdf(shuffled.cell.dist.summary[ line_g == .x & implant=='vCA1', rew.peaks.pct]))
+
+vca1.ecdf.knots = map(vca1.shuffle.ecdfs, ~ knots(.x)) %>% unlist %>% sort %>% unique
+vca1.shuffle.ecdf.summary.df = map_df(vca1.ecdf.knots, function(knot) {
+  vals = map_dbl(seq_along(vca1.ecdfs), ~ vca1.shuffle.ecdfs[[.x]](knot))
+  list(knot=knot,
+       mean.val=mean(vals),
+       lower.val=quantile(vals, 0.05)[[1]],
+       higher.val=quantile(vals, 0.95)[[1]])
+})
+
+dca1.shuffle.ecdfs = map(unique(shuffled.cell.dist.summary$line_g), 
+                         ~ ecdf(shuffled.cell.dist.summary[ line_g == .x & implant=='dCA1', rew.peaks.pct]))
+
+dca1.ecdf.knots = map(dca1.shuffle.ecdfs, ~ knots(.x)) %>% unlist %>% sort %>% unique
+dca1.shuffle.ecdf.summary.df = map_df(dca1.ecdf.knots, function(knot) {
+  vals = map_dbl(seq_along(dca1.shuffle.ecdfs), ~ dca1.shuffle.ecdfs[[.x]](knot))
+  list(knot=knot,
+       mean.val=mean(vals),
+       lower.val=quantile(vals, 0.05)[[1]],
+       higher.val=quantile(vals, 0.95)[[1]])
+})
+
 shuffled.cell.atrew.hist = shuffled.cell.dist.summary %>%
   group_by(implant, shuffle.id) %>%
-  dplyr::summarise(create.hist.tibble(rew.peaks.count / (n * 2) * 100, seq(0,100,rew.peaks.pct.step)))
+  dplyr::summarise(create.hist.tibble(rew.peaks.pct, seq(0,100,rew.peaks.pct.step)))
 
 # Percentile of cells in the shuffles with few and many fields
 shuffled.pct.atrew.95p = shuffled.cell.atrew.hist %>%
@@ -1718,6 +1748,7 @@ shuffled.pct.atrew.95p = shuffled.cell.atrew.hist %>%
   dplyr::summarise(cell.pct=sum(pct.count)) %>% 
   dplyr::group_by(implant, few_fields, many_fields) %>%
   dplyr::summarise(cell.pct.05p = stats::quantile(cell.pct, 0.05)[1],
+                   cell.pct.mean = mean(cell.pct),
                    cell.pct.95p = stats::quantile(cell.pct, 0.95)[1],
                    z=list(sort(cell.pct)))
 
@@ -1728,6 +1759,27 @@ shuffled.cell.atrew.hist.summary = shuffled.cell.atrew.hist %>%
 cell.rew.distance.summary = mutate(cell.rew.distance.summary, 
                                    rew.peaks.pct = rew.peaks.count / (n * 2) * 100)
 cell.rew.distance.summary.test = cell.rew.distance.summary
+
+# bind_rows(shuffled.cell.dist.summary, cell.rew.distance.summary.test) %>%
+#   ggplot(aes(x=rew.peaks.pct, group=group)) +
+#   stat_ecdf(aes(color=group)) +
+#   facet_grid(. ~ implant) +
+#   xlab('Reward fields (%)') + ylab('Cells CDF') +
+#   gtheme
+bind_rows(
+  vca1.shuffle.ecdf.summary.df %>% mutate(implant='vCA1'),
+  dca1.shuffle.ecdf.summary.df %>% mutate(implant='dCA1')) %>%
+  ggplot() +
+  geom_step(aes(x=knot,y=lower.val), color='#aaaaaa') +
+  geom_step(aes(x=knot,y=higher.val), color='#aaaaaa') +
+  stat_ecdf(data=cell.rew.distance.summary.test,
+            aes(x=rew.peaks.pct), color=side.two.coulours[1], size=0.75) +
+  xlab('Reward fields (%)') + ylab('Cells CDF') +
+  facet_grid(. ~ implant) +
+  gtheme
+ggsave('/home/prez/tmp/cheeseboard/reward_fields_ecdf.pdf',
+       height=4.0, width=6.5, units='cm', device=cairo_pdf, dpi=300)
+
 cell.rew.atrew.hist = cell.rew.distance.summary %>%
   group_by(implant) %>%
   dplyr::summarise(create.hist.tibble(rew.peaks.pct, seq(0,100,rew.peaks.pct.step)),
@@ -1761,6 +1813,12 @@ g = shuffled.cell.atrew.hist.summary %>%
 g
 ggsave('/home/prez/tmp/cheeseboard/reward_fields.pdf', g,
        height=4.8, width=6.5, units='cm', device=cairo_pdf, dpi=300)
+```
+
+
+```{r}
+shuffled.pct.atrew.95p
+cell.rew.atrew.hist
 ```
 
 
