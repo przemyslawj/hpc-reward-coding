@@ -16,7 +16,7 @@ mobility.bouts.tibble = function(timestamp, mobility.vals, atReward, velocity, d
   index.starts = which(index.running.change > 0)
   index.ends = which(index.running.change < 0) - 1
   if (length(index.starts) > length(index.ends)) {
-    index.ends = c(index.ends, length(is_running))
+    index.ends = c(index.ends, length(mobility.vals))
   }
   rew.at.end = map_int(index.ends, ~ max(atReward[max(1, .x - window.len) : 
                                                     min(.x + window.len, length(atReward))]) %>% 

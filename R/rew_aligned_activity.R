@@ -457,14 +457,16 @@ beforetest.aligned.pop.summary.by.pc %>%
                   group=is.pc, fill=is.pc), alpha=0.75) +
   geom_vline(xintercept=0, linetype='dashed') +
   facet_wrap(. ~ implant, scales='free') +
-  scale_fill_manual(values=side.two.coulours) +
+  scale_fill_manual(values=rev(side.two.coulours)) +
   labs(title='Approach to reward location (beforetest)') +
   ylab('Cells active (%)') +
   xlab('Time (s)') +
+  ylim(c(5, 21)) +
   gtheme +
   theme(legend.position='top')
-ggsave('~/tmp/cheeseboard/pop_activity/beforetest_reward_approach.svg',
-       height=6.5, width=8, units='cm')
+ggsave('~/tmp/cheeseboard/pop_activity/beforetest_reward_approach.pdf',
+       device = cairo_pdf,
+       height=5.1, width=6.4, units='cm')
 
 beforetest.aligned.pop.summary.by.pc %>%
   filter(is.pc) %>%
@@ -731,6 +733,37 @@ calc.pair.95CI(models$full,
                show.percent.change = TRUE)
 
 
+# Activity at reward bouts in place vs non-place cells, trials after learnt, as function of distance
+dist.bin.width = 2
+reward.aligned.pop.traces.earlylate.by.pc %>%
+  filter(timestamp_from_end >= -5000, timestamp_from_start >= 0, timestamp_from_end < 0) %>%
+  mutate(dist_approached_rew_bin = round(dist_approached_rew / dist.bin.width)) %>%
+  group_by(implant, is.pc, is.early.learning, dist_approached_rew_bin) %>%
+  dplyr::summarise(zscored_deconv_trace.sem=sem(zscored_smooth_deconv_trace.mean),
+                   zscored_deconv_trace.mean=mean(zscored_smooth_deconv_trace.mean),
+                   zscored_trace.sem=sem(zscored_smooth_deconv_trace.mean),
+                   zscored_trace.mean=mean(zscored_smooth_deconv_trace.mean),
+                   cells.active.pct.mean=mean(cells.active.pct),
+                   cells.active.pct.sem=sem(cells.active.pct), .groups='drop') %>%
+  filter(!is.early.learning) %>%
+  ggplot(aes(x=dist_approached_rew_bin * dist.bin.width, group=is.pc)) +
+  geom_ribbon(aes(
+    ymin=cells.active.pct.mean-cells.active.pct.sem,
+    ymax=cells.active.pct.mean+cells.active.pct.sem,
+    fill=is.pc), alpha=0.75) +
+  facet_wrap(. ~ implant, scales='free') +
+  scale_fill_manual(values=side.two.coulours) +
+  xlim(c(0, 40)) +
+  ylim(c(5, 25)) +
+  labs(title='Approach to rewarded location learnt') +
+  ylab('Cells active (%)') +
+  xlab('Distance (cm)') +
+  gtheme +
+  theme(legend.position='top')
+ggsave('~/tmp/cheeseboard/pop_activity/learnt_reward_approach_over_distance.pdf',
+       device = cairo_pdf,
+       height=5.2, width=6.6, units='cm')
+
 # Day mean difference between proximal and timestamp timestamps at reward
 reward.proximity.diff.by.pc.binned.per.day = reward.aligned.pop.traces.by.pc %>%
   add.proximal.distal.col(filter.proximal.distal = TRUE) %>%
@@ -858,7 +891,7 @@ reward.aligned.pop.traces.earlylate.binned.per.day$bout =
 reward.aligned.pop.traces.earlylate.binned.per.day$proximal.timestamp =
   as.factor(reward.aligned.pop.traces.earlylate.binned.per.day$proximal.timestamp)
 
-implant.loc = 'dCA1'
+implant.loc = 'vCA1'
 reward.aligned.pop.traces.earlylate.binned %>%
   filter(implant == implant.loc) %>%
   ggplot(aes(x=proximal.timestamp, y=zscored_deconv_trace.mean)) +

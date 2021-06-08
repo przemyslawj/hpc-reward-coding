@@ -1,3 +1,5 @@
+library(stringr)
+
 list.subdir = function(subdir) {
   learning_datestr = list.files(subdir)
   sapply(learning_datestr, FUN=function(x) {paste(subdir, x, sep='/')}) %>% unname
@@ -105,7 +107,7 @@ create.partial.df = function(fieldList, occupancyList, animal_name, day, cell_na
 }
 
 create.hist.tibble = function(vals, hist.breaks) {
-  h = hist(vals, breaks=hist.breaks, plot=FALSE, right=FALSE) 
+  h = hist(vals, breaks=hist.breaks, plot=FALSE, right=TRUE) 
   ncells = sum(h$counts)
   tibble(count=h$counts, mid=h$mids, pct.count=count/ncells * 100)
 }
