@@ -714,7 +714,9 @@ eval.val.current.rew(dist2current.rew.df, 'vCA1', field.size.50 / nbins / nbins 
 # How many cells remapped in each group
 dist2current.rew.df %>%
   group_by(implant, group) %>%
-  dplyr::summarise(persistent_field=1-mean(remapped))
+  dplyr::summarise(persistent_field=1-mean(remapped),
+                   sum(min.rew.dist <= goal.cell.max.dist),
+                   ncells=n())
 
 
 step.size=20
