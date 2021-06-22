@@ -14,8 +14,10 @@ library(raster)
 library(stringr)
 library(tidyr)
 
+source('behav_analysis.R')
 source('traces_input.R')
 source('place_field_utils.R')
+source('plotting_params.R')
 reactiv.colours = rev(main.two.colours)
 
 gtheme.light.panel = gtheme +
@@ -29,17 +31,19 @@ gtheme.light.panel = gtheme +
         strip.text = element_text(size = 8))
 
 trials.meta.df = read.trials.meta(rootdirs)
+mouse.meta.df = read.mouse.meta(rootdirs)
 ```
 
 
 ```{r}
 nbins=20
+timebin.dur.msec=200
 prepare.all.traces = function(caimg_result_dir, 
-                              timebin.dur.msec=200,
+                              timebin.dur.msec=timebin.dur.msec,
                               # running speed avg > 4 cm/s in 0.5 s window
                               mean.run.velocity=3.3, 
                               event.deconv.threshold=0.2) {
-  data.traces = read.data.trace(caimg_result_dir, filter_exp_title == 'trial')
+  data.traces = read.data.trace(caimg_result_dir)
   data.traces = add.running.col(data.traces, mean.run.velocity, 10)
   data.traces$date = rep(char2date(data.traces$date[1]), nrow(data.traces))
   setorder(data.traces, exp_title, trial_id, cell_id, timestamp)
@@ -72,17 +76,19 @@ prepare.all.traces = function(caimg_result_dir,
 
 
 ```{r}
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
-animal_name = 'F-BL'
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+# animal_name = 'F-BL'
 #root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
 #animal_name = 'M-BR'
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
+animal_name = 'E-BL'
 exp_title='learning'
 day_desc_name = 'learning2 day#1'
 
 day = filter(trials.meta.df, animal == animal_name, day_desc == day_desc_name) %>% pull(date)
 caimg_result_dir = find.caimg.dir(caimg_result_dirs, animal_name, day)
-timebin.dur.msec = 200
-binned.traces = prepare.all.traces(caimg_result_dir, timebin.dur.msec=timebin.dur.msec, )
+
+binned.traces = prepare.all.traces(caimg_result_dir, timebin.dur.msec=timebin.dur.msec, )[exp_title == 'trial',]
 binned.traces[, atReward := pmin((atReward0 >= 0.5) + (atReward1 >= 0.5), 1)]
 ```
 Activity change in the cells
@@ -94,8 +100,8 @@ new.locations.df = all.locations.df %>%
   filter(location_ordinal == max(location_ordinal)) %>%
   ungroup()
 
-filter(compared.early.late.df.trials.peaks.wide, animal == animal_name, day_desc == day_desc_name, signif.si, 
-       reactivated, fst.reactivated.trial >= 4) %>% View
+#filter(compared.early.late.df.trials.peaks.wide, animal == animal_name, day_desc == day_desc_name, signif.si, 
+#       reactivated, fst.reactivated.trial >= 4) %>% View
 
 #cell_names = c(3, 8, 38, 43) # M-BR, l2 d1
 #cell_names = c(40, 44, 63, 101, 110) # F-BL, l2 d1
@@ -150,6 +156,22 @@ Reactivation only at moved reward
 ```{r}
 all.locations.df = map_dfr(rootdirs, read_locations)
 
+cut.trace.until.new.rew = function(traces) {
+  new.location.df = all.locations.df %>%
+    filter(!is_test) %>%
+    filter(animal == traces$animal[1], date == traces$date[1]) %>%
+    filter(location_ordinal == max(location_ordinal))   
+  behav.traces = traces[cell_id == traces$cell_id[1],] 
+  max.timestamp.df = behav.traces[
+    (atReward > 0) & norm2(new.location.df$trans_x[1] - x, new.location.df$trans_y[1] - y) < goal.cell.max.dist, 
+         .(cut.timestamp = max(timestamp)),
+         by=.(animal, date, trial, trial_id)]
+  x = traces[max.timestamp.df, on=.(animal, date, trial, trial_id)]
+  res = x[timestamp <= cut.timestamp, ]
+  res[, cut.timestamp := NULL]
+  res
+}
+
 find.reactivation.events = function(traces, reactivation.at.new.rew=TRUE) {
   new.location.df = all.locations.df %>%
     filter(!is_test) %>%
@@ -177,6 +199,21 @@ find.reactivation.events = function(traces, reactivation.at.new.rew=TRUE) {
            # only consider reactivations at new reward location
            norm2(new.location.df$trans_x[1] - x, new.location.df$trans_y[1] - y) < dist.from.new.rew]
 }
+
+find.reactivation.during.immobility = function(traces) {
+  traces[, nevents_running := 0]
+  traces[(x>0) & (y>0) & is_running,
+         nevents_running := nevents]
+  traces[,
+         running_cumsum_events := cumsum(nevents_running),
+         by=.(exp_title, trial_id, trial, cell_id)]
+  traces[,
+         reactivation_event := immobile &
+           # cell must have been active during running before the event
+           (running_cumsum_events > 0) & 
+           (nevents > 0) ]
+}
+
 
 make.reactivated.cells.df = function(trial.events.count, all.active=FALSE) {
   trial1.reactivated.cells = trial.events.count[atReward > 0,]
@@ -227,17 +264,20 @@ Select cells to show
 example.for.compared.change.df = compared.change.df %>%
   filter(!reactivated_inbetween, active) %>% 
   filter(animal == animal_name, day_desc == day_desc_name) %>%
-  filter(trials.diff == 3) %>%
-  filter(trial.denominator == 2) 
+  filter(trials.diff == 1) %>%
+  filter(trial.denominator == 4) %>%
+  left_join(first.reactivated.trial) 
 
 example.for.compared.change.df %>% 
   filter(reactivated == TRUE) %>% 
+  filter(fst.reactivated.trial >= 3) %>%
   arrange(desc(max.deconv.ratio)) %>%
-  filter(max.deconv_trial.1 > 1) %>%
+  #filter(max.deconv_trial.1 > 0.5) %>%
   dplyr::select(cell_id, max.deconv_trial.1,max.deconv_trial.2, max.deconv.ratio, trial.numerator, trial.denominator)
 
 example.for.compared.change.df %>% 
   filter(reactivated == FALSE) %>% 
+  filter(fst.reactivated.trial == Inf) %>%
   arrange((max.deconv.ratio)) %>%
   filter(max.deconv_trial.1 > 1) %>%
   dplyr::select(cell_id, max.deconv_trial.1,max.deconv_trial.2, max.deconv.ratio, trial.numerator, trial.denominator)
@@ -245,17 +285,21 @@ example.for.compared.change.df %>%
 
 
 ```{r}
-source('behav_analysis.R')
-
-cell_names = c(120, 30, 246, # reactivated
-               98, 146, 308)# not reactivate)
+#cell_names = c(181, 30, 96, 194, # reactivated F-BL
+#               175, 35, 98, 146, 308)# not reactivate F-BL
+# cell_names = c(316, 161, 149, 250, # reactivated F-BL
+#                261, 308, 186, 41, 98)# not reactivated F-BL
+cell_names = c(108,72, 151, 157, # reactivated F-BL
+               133, 98, 110) # not reactivated F-BL
+               
 example.traces = binned.traces[exp_title == 'trial' & cell_id %in% cell_names , ]
 example.traces = example.traces[atReward | (is_running > 0), ]
 find.reactivation.events(example.traces)
+example.traces = cut.trace.until.new.rew(example.traces)
 example.traces = example.traces[(is_running > 0) | atReactivatedReward]
 #glimpse(example.traces)
 
-trace.window.len = 12  # 5 sec window
+trace.window.len = 25  # 10 sec window
 max.deconv.windows.df = example.traces %>%
   arrange(date, animal, trial, trial_id, atReactivatedReward, cell_id, timestamp) %>%
   group_by(date, animal, trial, trial_id, atReactivatedReward, cell_id) %>%
@@ -291,12 +335,17 @@ max.deconv.aligned.traces.reactivations = example.traces[atReactivatedReward==TR
 bind_rows(
   max.deconv.aligned.traces.running,
   max.deconv.aligned.traces.reactivations) %>% 
+  left_join(first.reactivated.trial) %>%
+  mutate(cell.reactivated = fst.reactivated.trial < Inf) %>%
   #filter(cell_id == 120, trial ==5) %>%
   filter(timestamp_from_start >= 0, timestamp_from_end <= 0, timestamp_from_start <= trace.window.len * 2 * 200) %>%
   ggplot(aes(x=timestamp_from_start / 1000, y=trace)) +
   geom_line(aes(colour=has.reactivation)) +
-  facet_grid(cell_id ~ trial + atReward, scales='free_y') +
+  facet_grid(cell.reactivated + cell_id ~ trial + atReward, scales='free_y') +
   gtheme
+
+ggsave('~/tmp/tanjas/example_traces_E-BL_L2.svg', units = 'cm',
+       width = 20, height = 9.1)
 ```
 
 
@@ -318,14 +367,12 @@ traces2pf.subset = function(subset.binned.traces, subset.name, shuffle.shift.sec
     subset.result = list()
     animal = subset.binned.traces$animal[1]
     date = subset.binned.traces$date[1]
-    plot.dir.prefix = paste(gen_imgs_dir, animal, format(date), sep='/')
 
     subset.result = calc.spatial.info(subset.binned.traces,
-                                      plot.dir=paste(plot.dir.prefix, subset.name, sep='/'),
                                       generate.plots=FALSE,
                                       nshuffles=nshuffles,
                                       shuffle.shift.sec = shuffle.shift.sec,
-                                      trace.var=trace.var,
+                                      trace.var='deconv_trace',
                                       timebin.dur.msec=timebin.dur.msec,
                                       nbins=nbins,
                                       min.occupancy.sec=1,
@@ -338,7 +385,6 @@ traces2pf.subset = function(subset.binned.traces, subset.name, shuffle.shift.sec
 
 ## Process all trials
 ```{r}
-place.cell.db = as.data.table(place.cell.db)
 last.days.df = test.days.df
 last.days.df$date = last.days.df$date - 1
 
@@ -356,12 +402,11 @@ trial.events.list = list()
 beforetest.change.list = list()
 early.late.si.list = list()
 
-# TODO: should only consider traces before left the new reward
-
 for (i in 1:nrow(test.days.df.joined)) {
   caimg_result_dir = find.caimg.dir(caimg_result_dirs, test.days.df.joined$animal[i], test.days.df.joined$date[i])
   binned.traces = prepare.all.traces(caimg_result_dir, timebin.dur.msec=200, event.deconv.threshold = 0.2)
   trial.traces = binned.traces[exp_title == 'trial',]
+  trial.traces = cut.trace.until.new.rew(trial.traces)
   find.reactivation.events(trial.traces)
   
   trial.events.count = trial.traces[atReward | ((x>0) & (y>0) & is_running), 
@@ -428,79 +473,79 @@ for (i in 1:nrow(test.days.df.joined)) {
   } else {
     early.late.si.list[[i]] = NULL
   }
-  ### Beforetest traces
-  beforetest.traces = binned.traces[exp_title == 'beforetest']
-  beforetest.behav.traces = beforetest.traces[cell_id == binned.traces$cell_id[1],] 
-  beforetest.immobility.bouts = group_by(beforetest.behav.traces, date, animal, exp_title, trial, trial_id) %>%
-    dplyr::summarise(mobility.bouts.tibble(timestamp, -as.vector(smooth_velocity), atReward, 
-                                           smooth_velocity,
-                                           atReward,
-                                           mobility.threshold = -2.5,
-                                           window.len = ceiling(2000/timebin.dur.msec),
-                                           min.bout.len=3000/timebin.dur.msec),
-                     .groups='drop') %>%
-    as.data.table()
-
-  beforetest.immobility.aligned.traces = beforetest.traces[, 
-        center.timestamps.around.events(.SD, beforetest.immobility.bouts, 'beforetest',
-                                        padding.after.event=0),
-        by=.(date, animal, exp_title, trial_id, cell_id)][aligned_event_id >= 0,]
-  beforetest.immobility.aligned.traces[, immobile := timestamp_from_start >=0 ]
-  find.reactivation.during.immobility(beforetest.immobility.aligned.traces)
-  
-  beforetest.events.count = beforetest.immobility.aligned.traces[immobile | ((x>0) & (y>0) & is_running), 
-                                    .(total_events = sum(nevents),
-                                      total_reactivation_events = sum(reactivation_event),
-                                      total_events_running = max(running_cumsum_events),
-                                      max.zscored.deconv = max(zscored_deconv_trace),
-                                      max.deconv = max(deconv_trace),
-                                      deconv.95p = quantile(deconv_trace, 0.999)[[1]],
-                                      mean.zscored.deconv = mean(zscored_deconv_trace),
-                                      mean.deconv = mean(deconv_trace)), 
-                                     by=.(animal, date, exp_title, cell, cell_id, immobile)]
-  # problem... need total_reactivation_events from immobile, later using only mobile
-  beforetest.reactivated.cells = beforetest.events.count[immobile > 0, ]
-  if (nrow(beforetest.reactivated.cells) == 0) {
-    beforetest.change.list[[i]] = data.frame()
-    next
-  }
-  beforetest.reactivated.cells[, `:=` (reactivated = total_reactivation_events >= 1, 
-                                 active = total_events_running >= 1)]
-  trial1.beforetest.events.reactivated = trial.events.count[trial == 1,][
-    beforetest.reactivated.cells[, .(animal, date, cell_id, reactivated, active)],
-                                  on=.(cell_id)]
-  beforetest.events.reactivated = beforetest.events.count[immobile==0,][beforetest.reactivated.cells[, .(animal, date, cell_id, reactivated, active)], on=.(cell_id)]
-  
-  beforetest.change = pivot_wider(
-    bind_rows(beforetest.events.reactivated[active == 1], 
-              trial1.beforetest.events.reactivated[active == 1 & atReward == 0]),
-      id_cols=c(animal, date, exp_title, cell_id, active, reactivated),
-      names_from=exp_title,
-      names_prefix='exp.',
-      values_from=c('total_events', 'max.deconv', 'deconv.95p','mean.deconv')) %>%
-      mutate(events.diff = total_events_exp.trial - total_events_exp.beforetest,
-             max.deconv.diff = max.deconv_exp.trial - max.deconv_exp.beforetest,
-             deconv.95p.diff = deconv.95p_exp.trial - deconv.95p_exp.beforetest,
-             max.deconv.ratio = max.deconv_exp.trial / max.deconv_exp.beforetest,
-             deconv.95p.ratio = deconv.95p_exp.trial / deconv.95p_exp.beforetest,
-             mean.deconv.diff = mean.deconv_exp.trial - mean.deconv_exp.beforetest,
-             mean.deconv.ratio = mean.deconv_exp.trial / mean.deconv_exp.beforetest)
-  beforetest.change.list[[i]] = beforetest.change
+  # ### Beforetest traces
+  # beforetest.traces = binned.traces[exp_title == 'beforetest']
+  # beforetest.behav.traces = beforetest.traces[cell_id == binned.traces$cell_id[1],] 
+  # beforetest.immobility.bouts = group_by(beforetest.behav.traces, date, animal, exp_title, trial, trial_id) %>%
+  #   dplyr::summarise(mobility.bouts.tibble(timestamp, -as.vector(smooth_velocity), atReward, 
+  #                                          smooth_velocity,
+  #                                          atReward,
+  #                                          mobility.threshold = -2.5,
+  #                                          window.len = ceiling(2000/timebin.dur.msec),
+  #                                          min.bout.len=3000/timebin.dur.msec),
+  #                    .groups='drop') %>%
+  #   as.data.table()
+  # 
+  # beforetest.immobility.aligned.traces = beforetest.traces[, 
+  #       center.timestamps.around.events(.SD, beforetest.immobility.bouts, 'beforetest',
+  #                                       padding.after.event=0),
+  #       by=.(date, animal, exp_title, trial_id, cell_id)][aligned_event_id >= 0,]
+  # beforetest.immobility.aligned.traces[, immobile := timestamp_from_start >=0 ]
+  # find.reactivation.during.immobility(beforetest.immobility.aligned.traces)
+  # 
+  # beforetest.events.count = beforetest.immobility.aligned.traces[immobile | ((x>0) & (y>0) & is_running), 
+  #                                   .(total_events = sum(nevents),
+  #                                     total_reactivation_events = sum(reactivation_event),
+  #                                     total_events_running = max(running_cumsum_events),
+  #                                     max.zscored.deconv = max(zscored_deconv_trace),
+  #                                     max.deconv = max(deconv_trace),
+  #                                     deconv.95p = quantile(deconv_trace, 0.999)[[1]],
+  #                                     mean.zscored.deconv = mean(zscored_deconv_trace),
+  #                                     mean.deconv = mean(deconv_trace)), 
+  #                                    by=.(animal, date, exp_title, cell, cell_id, immobile)]
+  # 
+  # beforetest.reactivated.cells = beforetest.events.count[immobile > 0, ]
+  # if (nrow(beforetest.reactivated.cells) == 0) {
+  #   beforetest.change.list[[i]] = data.frame()
+  #   next
+  # }
+  # beforetest.reactivated.cells[, `:=` (reactivated = total_reactivation_events >= 1, 
+  #                                active = total_events_running >= 1)]
+  # trial1.beforetest.events.reactivated = trial.events.count[trial == 1,][
+  #   beforetest.reactivated.cells[, .(animal, date, cell_id, reactivated, active)],
+  #                                 on=.(cell_id)]
+  # beforetest.events.reactivated = beforetest.events.count[immobile==0,][beforetest.reactivated.cells[, .(animal, date, cell_id, reactivated, active)], on=.(cell_id)]
+  # 
+  # beforetest.change = pivot_wider(
+  #   bind_rows(beforetest.events.reactivated[active == 1], 
+  #             trial1.beforetest.events.reactivated[active == 1 & atReward == 0]),
+  #     id_cols=c(animal, date, exp_title, cell_id, active, reactivated),
+  #     names_from=exp_title,
+  #     names_prefix='exp.',
+  #     values_from=c('total_events', 'max.deconv', 'deconv.95p','mean.deconv')) %>%
+  #     mutate(events.diff = total_events_exp.trial - total_events_exp.beforetest,
+  #            max.deconv.diff = max.deconv_exp.trial - max.deconv_exp.beforetest,
+  #            deconv.95p.diff = deconv.95p_exp.trial - deconv.95p_exp.beforetest,
+  #            max.deconv.ratio = max.deconv_exp.trial / max.deconv_exp.beforetest,
+  #            deconv.95p.ratio = deconv.95p_exp.trial / deconv.95p_exp.beforetest,
+  #            mean.deconv.diff = mean.deconv_exp.trial - mean.deconv_exp.beforetest,
+  #            mean.deconv.ratio = mean.deconv_exp.trial / mean.deconv_exp.beforetest)
+  # beforetest.change.list[[i]] = beforetest.change
 
 }
 
 all.change.from.trial1 = data.table::rbindlist(trial.change.list)
 rm(trial.change.list)
-all.change.from.beforetest = data.table::rbindlist(beforetest.change.list)
-rm(beforetest.change.list)
+# all.change.from.beforetest = data.table::rbindlist(beforetest.change.list)
+# rm(beforetest.change.list)
 
 all.change.from.trial1 = all.change.from.trial1 %>% 
   left_join(mouse.meta.df) %>% 
   left_join(trials.meta.df)
-
-all.change.from.beforetest = all.change.from.beforetest %>%
-  left_join(mouse.meta.df) %>%
-  left_join(trials.meta.df)
+# 
+# all.change.from.beforetest = all.change.from.beforetest %>%
+#   left_join(mouse.meta.df) %>%
+#   left_join(trials.meta.df)
 
 
 all.trial.events = data.table::rbindlist(trial.events.list)
@@ -510,8 +555,8 @@ all.day.events = merge.data.table(all.trial.events, trials.meta.df)[,
                    trials_with_reactivation = sum(total_reactivation_events > 0),
                    events_running = sum(total_events_running)),
                  by=.(animal, date, day_ordinal_name, location_set, exp_title, cell_id, atReward)]
-trial.peaks.at.rew = as.data.table(trial.peaks.at.rew)
-reactivation.summary = all.day.events[atReward>0][trial.peaks.at.rew, on=.(animal, location_set, cell_id)]
+#trial.peaks.at.rew = as.data.table(trial.peaks.at.rew)
+#reactivation.summary = all.day.events[atReward>0][trial.peaks.at.rew, on=.(animal, location_set, cell_id)]
 early.late.si = data.table::rbindlist(early.late.si.list)
 ```
 
@@ -614,8 +659,8 @@ compared.change.df %>%
              #y=mean.deconv.ratio)) +
              y=max.deconv.ratio)) +
   #geom_hline(yintercept = 1.0, linetype='dashed', color='#444444') +
-  #geom_jitter(aes(colour=reactivated),
-  #           shape=1, height=0, width=0.3, alpha=0.15, size=0.1) +
+  geom_jitter(aes(colour=reactivated),
+             shape=1, height=0, width=0.3, alpha=0.15, size=0.1) +
   #geom_violin(aes(colour=reactivated),
               #colour='#333333',
               #draw_quantiles=0.5,
@@ -624,14 +669,15 @@ compared.change.df %>%
   #geom_hline(data=compared.change.summary,
   #          mapping=aes(yintercept = mean.max.deconv.ratio, colour=reactivated),
   #          size=0.5) +
-  stat_summary(aes(colour=reactivated),
+  stat_summary(#aes(colour=reactivated),
+               color = '#444444',
                fun.data=sem_summary, 
                mult=1, 
                geom='pointrange', size=0.5, shape=1, log.transform=FALSE) +
   ylab('Trial n+x / Trial n peak activity') + 
   #ylim(c(0.4,1.2)) +
-  #scale_y_log10(limit=c(0.03, 3), breaks=c(0.4, 0.6, 0.8, 1.0, 2.0, 3.0)) +
-  scale_y_log10() +
+  scale_y_log10(limit=c(0.1, 3.0), breaks=c(0.2, 0.4, 0.6, 0.8, 1.0, 2.0, 3.0)) +
+  #scale_y_log10() +
   #coord_trans(y='log10')+
   facet_grid(group ~ trials.diff.desc) +
   scale_color_manual(values = reactiv.colours) +
@@ -647,6 +693,7 @@ ggsave('~/tmp/tanjas/trial2trial_change_means.svg', units = 'cm',
 
 ## Stats for change in max deconv activity
 ```{r}
+source('fixed_effects.R')
 m.mean.ratio = lmer.test.print(compared.change.df %>% 
                                  filter(!reactivated_inbetween) %>%
                                  #filter(trials.diff == 1) %>%
@@ -761,13 +808,13 @@ ggsave('~/tmp/tanjas/trial8to1activity_change_trials_with_reactivation_cors.svg'
 m.reactiv.cors = lmer.test.print(reactivations.activity.change.joined %>%
                   #mutate(val=log(deconv.95p.ratio)) %>%
                     mutate(val=log(0.0 + max.deconv.ratio)) %>%
-                  filter(group=='foraging', 
+                  filter(group=='learning', 
                          reactivation_events > 0),
                 var=val,
                 #fixed.effects = log(reactivation_events),
                 fixed.effects = trials_with_reactivation,
-                randef.str = '(1 | animal)',
-                #randef.str = '(1 + day_desc | animal)',
+                #randef.str = '(1 | animal)',
+                randef.str = '(1 + day_desc | animal)',
                 diagnostics.groupvar = animal)
 ```
 
@@ -820,6 +867,7 @@ glimpse(d.day)
 
 
 ```{r}
+library(plotly)
 # Performance: day-mean of log(distance)
 #Effect sizes per mouse calculated as 
 # 1) diff between peak activity ratios in the reactivated vs non-reactivated cells
@@ -841,13 +889,19 @@ lmer.test.print(left_join(reactivated.effect.deconv.ratio, d.day),
                 randef.str = '(1 | animal)',
                 diagnostics.groupvar = animal)
 
-g = left_join(reactivated.effect.deconv.ratio, d.day) %>% 
-  ggplot(aes(x=mean.logdist, y=deconv.ratio.diff, text=paste(animal, day_desc))) +
+left_join(reactivated.effect.deconv.ratio, d.day) %>% 
+  ggplot(aes(x=-mean.logdist, y=deconv.ratio.diff)) +
+             #text=paste(animal, day_desc))) +
   geom_point() +
   geom_hline(yintercept = 0, linetype='dashed', color='#333333') +
-  #stat_smooth(method='lm') +
+  stat_smooth(method='lm', colour='#444444') +
+  xlab('Trial performance (log mean run distance (m))') +
+  ylab('Relative peak activity difference') +
   gtheme
-ggplotly(g)
+ggsave('~/tmp/tanjas/relative_peak_cor_with_performance.svg', units = 'cm',
+       width=8, #width = 8, 
+       height = 5.8)
+#ggplotly()
 
 g = left_join(reactivated.effect.deconv.ratio, filter(d, trial_n==8)) %>%
   ggplot(aes(x=log(total_dist*perc2dist/100), y=deconv.ratio.diff, text=paste(animal, day_desc))) +
@@ -978,20 +1032,6 @@ lmer.test.print(reactivation.summary %>%
 Foraging reactivations?
 search for immobility periods of duration Xsec.
 ```{r}
-find.reactivation.during.immobility = function(traces) {
-  traces[, nevents_running := 0]
-  traces[(x>0) & (y>0) & is_running,
-         nevents_running := nevents]
-  traces[,
-         running_cumsum_events := cumsum(nevents_running),
-         by=.(exp_title, trial_id, trial, cell_id)]
-  #traces[, immobile := smooth_velocity <= 2.5]
-  traces[,
-         reactivation_event := immobile &
-           # cell must have been active during running before the event
-           (running_cumsum_events > 0) & 
-           (nevents > 0) ]
-}
 
 last.day.habit.df = trials.meta.df %>% 
   filter(day_desc == 'habituation day#3') %>%
@@ -1136,6 +1176,7 @@ summary.foraging.trial1.events[, exp := 'habituation']
 ```
 
 ```{r}
+place.cell.db = as.data.table(place.cell.db)
 habit.pcs.info = all.foraging.day.events %>%
   #filter(day_desc == 'habituation day#3') %>%
   left_join(place.cell.db) %>%
@@ -1205,13 +1246,14 @@ Early vs late metrics of the cells depending if the cell was reactivated during 
 use spatial.info after subtracting random shuffles mean
 ```{r}
 first.reactivated.trial = all.change.from.trial1 %>%
+  filter(trials.diff == 1) %>%
   group_by(animal, date, day_desc, day_ordinal_name, cell_id) %>%
-  arrange(baseline.trial) %>%
+  arrange(trial.denominator) %>%
   dplyr::summarise(fst.reactivated.trial = min(c(which(reactivated), Inf)),
                    active = max(active),
                    .groups='drop') %>%
-  left_join(place.cell.db[, .(animal, date, day_desc, cell_id, signif.si, early.late.cor)]) %>%
-  filter(signif.si) %>%
+  #left_join(place.cell.db[, .(animal, date, day_desc, cell_id, signif.si, early.late.cor)]) %>%
+  #filter(signif.si) %>%
   mutate(exp='learning')
 
 first.reactivated.habit.minute = all.foraging.trial1.events %>%
