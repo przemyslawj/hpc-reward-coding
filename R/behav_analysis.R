@@ -98,6 +98,10 @@ center.timestamps.around.events = function(cell.data.trace, events.tibble, exp_t
                                            padding.after.event=0) {
   events.tibble = as.data.table(events.tibble)
   trial.events = events.tibble[trial==cell.data.trace$trial[1] & exp_title==exp_title_name,]
+  if ('cell_id' %in% colnames(trial.events) & length(unique(trial.events$cell_id)) > 0) {
+    trial.events = trial.events[cell_id == cell.data.trace$cell_id[1]]
+  }
+
   cell.data.trace$aligned_event_id = -1
   cell.data.trace$timestamp_from_start = -1
   cell.data.trace$timestamp_from_end = -1
