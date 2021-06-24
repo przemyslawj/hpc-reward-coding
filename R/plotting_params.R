@@ -20,3 +20,13 @@ main.two.colours = c('#E78AC3', '#999999')
 side.two.coulours = c('#8856a7', '#598cc0')
 three.colours = c('#88bdf2', '#e78ac3', '#999999')
 low2high.colours = c('#DEEBF7', '#08306B')
+
+figure.ggsave = function(filename, ...) {
+  dir.create('figures', showWarnings = FALSE)
+  ggsave(filename, 
+         path='figures', 
+         units='cm',
+         device=cairo_pdf, 
+         dpi=300,
+         ...)
+}
