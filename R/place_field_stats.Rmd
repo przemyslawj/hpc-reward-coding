@@ -1373,6 +1373,13 @@ npeaks.summary = bind_rows(
   dplyr::summarise(create.hist.tibble(npeaks, hist.breaks=seq(0.5,6,1)), ncells=n()) %>%
   filter(ncells >= 5) # Only include samples with >= 5 cells
 
+# Fraction of multifields
+npeaks.summary %>%
+  ungroup() %>%
+  filter(mid == 1) %>%
+  group_by(implant) %>%
+  dplyr::summarise(mean.multi = mean(100-pct.count), sem.multi = sem(100-pct.count))
+
 plotted.npeaks.summary = npeaks.summary %>%
   group_by(implant, exp, mid) %>%
   dplyr::summarise(pct.mean = mean(pct.count), pct.sem = sem(pct.count)) 
