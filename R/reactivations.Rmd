@@ -18,7 +18,9 @@ source('behav_analysis.R')
 source('traces_input.R')
 source('place_field_utils.R')
 source('plotting_params.R')
-reactiv.colours = rev(main.two.colours)
+
+pc.two.colours = rev(main.two.colours)
+reactiv.colours = c('#999999', '#85b2e0')
 
 gtheme.light.panel = gtheme +
     theme(
@@ -568,26 +570,30 @@ all.change.combined = bind_rows(
     filter(trial.numerator <= 8) %>%
     mutate(group='foraging', day_ordinal_name = 'first') %>% 
     left_join(trials.meta.df),
-  #all.change.from.beforetest %>% mutate(group='no reward', day_ordinal_name = 'first'),
   all.change.from.trial1 %>% mutate(group='learning'))
+
+min.deconv.activity = 1e-5
+max.trial = 8
+
 all.change.combined = all.change.combined %>%
   arrange(trial.numerator) %>%
   ungroup() %>%
   group_by(group, implant, animal, date, exp_title, cell_id) %>%
   dplyr::mutate(fst.reactivated.trial = min(c(trial.denominator[which(reactivated)], Inf))) %>%
-  dplyr::ungroup()
-
-min.deconv.activity = 1e-5
-compared.change.df = all.change.combined %>%
-  filter(trials.diff <= 7) %>%
-  #filter(total_events_trial.1 > 0, total_events_trial.2 > 0) %>%
+  #dplyr::mutate(fst.reactivated.trial = ifelse(fst.reactivated.trial <= max.trial, fst.reactivated.trial, Inf)) %>%
+  dplyr::ungroup() %>%
+  filter(day_ordinal_name == 'first') %>%
+    filter(trials.diff <= 7, trial.numerator <= max.trial) %>%
   filter(max.deconv_trial.1 > min.deconv.activity, max.deconv_trial.2 > min.deconv.activity) %>%
-  filter(deconv.95p_trial.1 > 0, deconv.95p_trial.2 > 0) %>%
-  #filter(deconv.95p.ratio > 0, deconv.95p.ratio < Inf) %>%
-  filter(reactivated | (fst.reactivated.trial > pmax(trial.numerator, trial.denominator))) %>%
-  filter(day_ordinal_name == 'first') 
+  filter(deconv.95p_trial.1 > 0, deconv.95p_trial.2 > 0)
 
-compared.change.df$group = factor(compared.change.df$group, levels = c('learning', 'foraging'))
+all.change.combined$group = factor(all.change.combined$group, levels= c('learning', 'foraging'))
+
+compared.change.df = all.change.combined %>%
+  # Filter to the ones reactivated now or after the compared trials
+  filter(reactivated | (fst.reactivated.trial > pmax(trial.numerator, trial.denominator))) 
+
+#compared.change.df$group = factor(compared.change.df$group, levels = c('learning', 'foraging'))
 compared.change.df$reactivated = as.factor(compared.change.df$reactivated)
 
 compared.change.df %>%
@@ -633,16 +639,15 @@ ggsave('~/tmp/tanjas/trial2trial_change.svg', units = 'cm',
 #         axis.line.x = element_blank(),
 #         legend.position = 'top') 
 
-sem_summary <- function(x, log.transform=FALSE) {
-   percentiles = quantile(x, c(0.25, 0.75))
-   if (log.transform){
-    m <- exp(mean(log(x)))
-   } else {
-     m <- mean(x)
-   }
-   ymin <- percentiles[[1]]
-   ymax <- percentiles[[2]]
-   return(c(y=m, ymin=ymin, ymax=ymax))
+sd_summary <- function(x) {
+  x = x[!is.na(x)]
+  m <- mean(x)
+  # percentiles = quantile(x, c(0.25, 0.75))
+  # ymin <- percentiles[[1]]
+  # ymax <- percentiles[[2]]
+  ymin = m - sd(x)
+  ymax = m + sd(x)
+  return(c(y=m, ymin=ymin, ymax=ymax))
 }
 
 compared.change.summary = compared.change.df %>%
@@ -671,7 +676,7 @@ compared.change.df %>%
   #          size=0.5) +
   stat_summary(#aes(colour=reactivated),
                color = '#444444',
-               fun.data=sem_summary, 
+               fun.data=sd_summary, 
                mult=1, 
                geom='pointrange', size=0.5, shape=1, log.transform=FALSE) +
   ylab('Trial n+x / Trial n peak activity') + 
@@ -691,12 +696,71 @@ ggsave('~/tmp/tanjas/trial2trial_change_means.svg', units = 'cm',
        width = 14, height = 8.1)
 ```
 
+```{r}
+compared.var = quo(max.deconv.ratio)
+#compared.var = quo(mean.deconv.ratio)
+
+aligned.to.fst.reactivation.trial = map_dfr(1:7,
+                                            function(aligned.reactiv.trial) {
+  all.change.combined %>%
+  #filter(!reactivated_inbetween) %>%
+  mutate(reactivated_later = fst.reactivated.trial < Inf,
+         aligned.reactiv.trial = aligned.reactiv.trial) %>%
+  filter((trial.denominator == aligned.reactiv.trial) | (trial.numerator == aligned.reactiv.trial)) %>%
+  filter(fst.reactivated.trial == aligned.reactiv.trial)}) 
+
+non.reactivated.align.trial = 3
+x = bind_rows(
+  aligned.to.fst.reactivation.trial,
+  filter(all.change.combined, fst.reactivated.trial == Inf) %>% 
+    filter(trial.denominator == non.reactivated.align.trial | trial.numerator == non.reactivated.align.trial) %>% 
+    mutate(aligned.reactiv.trial = non.reactivated.align.trial, 
+           reactivated_later = FALSE)) %>%
+  mutate(trial_n = ifelse(trial.denominator < aligned.reactiv.trial, trial.denominator, trial.numerator) - aligned.reactiv.trial,
+         compared.var.ordered = ifelse(trial.denominator < aligned.reactiv.trial, 1/!!compared.var, !!compared.var)) %>%
+  identity()
+
+x.summary = group_by(x, group, reactivated_later, trial_n) %>%
+  dplyr::summarise(as_tibble(t(sd_summary(log(compared.var.ordered))) %>% exp) , .groups='drop') %>%
+  add_row(y=1, trial_n=0, reactivated_later=FALSE, group='learning') %>%
+  add_row(y=1, trial_n=0, reactivated_later=TRUE, group='learning') %>%
+  add_row(y=1, trial_n=0, reactivated_later=FALSE, group='foraging') %>%
+  add_row(y=1, trial_n=0, reactivated_later=TRUE, group='foraging') 
+x.summary$group = factor(x.summary$group, levels= c('learning', 'foraging'))
+
+x %>%
+  ggplot(aes(x=trial_n-0.2 + reactivated_later * 0.4, 
+             y=(compared.var.ordered), 
+             group=reactivated_later)) +
+  geom_jitter(aes(colour=reactivated_later), width=0.1, height=0, shape=1, 
+              alpha=0.2, size=0.1) +
+  geom_line(data=x.summary, mapping=aes(y=y, colour=reactivated_later, group=reactivated_later), 
+          alpha=0.75, size=1 ) +
+  # stat_summary(color = '#444444',
+  #              fun.data=sd_summary, 
+  #              geom='pointrange', size=0.5, shape=1) +
+  geom_pointrange(data=x.summary, mapping=aes(y=y, ymin=ymin, ymax=ymax),
+                  size=0.5, shape=1, colour='#444444', alpha=0.5) +
+  #ylim(c(0.1, 10)) +
+  #coord_trans(y='log10') +
+  scale_y_log10(limit=c(0.1, 10.0), breaks=c(0.2, 0.4, 0.6, 1.0, 2.0, 4.0, 8.0)) +
+  #scale_y_log10(limit=c(0.099, 8.0), breaks=c(0.1, 0.2, 0.4, 0.6, 1.0, 2.0, 4.0, 8.0)) +
+  scale_x_continuous(breaks=-2:5, limit=c(-2.5, 5.5)) +
+  scale_color_manual(values=reactiv.colours) +
+  facet_grid(group ~ .) +
+  gtheme.light.panel +
+  xlab('Trial from reactivation') + ylab('Relative activity peak')
+ggsave('~/tmp/tanjas/trial2trial_change_epsp_like.svg', units = 'cm',
+       width = 14, height = 8.1)
+```
+
+
 ## Stats for change in max deconv activity
 ```{r}
 source('fixed_effects.R')
 m.mean.ratio = lmer.test.print(compared.change.df %>% 
                                  filter(!reactivated_inbetween) %>%
-                                 #filter(trials.diff == 1) %>%
+                                 filter(trials.diff > 1) %>%
                                  filter(group == 'learning') %>%
                   mutate(val = log(0.1 + mean.deconv.ratio)) %>%
                   filter(!is.na(val), val < Inf),
@@ -746,6 +810,22 @@ m.deconv.ratio = lmer.test.print(compared.change.df %>%
                 randef.str = '(1 + day_desc | animal)',
                 diagnostics.groupvar = animal)
 
+x = mutate(x, before_reactiv = trial_n < 0)
+x$before_reactiv = as.factor(x$before_reactiv)
+x$group = as.factor(x$group)
+x$reactivated_later = as.factor(x$reactivated_later)
+tested.x = x %>% 
+    filter(trials.diff >= 1, trial_n > 0, trial_n <= 5) %>%
+    #filter(!reactivated_inbetween) %>%
+    mutate(log.mean = log(0.0 + mean.deconv.ratio),
+           log.max = log(0.0 + max.deconv.ratio))
+
+m.deconv.ratio = lmer.test.print(tested.x %>% filter(!is.na(log.max), log.max < Inf),
+                var = log.max,
+                fixed.effects = reactivated_later * group,
+                randef.str = '(1 + day_desc | animal)',
+                diagnostics.groupvar = animal)
+
 t.res.deconv.ratio = lsmeansLT(m.deconv.ratio, pairwise = TRUE)
 t.res.deconv.ratio[c(3,8),]
 str_c(attributes(t.res.deconv.ratio)$row.names, 
@@ -756,6 +836,14 @@ str_c(attributes(t.res.deconv.ratio)$row.names,
       sep=' ')[c(3,8)]
 
 paste(attributes(t.res.deconv.ratio)$row.names, 100 - exp(t.res.deconv.ratio$Estimate) * 100, '%')[c(3,8)]
+
+m.mean.ratio = lmer.test.print(tested.x %>% filter(!is.na(log.mean), log.mean < Inf),
+                var = log.mean,
+                fixed.effects = reactivated_later * group,
+                randef.str = '(1 + day_desc | animal)',
+                diagnostics.groupvar = animal)
+t.res.mean.ratio = lsmeansLT(m.mean.ratio, pairwise = TRUE)
+t.res.mean.ratio[c(3,8),]
 ```
 
 ## Correlation between reactivations and max deonv ratio
@@ -773,18 +861,18 @@ reactivations.activity.change.joined %>%
              x=trials_with_reactivation)) +
              #x=reactivation_events)) +
   geom_hline(yintercept = 1.0, linetype='dashed', color='#444444') +
-  geom_jitter(shape=1, alpha=0.4, size=0.4, colour=reactiv.colours[2]) +
+  geom_jitter(shape=1, alpha=0.4, size=0.4, colour=reactiv.colours[2], width=0.3, height=0.0) +
   stat_smooth(method='lm', colour='#999999') +
   #scale_y_log10() +
-  scale_y_log10(limits=c(0.03,10)) +
+  scale_y_log10(limits=c(0.02,10)) +
   #scale_x_log10() +
   facet_grid(.~ group) +
   gtheme.light.panel +
-  xlab('Reactivations') + ylab('Relative activity peak')
+  xlab('#Trials when reactivated') + ylab('Relative activity peak')
 
 ggsave('~/tmp/tanjas/trial8to1activity_change_trials_with_reactivation_cors.svg', units = 'cm',
        width=9, #width = 8, 
-       height = 5.8)
+       height = 5.1)
 
 
 # m.reactiv.cors = lmer.test.print(reactivations.activity.change.joined %>%
@@ -808,7 +896,7 @@ ggsave('~/tmp/tanjas/trial8to1activity_change_trials_with_reactivation_cors.svg'
 m.reactiv.cors = lmer.test.print(reactivations.activity.change.joined %>%
                   #mutate(val=log(deconv.95p.ratio)) %>%
                     mutate(val=log(0.0 + max.deconv.ratio)) %>%
-                  filter(group=='learning', 
+                  filter(group=='learning',
                          reactivation_events > 0),
                 var=val,
                 #fixed.effects = log(reactivation_events),
@@ -820,7 +908,13 @@ m.reactiv.cors = lmer.test.print(reactivations.activity.change.joined %>%
 
 Reactivations in a single trial vs increase just after
 ```{r}
-reactivations.activity.change.joined %>%
+subsequent.reactivations.activity.change.joined = filter(compared.change.df, trials.diff == 1) %>%
+  left_join(bind_rows(filter(all.day.events, atReward > 0), 
+                      filter(summary.foraging.trial1.events, atReward > 0)) %>% 
+              dplyr::select(animal, date, cell_id, trials_with_reactivation, reactivation_events,), 
+            by=c('animal', 'date', 'cell_id'))
+
+subsequent.reactivations.activity.change.joined %>%
   filter(total_reactivations_at_reward_trial.1 > 0) %>%
   #filter(trials.diff==1) %>%
   filter(total_reactivations_at_reward_trial.1 <= 8) %>%
@@ -838,16 +932,16 @@ ggsave('~/tmp/tanjas/trial8to1activity_next_trials_change_with_reactivation_cors
        width=9, #width = 8, 
        height = 5.8)
 
-m.reactiv.cors = lmer.test.print(reactivations.activity.change.joined %>%
+m.reactiv.cors = lmer.test.print(subsequent.reactivations.activity.change.joined %>%
                   mutate(val=log(0.0+max.deconv.ratio)) %>%
-                    #filter(group == 'learning') %>%
+                    filter(group == 'learning') %>%
                     filter(total_reactivations_at_reward_trial.1 <= 8) %>%
                     mutate(total_reactivations_at_reward_trial1_multiple = total_reactivations_at_reward_trial.1 > 1) %>%
                   filter(val > 0 & val < Inf, total_reactivations_at_reward_trial.1 > 0),
                 var=val,
-                #fixed.effects = total_reactivations_at_reward_trial.1,
+                fixed.effects = total_reactivations_at_reward_trial.1,
                 #fixed.effects = total_reactivations_at_reward_trial1_multiple,
-                fixed.effects = reactivation_events * group,
+                #fixed.effects = reactivation_events,
                 randef.str = '(1 + day_desc | animal)',
                 diagnostics.groupvar = animal)
 ```
@@ -858,10 +952,11 @@ library(readr)
 df = read.csv(file.path('/mnt/DATA/Prez/cheeseboard', 'trial_stats.csv'))
 df$date = as.Date(df$date)
 
-d = filter(df, exp_title == 'trial')
+d = filter(df, exp_title == 'trial') %>%
+  mutate(logdist = log(total_dist*perc2dist/100))
 d.day = d %>%
   group_by(animal, date, exp, exp_title, day_ordinal, day_desc) %>%
-  dplyr::summarise(mean.logdist = log(total_dist*perc2dist/100) %>% mean)
+  dplyr::summarise(mean.logdist = mean(logdist))
 glimpse(d.day)
 ```
 
@@ -872,9 +967,10 @@ library(plotly)
 #Effect sizes per mouse calculated as 
 # 1) diff between peak activity ratios in the reactivated vs non-reactivated cells
 
-reactivated.effect.deconv.ratio = reactivations.activity.change.joined %>%
+day.reactivated.effect.deconv.ratio = reactivations.activity.change.joined %>%
     #filter(!reactivated_inbetween) %>%
   filter(group == 'learning') %>%
+  #filter(date != '2020-10-18' | animal != 'M-BR' ) %>%
   group_by(exp_title, date, animal, day_desc, reactivated) %>%
   dplyr::summarise(mean.deconv.ratio = mean(max.deconv.ratio), ncells=n()) %>% 
   pivot_wider(id_cols=c('exp_title', 'date', 'animal', 'day_desc'),
@@ -883,39 +979,81 @@ reactivated.effect.deconv.ratio = reactivations.activity.change.joined %>%
   mutate(deconv.ratio.diff = reactivated_TRUE - reactivated_FALSE) %>% 
   filter(!is.na(deconv.ratio.diff))
 
-lmer.test.print(left_join(reactivated.effect.deconv.ratio, d.day),
+lmer.test.print(left_join(day.reactivated.effect.deconv.ratio, d.day),
                 var=deconv.ratio.diff,
                 fixed.effects = mean.logdist,
                 randef.str = '(1 | animal)',
                 diagnostics.groupvar = animal)
 
-left_join(reactivated.effect.deconv.ratio, d.day) %>% 
-  ggplot(aes(x=-mean.logdist, y=deconv.ratio.diff)) +
-             #text=paste(animal, day_desc))) +
+cor.test(~ mean.logdist + deconv.ratio.diff, 
+         data=left_join(day.reactivated.effect.deconv.ratio, d.day),
+         method='spearman')
+
+left_join(day.reactivated.effect.deconv.ratio, d.day) %>% 
+  ggplot(aes(x=-mean.logdist, y=deconv.ratio.diff,#)) +
+             text=paste(animal, day_desc))) +
   geom_point() +
   geom_hline(yintercept = 0, linetype='dashed', color='#333333') +
   stat_smooth(method='lm', colour='#444444') +
-  xlab('Trial performance (log mean run distance (m))') +
+  xlab('Trial performance (-log mean run distance (m))') +
   ylab('Relative peak activity difference') +
   gtheme
 ggsave('~/tmp/tanjas/relative_peak_cor_with_performance.svg', units = 'cm',
-       width=8, #width = 8, 
-       height = 5.8)
-#ggplotly()
+       width=8, height = 5.8)
+ggplotly()
 
-g = left_join(reactivated.effect.deconv.ratio, filter(d, trial_n==8)) %>%
-  ggplot(aes(x=log(total_dist*perc2dist/100), y=deconv.ratio.diff, text=paste(animal, day_desc))) +
+
+trial.reactivated.effect.deconv.ratio = subsequent.reactivations.activity.change.joined %>%
+    #filter(!reactivated_inbetween) %>%
+  filter(group == 'learning') %>%
+  group_by(exp_title, date, animal, day_desc, trial.numerator, reactivated) %>%
+  dplyr::summarise(mean.deconv.ratio = mean(max.deconv.ratio), 
+                   ncells=n(), 
+                   mean.reactivations = mean(total_reactivations_at_reward_trial.1))%>% 
+  pivot_wider(id_cols=c('exp_title', 'date', 'animal', 'day_desc', 'trial.numerator'),
+              values_from = 'mean.deconv.ratio', 
+              #values_from = 'mean.reactivations',
+              names_from='reactivated', names_prefix='reactivated_') %>% 
+  mutate(deconv.ratio.diff = reactivated_TRUE - reactivated_FALSE) %>% 
+  filter(!is.na(deconv.ratio.diff))
+
+left_join(trial.reactivated.effect.deconv.ratio %>% mutate(trial_n=trial.numerator), d) %>% 
+  filter(-logdist > -2.5) %>%
+  ggplot(aes(x=-logdist, y=deconv.ratio.diff)) +
   geom_point() +
   geom_hline(yintercept = 0, linetype='dashed', color='#333333') +
-  #stat_smooth(method='lm') +
+  stat_smooth(method='lm', colour='#444444') +
+  xlab('Trial performance (-log run distance (m))') +
+  ylab('Relative peak activity difference') +
   gtheme
-ggplotly(g)
 
-lmer.test.print(left_join(reactivated.effect.deconv.ratio, filter(d, trial_n==8)),
-                var=deconv.ratio.diff,
-                fixed.effects = log(total_dist*perc2dist/100),
-                randef.str = '(1 | animal)',
+ggsave('~/tmp/tanjas/next_trial_performance.svg', units = 'cm',
+       width=9, #width = 8, 
+       height = 5.8)
+
+lmer.test.print(left_join(trial.reactivated.effect.deconv.ratio %>% mutate(trial_n=trial.numerator), d),
+                fixed.effects = logdist,
+                var = deconv.ratio.diff,
+                randef.str = '(1 + day_desc | animal)',
                 diagnostics.groupvar = animal)
+
+# # Performance on trial 8
+# g = left_join(day.reactivated.effect.deconv.ratio, filter(d, trial_n==8)) %>%
+#   ggplot(aes(x=log(total_dist*perc2dist/100), y=deconv.ratio.diff, text=paste(animal, day_desc))) +
+#   geom_point() +
+#   geom_hline(yintercept = 0, linetype='dashed', color='#333333') +
+#   #stat_smooth(method='lm') +
+#   gtheme
+# ggplotly(g)
+# 
+# lmer.test.print(left_join(day.reactivated.effect.deconv.ratio, filter(d, trial_n==8)),
+#                 var=deconv.ratio.diff,
+#                 fixed.effects = log(total_dist*perc2dist/100),
+#                 randef.str = '(1 | animal)',
+#                 diagnostics.groupvar = animal)
+
+#Performance on the following trial
+# 1) As the function of change in the peak activity
 
 # 2) Number of reactivations
 # 3) Fraction of reactivated cells?
@@ -1252,8 +1390,8 @@ first.reactivated.trial = all.change.from.trial1 %>%
   dplyr::summarise(fst.reactivated.trial = min(c(which(reactivated), Inf)),
                    active = max(active),
                    .groups='drop') %>%
-  #left_join(place.cell.db[, .(animal, date, day_desc, cell_id, signif.si, early.late.cor)]) %>%
-  #filter(signif.si) %>%
+  left_join(place.cell.db[, .(animal, date, day_desc, cell_id, signif.si, early.late.cor)]) %>%
+  filter(signif.si) %>%
   mutate(exp='learning')
 
 first.reactivated.habit.minute = all.foraging.trial1.events %>%
@@ -1482,6 +1620,7 @@ m.rew.dist = lmer.test.print(compared.early.late.pc.wide %>%
                 fixed.effects = reactivated,
                 randef.str = '(1 + day_desc | animal)',
                 diagnostics.groupvar = animal)
+lsmeansLT(m.rew.dist, pairwise = TRUE)
 
 m.rew.dist.change = lmer.test.print(compared.early.late.pc.wide %>%
                          filter(exp=='learning') %>%
@@ -1621,11 +1760,11 @@ compared.beforetest.late.df.trials.peaks.wide = beforetest.peaks.at.rew %>%
   filter(signif.si) 
 
 compared.beforetest.late.df.trials.peaks.wide %>%
-  ggplot(aes(x=reactivated, y=min.rew.dist.beforetest * perc2dist, color=reactivated)) +
+  ggplot(aes(x=reactivated, y=min.rew.dist.diff * perc2dist, color=reactivated)) +
   geom_jitter(shape=1, size=0.1, alpha=0.4, height=0, width=0.2) +
   geom_violin( fill='transparent', colour='#333333', draw_quantiles=0.5) +
   #geom_hline(yintercept = 0.0, linetype='dashed', color='#444444') +
-  scale_color_manual(values=reactiv.colours) +
+  scale_color_manual(values=pc.two.colours) +
   facet_grid(. ~ exp) +
   ylab('Distance to reward location:\n foraging session before learning (cm)') +
   theme(legend.position = 'none')  
@@ -1640,5 +1779,48 @@ compared.beforetest.late.df.trials.peaks %>%
   facet_grid(. ~ exp) +
   ylab('Distance to reward location:\n foraging session before learning (cm)') +
   theme(legend.position = 'none')  
+```
+
+Change in the distance of the the highest peak
+```{r}
+pc.test.df.new = pc.test.df %>%
+  dplyr::select(-c(is.goal.cell, closest.location.ordinal, closer.rew.angle, min.rew.dist)) %>%
+  dplyr::group_by(date, day_desc, animal) %>%
+  dplyr::mutate(
+        min.rew.dist=calc.min.rew.dist(filter.rews.df(new.locations.df, date[1], animal[1]),
+                                       field.max.x, field.max.y)$rew.dist)
+
+pc.late.df.new = compared.early.late.df.trials %>% filter(trials_group == 'late') %>%
+   dplyr::group_by(date, day_desc, animal) %>%
+  dplyr::mutate(
+        min.rew.dist=calc.min.rew.dist(filter.rews.df(new.locations.df, date[1], animal[1]),
+                                       field.max.x, field.max.y)$rew.dist)
+
+pc.late.df.change = pc.test.df.new %>%
+  mutate(min.rew.dist.beforetest = min.rew.dist) %>% 
+  dplyr::select(animal, date, cell_id, day_desc, min.rew.dist.beforetest) %>%
+  left_join(pc.late.df.new) %>%
+  mutate(min.rew.dist.diff = min.rew.dist.beforetest - min.rew.dist) %>%
+  dplyr::mutate(reactivated = fst.reactivated.trial < Inf) %>%
+  filter(!is.na(reactivated), !is.na(min.rew.dist.diff)) %>%
+  filter(signif.si)
+
+pc.late.df.change %>%
+  ggplot(aes(x=reactivated, y=min.rew.dist.diff * perc2dist, color=reactivated)) +
+  geom_jitter(shape=1, size=0.1, alpha=0.4, height=0, width=0.2) +
+  geom_violin( fill='transparent', colour='#333333', draw_quantiles=0.5) +
+  #geom_hline(yintercept = 0.0, linetype='dashed', color='#444444') +
+  scale_color_manual(values=pc.two.colours) +
+  ylab('Place field shift\ntowards reward (cm)') +
+  theme(legend.position = 'none')  
+
+ggsave('~/tmp/tanjas/shift_to_rew.svg', width=5.0, height=6.5, units='cm')
+
+lmer.test.print(pc.late.df.change,
+                var=min.rew.dist.diff,
+                fixed.effects = reactivated,
+                randef.str = '(1 + day_desc | animal)',
+                diagnostics.groupvar = animal)
+
 ```
 
