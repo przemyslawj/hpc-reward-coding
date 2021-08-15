@@ -113,8 +113,8 @@ center.timestamps.around.events = function(cell.data.trace, events.tibble, exp_t
   
   prev.index = 0
   for (i in 1:nrow(trial.events)) {
-    timestamp.before.end = which(cell.data.trace$timestamp <= trial.events$timestamp_end)
-    index.end = cell.data.trace$timestamp[timestamp.before.end[length(timestamp.before.end)] ]
+    timestamp.before.end = which(cell.data.trace$timestamp <= trial.events$timestamp_end[i])
+    index.end = timestamp.before.end[length(timestamp.before.end)]
     event.index.range = (prev.index+1) : min(index.end + padding.after.event, nrow(cell.data.trace))
     if (event.index.range[1] > nrow(cell.data.trace)) {
       break
