@@ -248,7 +248,8 @@ geom_rewards.current = function(rewards.df, subject=NULL, day=NULL, nbins=20,
 
 geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20,
                         rew.colours = c('prev_rew'='gray60', 'current_rew'='white', 'TRUE'='red', 'FALSE'='blue'),
-                        rew.size=2) {
+                        rew.size=2,
+                        rew.shape=2) {
   dayreward.df = rewards.df
   if (!is.null(subject)) {
     dayreward.df = filter(rewards.df, animal==subject)
@@ -262,7 +263,6 @@ geom_rewards = function(rewards.df, subject=NULL, day=NULL, nbins=20,
   dayreward.df = dplyr::mutate(
     dayreward.df,
     rew_name = ifelse(current_loc, 'current_rew', 'prev_rew'))
-  rew.shape = 2
   bin.size = 100 / nbins
   list(geom_point(data=dayreward.df, 
                   aes(x=trans_x / bin.size, y=(100 - trans_y) / bin.size, color=rew_name), 

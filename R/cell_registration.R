@@ -20,15 +20,18 @@ reg_stat_df = map_dfr(reg_stat_files, ~ {
   df
 })
 
-ggplot(reg_stat_df, aes(x=reg_dist_px, y=matched_cors)) +
+reg_stat_df %>% 
+  left_join(mouse.meta.df) %>%
+  ggplot(aes(x=reg_dist_px, y=matched_cors)) +
   stat_density_2d(
     geom = "raster",
     aes(fill = after_stat(density)),
     contour = FALSE
   ) + scale_fill_continuous(low=low2high.colours[1], high=low2high.colours[2]) +
-  geom_point(size=0.2, alpha=0.2, shape=1) +
+  #geom_point(size=0.2, alpha=0.2, shape=1) +
   #facet_wrap(animal ~ ., scales = 'free') +
-  ylim(c(0,1.0)) + xlim(c(0, 6)) +
+  #facet_grid(implant ~ .) +
+  ylim(c(0, 1.0)) + xlim(c(0, 6)) +
   gtheme +
   ylab('Spatial correlation') + xlab('Centroid distance (μm)')
 ggsave('cell_registration_matched_stat.pdf', device=cairo_pdf,

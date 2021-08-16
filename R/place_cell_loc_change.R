@@ -737,6 +737,22 @@ dist2current.rew.df %>%
 ggsave('/home/prez/tmp/cheeseboard/reward_active_dist_to_current.pdf', 
        height=4.57, width=8.3, units='cm', device=cairo_pdf, dpi=300)
 
+dist2current.rew.df %>%
+  group_by(implant, group) %>%
+  #dplyr::summarise(create.hist.tibble(min.rew.dist * perc2dist, seq(0,120,step.size))) %>%
+  ggplot() +
+  geom_density(aes(x=min.rew.dist * perc2dist, group=group, color=group)) +
+  facet_wrap(. ~ implant) +
+  scale_color_manual(values=c(side.two.coulours[1], '#999999')) +
+  xlab('Distance to reward (cm)') + 
+  ylab('Cell density') + 
+  labs(linetype='', title='Field distance to reward after translocation') +
+  xlim(c(0,100))+
+  gtheme
+
+ggsave('/home/prez/tmp/cheeseboard/reward_active_dist_to_current_density.pdf', 
+       height=4.57, width=8.3, units='cm', device=cairo_pdf, dpi=300)
+
 # step.size=20
 # dist2current.rew.trials.df %>%
 #   group_by(implant, group) %>%

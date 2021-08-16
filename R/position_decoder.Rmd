@@ -374,7 +374,7 @@ spatial.error.hist.df %>%
   geom_errorbar(aes(x=mid, ymin=mean.pct.count-sem.pct.count, ymax=mean.pct.count+sem.pct.count), 
                 width=4, size=0.25) +
   ylab('%') + xlab('Error (cm)') +
-  scale_color_manual(values=two.colours) +
+  scale_color_manual(values=main.two.colours) +
   facet_grid(. ~ decoder_ncells) +
   gtheme
 ggsave('spatial_decoding_histogram.pdf',
@@ -400,11 +400,12 @@ random.error.df = habit.error.summary %>%
 g = habit.error.summary %>%
   #filter(animal_day_desc %in% multicell.habit.animal_day_desc) %>%
   ggplot(aes(x=implant, y=median.error, group=implant, color=implant, day=day_desc, animal_name=animal)) +
+  stat_summary(fun.data='mean_cl_boot', geom='crossbar') +
   geom_jitter(shape=1, width=0.2, height=0, size=0.5) +
   geom_hline(yintercept = random.error.df$m.random.error[1]-random.error.df$sem.random.error[1]) +
   geom_hline(yintercept = random.error.df$m.random.error[1]+random.error.df$sem.random.error[1]) +
   facet_grid(. ~ decoder_ncells) +
-  scale_color_manual(values=two.colours) +
+  scale_color_manual(values=main.two.colours) +
   gtheme +
   ylab('Median error (cm)') + xlab('') + ylim(c(0,61))
 g
@@ -1066,9 +1067,11 @@ beforetest.onedayout.reward.summary %>%
 ```
 
 ```{r}
-g = ggplot(beforetest.onedayout.reward.summary, aes(text=animal, test_day=test_date)) +
-  geom_jitter(aes(x=implant, y=100*mean.rand.diff, color=implant),
-              shape=1, height=0, width=0.15, size=0.5) +
+g = ggplot(beforetest.onedayout.reward.summary,
+           aes(x=implant, y=100*mean.rand.diff, color=implant)) +
+           #aes(x=implant, y=100*mean.rand.diff, color=implant, text=animal, test_day=test_date)) +
+  stat_summary(fun.data='mean_cl_boot', geom='crossbar') +
+  geom_jitter(shape=1, height=0, width=0.15, size=0.5) +
   geom_hline(yintercept = 0, linetype='dashed') +
   scale_color_manual(values=main.two.colours) +
   gtheme +

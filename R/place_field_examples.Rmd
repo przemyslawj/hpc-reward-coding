@@ -544,11 +544,26 @@ for (animal_name in names(run.fields)) {
 
 Plot selected multi fields during test trials
 ```{r}
-animal_name = 'K-BR'
-#selected.cells =  c(149, 172, 131, 153, 75)
-#selected.cells =  c(43, 233, 101, 223, 90)
-#selected.cells = c(79, 101, 21, 178, 136, 117)
-selected.cells = c(61, 108, 39, 25, 120, 114)
+#animal_name = 'K-BR'
+#selected.cells = c(61, 108, 39, 25, 120, 114) # 'K-BR'
+#selected.cells = c(108, 122, 36, 59, 62) # 'K-BR'
+animal_name = 'D-BR'
+# selected.cells = c(196, 198, 70, 194, 199, 266, 267, 268) # 'D-BR'
+# animal_name = 'B-BL'
+# selected.cells = c(86,93,94,108) # 'B-BL'
+animal_name = 'G-BR'
+#selected.cells = c(79, 213, 12, 62, 92) # 'G-BR'
+selected.cells = c(51,84,92,99,101) # 'G-BR'
+# animal_name = 'F-TL'
+# selected.cells = c(419,142,335,428,6,97, 98) # 'F-TL'
+# animal_name = 'N-BR'
+# selected.cells = c(236,24,69,89,97) # 'N-BR'
+# animal_name = 'E-BL'
+# selected.cells = c(329,169,79,78,82,98,131) # 'E-BL'
+# animal_name = 'F-BL'
+# selected.cells = c(105) # 'F-BL'
+# animal_name = 'N-BL'
+# selected.cells = c(1, 197, 137, 357, 363) # 'N-BL'
 g.gbr = map_dfr(selected.cells,
                 #c(36, 59, 62, 72, 122), 
                 #c(122, 72, 39, 111, 102),
@@ -557,17 +572,20 @@ g.gbr = map_dfr(selected.cells,
   create.all.day.pf(fields.list=beforetest.fields,
                     occupancies.list=beforetest.occupancies) %>%
   filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning4 day#3') %>%
-  #filter(day_desc != 'learning3 day#3') %>%
+  filter(day_desc != 'learning4 day#3') %>%
   day.normalize.fields() %>% 
   plot.pf(max.x=nbins, max.y=nbins) +
     facet_grid(cell_id ~ day_desc) +
-    geom_rewards(beforetest.rewards.df, animal_name, nbins=nbins, 
+    geom_maze_contour(diameter = nbins) +
+    geom_rewards(beforetest.rewards.df %>% filter(day_desc != 'learning4 day#3'), 
+                 animal_name, nbins=nbins, 
                  rew.colours = list('prev_rew'='white', 'current_rew'='white')) +
-  geom_maze_contour(diameter = nbins) +
-  theme(legend.position = 'none')
+  theme(legend.position = 'bottom')
   
 g.gbr
-ggsave('/tmp/pf_k-br.pdf', plot = g.gbr, width = 7, height = 11, units = 'cm', dpi = 300, device = cairo_pdf)
+ggsave('/tmp/pf_k-br.pdf', plot = g.gbr, 
+       width = 7, height = 11, 
+       units = 'cm', dpi = 300, device = cairo_pdf)
 ```
 
 Choose habit cells

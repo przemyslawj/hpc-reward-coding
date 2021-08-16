@@ -189,13 +189,16 @@ summary.compared.pcs.df = compared.pcs.df %>%
 compared.pcs.df = filter(compared.pcs.df, signif.si)
 
 g.place.cell.count = summary.compared.pcs.df %>%
-  ggplot(aes(x=implant, y=pc.pct, group=animal)) +
+  ggplot(aes(x=implant, y=pc.pct, colour=implant)) +
   #geom_point(shape=1) +
-  geom_jitter(shape=1, width=0.2, height=0, size=0.5, color='#222222')+
+  stat_summary(fun.data='mean_cl_boot', geom='crossbar') +
+  geom_jitter(shape=1, width=0.2, height=0, size=0.5) +
+  scale_color_manual(values=main.two.colours) +
   #facet_grid(. ~ exp_title) +
   gtheme +
   ylab('Place cells (%)') + xlab('') + ylim(c(0,100)) +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank(),
+        legend.position = 'none')
  
 plot_grid(
   g.place.cell.count,
@@ -205,10 +208,7 @@ plot_grid(
   plot.pc.stat(early.late.cor, TRUE) + ylab('correlation'),
   nrow = 1, rel_widths = c(0.95,1,1,1))
 
-ggsave('pf_stats.pdf', path='/tmp', 
-       width=12.5, height=3.0, units='cm',
-       device=cairo_pdf, dpi=300)
-figure.ggsave('Figure_1DEGH.pdf', width=12.5, height=3.6)
+figure.ggsave('Figure_1DEGH.pdf', width=12.5, height=2.9)
 ```
 
 

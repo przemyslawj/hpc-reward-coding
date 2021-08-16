@@ -38,15 +38,15 @@ trials.meta.df = read.trials.meta(rootdirs)
 # #day = '2019-09-05'
 # day = '2019-09-07'
 
-# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
-# animal_name = 'G-BR'
-# exp_title='learning'
-# day = '2020-02-10' # learning 3 day2
-
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
-animal_name = 'D-BR'
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
+animal_name = 'G-BR'
 exp_title='learning'
-day = '2019-07-23' # learning 1 day1
+day = '2020-02-10' # learning 3 day2
+
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
+# animal_name = 'D-BR'
+# exp_title='learning'
+# day = '2019-07-23' # learning 1 day1
 # day = '2019-07-29' # learning 2 day2
 # day = '2019-08-01' # learning 3 day2
 
@@ -144,13 +144,13 @@ wide.behav.traces = behav.traces %>%
 
 Activity raster, cells sorted using t-sne on correlation matix
 ```{r}
-selected.trial = 1
+selected.trial = 1 # G-BR
+#selected.trial = 3 # N-BR
 
 g.behav = wide.behav.traces %>%
   filter(trial==selected.trial) %>%
   #filter(metric %in% c('velocity', 'total_activity', 'is_running')) %>% 
   filter(metric == 'total_activity') %>%
-  filter(value < 50) %>%
   ggplot(aes(x=trial_time_bin * (timebin.dur.msec / 1000), y=value)) +
   geom_line() +
   facet_grid(metric ~ ., scales='free_y') +
@@ -169,24 +169,36 @@ rew.aligned.traces = binned.traces[exp_title=='trial' & trial == selected.trial,
                                                                    exp_title[1],
                                                                    padding.after.event=5000/timebin.dur.msec), 
                                    by=.(exp_title, trial_id, cell_id)][aligned_event_id >= 0,]
-cell.order.df = order.cells.by.max.val(rew.aligned.traces[timestamp_from_start >= 0 & timestamp_from_end <= 5000])
+cell.order.df = order.cells.by.max.val(rew.aligned.traces[timestamp_from_start >= 0 & timestamp_from_end <= 5000],
+                                       active.val.threshold=0.5)
 ```
 
 ```{r}
 plotted.trials = c(selected.trial)
 plot.binned.traces = binned.traces[trial %in% plotted.trials,]
 joined.binned.traces = plot.binned.traces[cell.order.df, on='cell_id']
-g.raster = plot.activity.raster(joined.binned.traces[is.active==TRUE,], 
-                                zscored_smooth_deconv_trace, 
-                                tile.width=timebin.dur.msec/1000) +
-  geom_vline(data=reward.arriving.bouts[trial %in% plotted.trials], 
-             aes(xintercept=timestamp_end/1000), 
+
+joined.binned.traces.norm = joined.binned.traces %>%
+  filter(is.active==TRUE) %>%
+  group_by(cell_id) %>%
+  dplyr::mutate(zscored_smooth_deconv_trace.norm = 
+                  (zscored_smooth_deconv_trace - min(zscored_smooth_deconv_trace)) / 
+                  (max(zscored_smooth_deconv_trace) - min(zscored_smooth_deconv_trace)))
+
+g.raster = plot.activity.raster(joined.binned.traces.norm, 
+                                zscored_smooth_deconv_trace,
+                                #zscored_smooth_deconv_trace.norm, 
+                                tile.width=2*timebin.dur.msec/1000) +
+  scale_fill_gradientn(colours = jet.colours(7)) + 
+  geom_vline(data=reward.arriving.bouts[trial %in% plotted.trials],
+             aes(xintercept=timestamp_end/1000),
              linetype='dashed', color='#333333') +
-  geom_vline(data=reward.arriving.bouts[trial %in% plotted.trials], 
-             aes(xintercept=timestamp_start/1000), 
+  geom_vline(data=reward.arriving.bouts[trial %in% plotted.trials],
+             aes(xintercept=timestamp_start/1000),
              linetype='dashed', color='#0098ff') +
-  facet_grid(trial ~ .)
-g.raster
+  facet_grid(trial ~ .) +
+  theme(legend.position = 'right')
+g.raster + xlim(c(0, 80))
 
 plot_grid(g.raster + xlim(c(0, 80)), 
           g.behav + xlim(c(0, 80)), 
