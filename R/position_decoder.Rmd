@@ -18,6 +18,7 @@ source('locations.R')
 source('plotting_params.R')
 source('fixed_effects.R')
 source('utils.R')
+source('position_decoder_utils.R')
 ```
 
 ```{r}
@@ -498,6 +499,7 @@ eval.decoder.other.day = function(caimg_result_dir,
                                   models,
                                   prepare.vars.fun=NULL,
                                   filter.training.trace.fun=NULL,
+                                  filter.test.traces.fun=NULL,
                                   exp_title='trial',
                                   max.days.diff=2,
                                   min.days.diff=1,
@@ -534,6 +536,10 @@ eval.decoder.other.day = function(caimg_result_dir,
           warning('Few overlapping cells (', length(cell_ids), ') for animal=', animal_name, 
                   ' between day=', format(model_date), ' and day=', date_str)
           next
+        }
+        test.traces = binned.traces
+        if (!is.null(filter.test.traces.fun)) {
+           test.traces = filter.test.traces.fun(test.traces, model_date)
         }
         for (shuffle_i in 1:nshuffles) {
           shuffle_cell_ids = cell_ids
@@ -645,82 +651,6 @@ create.error.summary(beforetest.otherday.spatial.decoding.df, implant, animal, d
 ```
 
 ### Beforetest spatial decoding on leave-one-out day data - only consider 3 learnings
-```{r}
-eval.decoder.all.other.days = function(decoder.config, 
-                                       test.days.df, 
-                                       equal.prior=FALSE,
-                                       nshuffles=1,
-                                       ncells=0,
-                                       prepare.vars.fun=NULL,
-                                       filter.train.traces.fun=NULL,
-                                       filter.test.traces.fun=NULL,
-                                       test.day.indecies=c(1,2,3),
-                                       min.ncells.for.eval=10,
-                                       timebin.dur.msec=200,
-                                       binned.var='zscored_trace') {
-  ndays = 3  # Number of the first beforetest days to use
-  eval.dfs = data.frame()
-  for (animal_name in unique(test.days.df$animal)) {
-    beforetest_dates = filter(test.days.df, animal == animal_name) %>% pull(date)
-    animal.caimg_dirs = map_chr(beforetest_dates, ~ find.caimg.dir(caimg_result_dirs, animal_name, .x))[1:ndays]
-    data.traces = map_dfr(animal.caimg_dirs, ~ {
-      x = read.data.trace(.x, filter_exp_title = 'beforetest')
-      x$date = rep(char2date(x$date[1]), nrow(x))
-      x
-    })
-    binned.traces = prepare.traces(data.traces,
-                                   filter.running=TRUE,
-                                   timebin.dur.msec = timebin.dur.msec,
-                                   get.bin.thresholds.fun = get.quantiles.fun(c(0.9, 1.0)),
-                                   binned.var=binned.var)
-    traces.dates = char2date(unique(data.traces$date)) %>% sort()
-    cells.present = binned.traces[, (1), by=.(date, cell_id)][, .(ntimes=.N), by=.(cell_id)][
-        ntimes == ndays, cell_id]
-    sprintf('%d cells present on all days for animal=%s', length(cells.present), animal_name)
-    if (length(cells.present) < min.ncells.for.eval) {
-      warning('Few cells present on all days, skipping eval for animal=', animal_name)
-      next
-    }
-    if (!is.null(prepare.vars.fun)) {
-      binned.traces = prepare.vars.fun(binned.traces)
-    }
-    for (shuffle_i in 1:nshuffles) {
-      shuffled.cells = cells.present
-      if (ncells > 0) {
-        shuffled.cells = cells.present[shuffle(cells.present)]
-        shuffled.cells = shuffled.cells[1:min(ncells, length(shuffled.cells))]
-      }
-      binned.traces.filtered = binned.traces[cell_id %in% shuffled.cells]
-      for (i in test.day.indecies) {
-        train.traces = binned.traces.filtered[date != as.Date(traces.dates[i]),]
-        if (!is.null(filter.train.traces.fun)) {
-          train.traces = filter.train.traces.fun(train.traces)
-        }
-        test.traces = binned.traces.filtered[date == as.Date(traces.dates[i]),]
-        if (!is.null(filter.test.traces.fun)) {
-          test.traces = filter.test.traces.fun(test.traces, train.traces)
-        }
-        if (nrow(test.traces) == 0) {
-          print(sprintf('Test traces empty for test date %s, skipping', traces.dates[i]))
-          next
-        }
-        model = train.decoder.model(train.traces, decoder.config)
-        if (equal.prior) {
-          model$prior[model$prior > 0] = 1.0 / sum(model$prior > 0)
-        }
-        eval.res = eval.model(model, test.traces, decoder.config)
-        eval.res$df$model_date = str_c(format(traces.dates[-i]), collapse=',')
-        eval.res$df$model_id = i
-        eval.res$df$shuffle_id = shuffle_i
-        eval.res$df$ncells_present = length(cells.present)
-        eval.dfs = bind_rows(eval.dfs, eval.res$df)
-      }
-    }
-  }
-  return(eval.dfs)
-}
-```
-
 
 ```{r include=FALSE}
 beforetest.onedayout.spatial = eval.decoder.all.other.days(discrete.bayes.spatial.decoder, 
@@ -953,8 +883,6 @@ otherday.rew.decoding.summary %>%
 
 ### Beforetest reward decoding on leave-one-out day data - only consider 3 learnings
 ```{r include=FALSE}
-source('distances.R')
-
 test.rewards.df = all.locations.df %>%
   filter(is_test, exp_title=='beforetest') %>%
   left_join(mouse.meta.df, by='animal') %>%
@@ -989,7 +917,8 @@ filter.at.present.or.future.rew = function(test.traces, train.traces,
   
   tested.locs.df = bind_rows(rew.present.both.tests(training.rewards.df),
                              exclude.loc.ordinals(filter(animal.test.rewards.df, date == test.traces$date[1]), 
-                                                  training.rewards.df))
+                                                  training.rewards.df)) %>%
+    dplyr::distinct()
   
   x = test.traces[, dist.rews := calc.min.rew.dist(tested.locs.df, x, y)$rew.dist]
   x[dist.rews <= filter.dist.thresh, ]
@@ -1002,17 +931,130 @@ filter.train.present.or.future.rew = function(test.traces, train.traces,
   training.rewards.df = filter(animal.test.rewards.df, date %in% unique(train.traces$date)) 
   
   tested.locs.df = bind_rows(rew.present.both.tests(training.rewards.df),
-                             exclude.loc.ordinals(animal.test.rewards.df, training.rewards.df))
+                             exclude.loc.ordinals(animal.test.rewards.df, training.rewards.df)) %>%
+    dplyr::distinct()
   
   x = train.traces[, dist.rews := calc.min.rew.dist(tested.locs.df, x, y)$rew.dist]
   x[dist.rews <= filter.dist.thresh, ]
 }
 ```
 
+## Other day reward decoding
+```{r}
+filter.test.samerew.fun = function(test.traces, train.date,
+                                   filter.dist.thresh=15/perc2dist) {
+  animal.test.rewards.df = filter(test.rewards.df, animal == test.traces$animal[1]) 
+  data.rewards.df = filter(animal.test.rewards.df, date %in% c(train.date, test.traces$date[1]))
+  
+  tested.locs.df = bind_rows(rew.present.both.tests(data.rewards.df),
+                             exclude.loc.ordinals(animal.test.rewards.df, data.rewards.df)) %>%
+    dplyr::distinct()
+
+  x = test.traces[, dist.rews := calc.min.rew.dist(tested.locs.df, x, y)$rew.dist]
+  x[dist.rews <= filter.dist.thresh, ]
+}
+
+beforetest.otherday.reward.decoding.df = data.frame()
+models = list()
+for (caimg_result_dir in test_caimg_dirs) {
+  eval.res = eval.decoder.other.day(
+    caimg_result_dir, 
+    bayes.atreward.decoder.config,
+    trials.meta.df,
+    models,
+    prepare.vars.fun = add.close2rew.fun(goal.cell.max.dist),
+    filter.training.trace.fun = function(binned.traces) {
+            binned.traces[pmin(dist_reward0, dist_reward1) <= 15/perc2dist | pmin(dist_reward0, dist_reward1) >= 40 / perc2dist, ]
+    },
+    filter.test.traces.fun = filter.test.samerew.fun,
+    max.days.diff = 2,
+    min.days.diff = 2,
+    binned.varname = 'zscored_trace',
+    nshuffles = 0)
+  models = eval.res$models
+  beforetest.otherday.reward.decoding.df = bind_rows(beforetest.otherday.reward.decoding.df, eval.res$df)
+}
+```
+
+```{r}
+beforetest.otherday.reward.decoding.summary = beforetest.otherday.reward.decoding.df %>%
+  left_join(mouse.meta.df) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date')) %>%
+  group_by(implant, animal, test_date) %>%
+  dplyr::summarise(mean.error=mean(error), sem.error=sem(error), 
+                   mean.rand.error=mean(random_error), sem.rand.error=sem(random_error)) %>%  
+  dplyr::mutate(mean.rand.diff=mean.rand.error-mean.error)
+
+beforetest.otherday.reward.decoding.summary %>% 
+  group_by(implant) %>%
+  dplyr::summarise(mean(mean.error), sem(mean.error), 
+                   mean(mean.rand.diff), sem(mean.rand.diff),
+                   mean(mean.rand.error), sem(mean.rand.error))
+```
+
+
+## Cross validation
+```{r, include=FALSE}
+filter.test.samerew.fun = function(test.traces,
+                                   filter.dist.thresh=15/perc2dist) {
+  animal.test.rewards.df = filter(test.rewards.df, animal == test.traces$animal[1]) 
+  test.traces.dates = unique(test.traces$date)
+  data.rewards.df = filter(animal.test.rewards.df, date %in% test.traces.dates)
+  
+  tested.locs.df = bind_rows(rew.present.both.tests(data.rewards.df),
+                             exclude.loc.ordinals(animal.test.rewards.df, data.rewards.df)) %>%
+    dplyr::distinct()
+
+  x = test.traces[, dist.rews := calc.min.rew.dist(tested.locs.df, x, y)$rew.dist]
+  x[dist.rews <= filter.dist.thresh, ]
+}
+
+beforetest.onedayout.reward.cv = eval.decoder.all.other.days(
+  bayes.atreward.decoder.config, 
+  test.days.df,
+  equal.prior = TRUE,
+  prepare.vars.fun = add.close2rew.fun(goal.cell.max.dist),
+  filter.train.traces.fun = function(binned.traces) {
+    binned.traces[pmin(dist_reward0, dist_reward1) <= 15/perc2dist | pmin(dist_reward0, dist_reward1) >= 40 / perc2dist, ]
+  },
+  filter.test.traces.fun = filter.test.samerew.fun,
+  min.ncells.for.eval = 10,
+  min.present.times = 3,
+  test.day.indecies=c(1,3),
+  traces.decode.fun=crosseval.decoder.on.paired.days)
+```
+
+```{r}
+beforetest.onedayout.reward.cv.summary = beforetest.onedayout.reward.cv %>%
+  left_join(mouse.meta.df) %>%
+  group_by(implant, animal, model_date) %>%
+  dplyr::summarise(mean.error=mean(error), sem.error=sem(error), 
+                   mean.rand.error=mean(random_error), sem.rand.error=sem(random_error),
+                   n=n()) %>%  
+  filter(n>=10) %>%
+  dplyr::mutate(mean.rand.diff=mean.rand.error-mean.error)
+beforetest.onedayout.reward.cv.summary %>% 
+  group_by(implant) %>%
+  dplyr::summarise(mean(mean.error), sem(mean.error), 
+                   mean(mean.rand.diff), sem(mean.rand.diff),
+                   mean(mean.rand.error), sem(mean.rand.error))
+
+ggplot(beforetest.onedayout.reward.cv.summary,
+           aes(x=implant, y=100*mean.rand.diff, color=implant)) +
+  stat_summary(fun.data='mean_cl_boot', geom='crossbar') +
+  geom_jitter(shape=1, height=0, width=0.15, size=0.5) +
+  geom_hline(yintercept = 0, linetype='dashed') +
+  scale_color_manual(values=main.two.colours) +
+  gtheme +
+  theme(legend.position = 'none') +
+  xlab('') + ylab('Accuracy above random (%)') + 
+  scale_y_continuous(limits=c(-50,55), breaks=seq(-50,50,25))
+```
+
 
 ##Decoder evaluated on training data
 ```{r include=FALSE}
-beforetest.onedayout.reward.training = eval.decoder.all.other.days.debug(
+beforetest.onedayout.reward.training = eval.decoder.all.other.days(
   bayes.atreward.decoder.config, 
   test.days.df,
   equal.prior = TRUE,
@@ -1027,7 +1069,6 @@ beforetest.onedayout.reward.training = eval.decoder.all.other.days.debug(
 
 beforetest.onedayout.reward.training.summary = beforetest.onedayout.reward.training %>%
   left_join(mouse.meta.df) %>%
-  left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date')) %>%
   group_by(implant, animal, test_date) %>%
   dplyr::summarise(mean.error=mean(error), sem.error=sem(error), 
                    mean.rand.error=mean(random_error), sem.rand.error=sem(random_error)) %>%  
@@ -1042,17 +1083,13 @@ beforetest.onedayout.reward.training.summary %>%
 
 ##Decoder evaluated on test data
 ```{r include=FALSE}
-beforetest.onedayout.reward = eval.decoder.all.other.days.debug(
+beforetest.onedayout.reward = eval.decoder.all.other.days(
   bayes.atreward.decoder.config, 
   test.days.df,
   #ncells = 0,
   #nshuffles = 1,
   equal.prior = TRUE,
   prepare.vars.fun = add.close2rew.fun(goal.cell.max.dist),
-  # prepare.vars.fun = function(df) {
-  #   add.close2.rew = add.close2rew.fun(goal.cell.max.dist)
-  #   add.close2.rew(df[timestamp <= 120000])
-  # },
   filter.train.traces.fun = function(binned.traces) {
     binned.traces[pmin(dist_reward0, dist_reward1) <= 15/perc2dist | pmin(dist_reward0, dist_reward1) >= 40 / perc2dist, ]
   },
@@ -1253,7 +1290,7 @@ avg.pop.activity = function(binned.traces) {
 
 pop.bayes.atreward.decoder.config = mfr.bayes.atreward.decoder.config
 pop.bayes.atreward.decoder.config$predictor.var = quo(avg.val)
-beforetest.pop.oneydayout.reward = eval.decoder.all.other.days.debug(
+beforetest.pop.oneydayout.reward = eval.decoder.all.other.days(
   pop.bayes.atreward.decoder.config, 
   #filter(test.days.df, animal %in% c('E-BL', 'E-TR', ''),
   test.days.df,
@@ -1497,16 +1534,6 @@ caret.svm.train = function(binned.traces,
   list(prior=prior.vec, likelihood=svmFit)
 }
 
-caret.svm.predict = function(prior, svmFit, predictor.vals, nclasses=2) {
-  testing.wide.df = data.frame(t(predictor.vals))
-  colnames(testing.wide.df) = paste0('cell_', names(predictor.vals))
-  predicted = predict(svmFit, testing.wide.df)
-  predicted.class.index = as.integer(substr(as.character(predicted), 7, 100))
-  list(s=predicted.class.index,
-       density=rep(1/nclasses, nclasses),
-       prob=1)
-}
-
 caret.atreward.decoder.config = list(
   predicted.var = quo(close2rew),
   #predictor.var = quo(smoothed_deconv_trace),
@@ -1515,22 +1542,18 @@ caret.atreward.decoder.config = list(
   #predictor.var = quo(avg.val),
   nclasses = 2,
   train.fun = caret.svm.train,
-  predict.fun = caret.svm.predict.debug,
+  predict.fun = caret.svm.predict,
   error.fun = function(x,y) {abs(x-y)}
 )
 ```
 
 #Decoding if at reward from cell activity
 ```{r include=FALSE}
-beforetest.onedayout.cell.reward.svm = eval.decoder.all.other.days.debug(
+beforetest.onedayout.cell.reward.svm = eval.decoder.all.other.days(
   caret.atreward.decoder.config, 
   test.days.df,
   equal.prior = TRUE,
   prepare.vars.fun = add.close2rew.fun(goal.cell.max.dist),
-  # prepare.vars.fun = function(df) {
-  #   add.close2.rew = add.close2rew.fun(goal.cell.max.dist)
-  #   add.close2.rew(df[timestamp <= 120000])
-  # },
   filter.train.traces.fun = function(binned.traces) {
     binned.traces[pmin(dist_reward0, dist_reward1) <= 15/perc2dist | pmin(dist_reward0, dist_reward1) >= 40 / perc2dist, ]
   },
@@ -1571,7 +1594,7 @@ ggplotly(g)
 
 #Decoding if at reward from population activity
 ```{r include=FALSE}
-beforetest.onedayout.reward.svm = eval.decoder.all.other.days.debug(
+beforetest.onedayout.reward.svm = eval.decoder.all.other.days(
   caret.atreward.decoder.config, 
   test.days.df,
   #ncells = 0,
