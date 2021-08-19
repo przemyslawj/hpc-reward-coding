@@ -440,48 +440,6 @@ print('Insufficient evidence to say if different spatial decoding accuracy on 30
 models$full / models$null
 calc.pair.95CI(models$full, show.percent.change = FALSE)
 ```
-Stan model
-```{r}
-library(brms)
-brms::get_prior(median.error ~ 1 + implant + (1 + day_desc | animal),
-          filter(habit.error.summary, str_starts(day_desc, 'habituation'), decoder_ncells != 60))
-
-m.full = brms::brm(median.error ~ 1 + implant*decoder_ncells + (1 + day_desc | animal),
-          filter(habit.error.summary, str_starts(day_desc, 'habituation'), decoder_ncells != 60),
-          save_all_pars = TRUE,
-          prior = c(
-            prior(cauchy(0, sqrt(2)/2 * 13.5), coef=implantvCA1)  # standard Jeffreys prior * sd(habit.error.summary$median.error)
-          ))
-
-m.null = brms::brm(median.error ~ 1 + decoder_ncells + (1 + day_desc | animal),
-          filter(habit.error.summary, str_starts(day_desc, 'habituation'), decoder_ncells != 60),
-          save_all_pars = TRUE,
-          prior = c(
-          ))
-bayes_factor(m.full, m.null)
-ci(m.full, ci=0.95)
-
-#brms::posterior_samples(m.full)
-brms::pp_check(m.full)
-#brms::conditional_effects(m.full)
-#bayestestR::
-```
-Model on all errors
-```{r}
-brms::get_prior(error ~ 1 + implant * decoder_ncells + (1 + day_desc | animal),
-          filter(spatial.error.df, str_starts(day_desc, 'habituation'), decoder_ncells != 60))
-error.full = brms::brm(1 + error ~ 1 + implant*decoder_ncells + (1 + day_desc | animal),
-          filter(spatial.error.df, str_starts(day_desc, 'habituation'), decoder_ncells != 60),
-          #family = hurdle_gamma(),
-          save_all_pars = TRUE,
-          prior = c(
-            prior(cauchy(0, sqrt(2)/2 * 13.5), class=b)  # standard Jeffreys prior * sd(habit.error.summary$median.error)
-          ),
-          family = brmsfamily('lognormal'),
-          nc)
-
-brms::pp_check(error.full)
-```
 
 
 ## Eval on another day
@@ -998,35 +956,91 @@ otherday.rew.decoding.summary %>%
 source('distances.R')
 
 test.rewards.df = all.locations.df %>%
-  filter(is_test) %>%
+  filter(is_test, exp_title=='beforetest') %>%
   left_join(mouse.meta.df, by='animal') %>%
   left_join(dplyr::select(trials.meta.df, -location_set), by=c('date', 'animal'))
+
+# Returns test.rewards DF present on 2 dates
+rew.present.both.tests = function(rewards.dates.df) {
+  # loc ordinal for reward present on both days
+  reward.loc_ord = rewards.dates.df %>%
+    count(location_ordinal) %>% filter(n==2) %>% pull(location_ordinal)
+
+  filter(rewards.dates.df, location_ordinal %in% reward.loc_ord ) %>%
+    dplyr::select(location_ordinal, trans_x, trans_y) %>%
+    dplyr::distinct()
+}
+
+# Returns test.rewards of the that not exclude the given rewards DF
+exclude.loc.ordinals = function(animal.rews.df, excluded.rews.df) {
+  rewards.loc_ords = pull(animal.rews.df, location_ordinal)
+  included.reward.loc_ord = setdiff(rewards.loc_ords, pull(excluded.rews.df, location_ordinal))
+  
+  filter(animal.rews.df, location_ordinal %in% included.reward.loc_ord) %>%
+    dplyr::select(location_ordinal, trans_x, trans_y) %>%
+    dplyr::distinct()
+}
 
 # Filters test.traces to epochs at the tested reward location that was not present during training data and vice-verse
 filter.at.present.or.future.rew = function(test.traces, train.traces,
                                            filter.dist.thresh=15/perc2dist) {
-  training.dates = unique(train.traces$date)
-  rewards.trainging.df = filter(test.rewards.df, date %in% training.dates, 
-                                animal == train.traces$animal[1], exp_title=='beforetest') 
-  # loc ordinal for reward present in both training days
-  train.reward.loc_ord = rewards.trainging.df %>%
-    count(location_ordinal) %>% filter(n==2) %>% pull(location_ordinal)
-  test.rewards.loc_ords = filter(test.rewards.df, date == test.traces$date[1], 
-                                 animal == train.traces$animal[1], exp_title=='beforetest') %>%
-    pull(location_ordinal)
-  # loc ordinal for reward present in test but not training
-  test.reward.loc_ord = setdiff(test.rewards.loc_ords, pull(rewards.trainging.df, location_ordinal))
-  tested.locs.df = filter(test.rewards.df, animal==train.traces$animal[1], 
-                          location_ordinal %in% c(test.reward.loc_ord, train.reward.loc_ord)) %>%
-    dplyr::select(location_ordinal, trans_x, trans_y) %>%
-    dplyr::distinct()
+  animal.test.rewards.df = filter(test.rewards.df, animal == test.traces$animal[1]) 
+  training.rewards.df = filter(animal.test.rewards.df, date %in% unique(train.traces$date)) 
   
+  tested.locs.df = bind_rows(rew.present.both.tests(training.rewards.df),
+                             exclude.loc.ordinals(filter(animal.test.rewards.df, date == test.traces$date[1]), 
+                                                  training.rewards.df))
   
   x = test.traces[, dist.rews := calc.min.rew.dist(tested.locs.df, x, y)$rew.dist]
   x[dist.rews <= filter.dist.thresh, ]
 }
+
+# Filters train.traces to epochs at the tested reward location that was not present during training data and vice-verse
+filter.train.present.or.future.rew = function(test.traces, train.traces,
+                                              filter.dist.thresh=15/perc2dist) {
+  animal.test.rewards.df = filter(test.rewards.df, animal == test.traces$animal[1]) 
+  training.rewards.df = filter(animal.test.rewards.df, date %in% unique(train.traces$date)) 
+  
+  tested.locs.df = bind_rows(rew.present.both.tests(training.rewards.df),
+                             exclude.loc.ordinals(animal.test.rewards.df, training.rewards.df))
+  
+  x = train.traces[, dist.rews := calc.min.rew.dist(tested.locs.df, x, y)$rew.dist]
+  x[dist.rews <= filter.dist.thresh, ]
+}
 ```
 
+
+##Decoder evaluated on training data
+```{r include=FALSE}
+beforetest.onedayout.reward.training = eval.decoder.all.other.days.debug(
+  bayes.atreward.decoder.config, 
+  test.days.df,
+  equal.prior = TRUE,
+  prepare.vars.fun = add.close2rew.fun(goal.cell.max.dist),
+  filter.train.traces.fun = function(binned.traces) {
+    binned.traces[pmin(dist_reward0, dist_reward1) <= 15/perc2dist | pmin(dist_reward0, dist_reward1) >= 40 / perc2dist, ]
+  },
+  filter.test.traces.fun = filter.train.present.or.future.rew,
+  min.ncells.for.eval = 10,
+  min.present.times = 3,
+  test.day.indecies=c(1,3))
+
+beforetest.onedayout.reward.training.summary = beforetest.onedayout.reward.training %>%
+  left_join(mouse.meta.df) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date')) %>%
+  group_by(implant, animal, test_date) %>%
+  dplyr::summarise(mean.error=mean(error), sem.error=sem(error), 
+                   mean.rand.error=mean(random_error), sem.rand.error=sem(random_error)) %>%  
+  dplyr::mutate(mean.rand.diff=mean.rand.error-mean.error)
+beforetest.onedayout.reward.training.summary %>% 
+  group_by(implant) %>%
+  dplyr::summarise(mean(mean.error), sem(mean.error), 
+                   mean(mean.rand.diff), sem(mean.rand.diff),
+                   mean(mean.rand.error), sem(mean.rand.error))
+```
+
+
+##Decoder evaluated on test data
 ```{r include=FALSE}
 beforetest.onedayout.reward = eval.decoder.all.other.days.debug(
   bayes.atreward.decoder.config, 
