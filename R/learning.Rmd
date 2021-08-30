@@ -315,7 +315,8 @@ animal.locations = locations.df %>%
   dplyr::select(animal, rowxcol, Well_row, Well_col, trans_x, trans_y, location_set) %>%
   dplyr::distinct()
 
-hab_loc = full_join(hab.files, animal.locations, by=c("animal"))
+hab_loc = full_join(hab.files, animal.locations, by=c("animal")) %>%
+  filter(!is.na(filepath))
 hab_loc$crossings = rep(0, nrow(hab_loc))
 hab_loc$total_dist = rep(0, nrow(hab_loc))
 hab_loc$total_frames = rep(0, nrow(hab_loc))
@@ -510,23 +511,6 @@ ggsave('test_trial_path.pdf', path='/home/prez/tmp/cheeseboard',
        device = cairo_pdf, units='cm', width=3.7, height=3.6)
 ```
 
-```{r}
-# Paired comparisons of crossings counts
-gcross.paired.absolute = test.trial.df.joined %>%
-  dplyr::select(animal, date, location_set, crossings_0_120s, type) %>%
-  spread(type, crossings_0_120s) %>%
-  mutate(cross_diff = test-habituation) %>%
-  ggplot() +
-  #geom_boxplot(aes(x=location_set, y=cross_diff)) +
-  geom_dotplot(aes(x=location_set, y=cross_diff, fill=animal), binaxis='y', dotsize=1) +
-  xlab('Reward location set') +
-  ylab('Increase in #crossings (60s)\nafter learning vs habituation') +
-  ylim(c(0,8)) +
-  gtheme 
-
-gcross.paired.absolute
-```
-
 
 # Change of reward location
 
@@ -540,4 +524,39 @@ ggplot(prev.reward.d)%>% +
   geom_point(aes(x=trial_id, y=ncross_prev_rew, color=animal), size=2)
 ```
 
+
+Velocity not different inside and outside of reward zone
+```{r}
+test.trial.velocities = test.trial.df %>%
+  dplyr::select(date, animal, day_desc, mroi_velocity, moutside_roi_velocity) %>%
+  pivot_longer(cols=c(mroi_velocity, moutside_roi_velocity),
+               names_to='location',
+               values_to='velocity') %>%
+  filter(!is.na(velocity), velocity < Inf) %>%
+  mutate(aday=paste(animal, day_desc, sep='_'))
+
+test.trial.velocities$location = as.factor(test.trial.velocities$location)
+test.trial.velocities$aday = as.factor(test.trial.velocities$aday) %>% as.integer() %>% as.factor()
+
+test.trial.velocities %>%
+  ggplot(aes(x=location, y=velocity*perc2dist)) +
+  geom_violin(draw_quantiles = c(0.5)) +
+  geom_jitter(height=0, width=0.3, shape=1, alpha=0.6) +
+  ylim(c(0, 35)) +
+  ylab('Velocity (cm/s)') +
+  gtheme
+
+lmer.test.print(test.trial.velocities %>%
+                  filter(!is.na(velocity), velocity < Inf),
+                var=velocity,
+                fixed.effects = location,
+                diagnostics.groupvar = 'animal',
+                randef.str = '(1 | aday)')
+
+bf.models = create.bayes.lm.pair(test.trial.velocities,
+                                 formula.full = velocity ~ location + aday,
+                                 formula.null = velocity ~ aday,
+                                 whichRandom = c('aday'))
+bf.models$full / bf.models$null
+```
 

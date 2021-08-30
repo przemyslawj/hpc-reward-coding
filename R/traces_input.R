@@ -14,6 +14,10 @@ rootdirs = c(root_dir07, root_dir08, root_dir01, root_dir10)
 tracking_rootdirs = stringr::str_replace(rootdirs, '-down/down_2', '')
 #tracking_rootdirs = rootdirs
 
+animal_names = c('O-TR', 'R-TR', 'M-BR', 'N-BR', 
+                 'E-BL', 'E-TR', 'F-BL', 'F-BL', 'F-TL',
+                 'G-BR', 'K-BR', 'B-BL', 'D-BR')
+
 caimg_result_dirs = c(
   get.subject.result.dirs(root_dir10, 'O-TR'),
   get.subject.result.dirs(root_dir10, 'R-TR'),

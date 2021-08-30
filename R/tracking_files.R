@@ -1,6 +1,7 @@
 library(dplyr)
 
 source('utils.R')
+source('traces_input.R')
 
 
 get_tracking_files = function(root_dat_dir) {
@@ -55,5 +56,8 @@ get_tracking_files = function(root_dat_dir) {
     }
   }
   tracking_files$date = char2date(tracking_files$date)
+  
+  tracking_files = filter(tracking_files,
+                          animal %in% animal_names)
   return(tracking_files)
 }

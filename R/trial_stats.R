@@ -3,6 +3,7 @@
 library(dplyr)
 library(purrr)
 library(readr)
+library(datatrace)
 
 source('crossings.R')
 source('distances.R')
@@ -38,11 +39,13 @@ get_stats = function(tracking_df, animal_locations.df) {
     mutate(dist_trans = vec_dist(smooth_trans_x, smooth_trans_y),
            velocity = get_velocity(dist_trans, timestamp),
            at_rew0 = is.at.reward(velocity, dist_reward0, timestamp),
-           at_rew1 = is.at.reward(velocity, dist_reward1, timestamp))
+           at_rew1 = is.at.reward(velocity, dist_reward1, timestamp),
+           inside_roi = pmin(dist_reward0, dist_reward1) < rew_zone_radius,
+           cell_id = 0, exp_title='x', trial_id='x', trial=1) # Workaroudn to add running column
   
+  dist_df = add.running.col(as.data.table(dist_df), 3.3, 10)
   
-  
-  mvelocity = mean(dist_df$velocity[which(dist_df$velocity > 1.0)])
+  mvelocity = mean(dist_df$velocity[which(dist_df$is_running)])
   # Add crossings statistics for previous reward locations
   prev_locs.df = filter(animal_locations.df, previous_loc == TRUE, Valence == 'Positive') %>%
       arrange(position_no)
@@ -67,7 +70,8 @@ get_stats = function(tracking_df, animal_locations.df) {
   
   inside_roi = fill.gaps(dist_df$inside_roi, dist_df$timestamp, max.gap.ms=100)
   roi_durs = get.crossing.durations(inside_roi, dist_df$timestamp)
-  roi_velocity = dist_df$velocity[which(inside_roi==1)]
+  roi_velocity = dist_df$velocity[which(inside_roi==1 & dist_df$is_running)]
+  outside_roi_velocity = dist_df$velocity[which(inside_roi==0 & dist_df$is_running)]
   
   frame_30s = behav_cam_frame_rate * 30
   frame_60s = behav_cam_frame_rate * 60
@@ -95,6 +99,7 @@ get_stats = function(tracking_df, animal_locations.df) {
               nroi_crossings=length(roi_durs),
               roi_duration=sum(roi_durs),
               mroi_velocity=mean(roi_velocity),
+              moutside_roi_velocity=mean(outside_roi_velocity),
               rew_dwell_pct=rew_dwell_pct,
               start_x=valid_pos_df$trans_x[1], 
               start_y=valid_pos_df$trans_y[1],
@@ -130,6 +135,7 @@ output_df = data.frame(date=character(),
                        nroi_crossings=numeric(),
                        roi_duration=numeric(),
                        mroi_velocity=numeric(),
+                       m_outside_roi_velocity=numeric(),
                        rew_dwell_pct=numeric())
 
 trials.meta.df = read.trials.meta(rootdirs)
@@ -217,6 +223,7 @@ for (joined_tracking_id in unique(files.df$joined_tracking_id)) {
                        nroi_crossings=res['nroi_crossings'],
                        roi_duration=res['roi_duration'],
                        mroi_velocity=res['mroi_velocity'],
+                       m_outside_roi_velocity=res['moutside_roi_velocity'],
                        rew_dwell_pct=res['rew_dwell_pct'])
   output_df = rbind(output_df, new_row) 
 }

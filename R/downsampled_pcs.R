@@ -84,7 +84,7 @@ timestamps.per.bin = function(fst.trace, snd.trace, down_nbins=10) {
                                                     nbins_x=down_nbins,
                                                     nbins_y=down_nbins,
                                                     trace=trace,
-                                                    minOccupancy=1))
+                                                     minOccupancy=1))
   matching.occupancyMap = pmin(fst.mfr$occupancyMap, snd.mfr$occupancyMap)
 
   fst.timestamps.per.bin = binned.fst.trace[, .(timestamp, bin.xy, bin.x, bin.y)]
@@ -105,7 +105,7 @@ next.down.timestamps = function(shuffle.timestamps) {
 }
 
 nbins = 20
-ndownsample_shuffles = 100
+ndownsample_shuffles = 50
 min.occupancy.sec = 1.0
 timebin.dur.msec = 200
 habit3.days.df = as.data.table(habit3.days.df)
@@ -198,5 +198,5 @@ for (caimg_result_dir in test_caimg_dirs) {
 
 #down.habit.si$date.test = char2date(down.habit.si$date.test)
 print("Saving env variables")
-save.image(file="data/2020-12-31-downsampled_smoothed_deconv_bin200msec_nbins20_occupancy1sec_gaussvar2_dist15_shuffle_10s.RData")
+save.image(file="data/2021-08-20-downsampled_smoothed_deconv_bin200msec_nbins20_occupancy1sec_gaussvar2_dist15_shuffle_10s.RData")
 

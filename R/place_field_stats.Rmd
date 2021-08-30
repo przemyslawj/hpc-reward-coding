@@ -155,8 +155,8 @@ Sparsity not different between vCA1 and dCA1, possibly larger fields in vCA1
 ```{r}
 compared.pcs.df = 
   bind_rows(
-    filter(place.cell.db, exp=='habituation') %>% mutate(exp_title='habituation')
-    #beforetest.cell.db %>% mutate(exp_title = 'test')
+    filter(place.cell.db, exp=='habituation') %>% mutate(exp_title='habituation'),
+    beforetest.cell.db %>% mutate(exp_title = 'test')
   ) %>%
   left_join(trials.meta.df) %>%
   left_join(mouse.meta.df) %>%
@@ -167,8 +167,12 @@ compared.pcs.df$aday = as.factor(compared.pcs.df$aday) %>% as.integer() %>% as.f
 
 plot.pc.stat = function(metric, facet.exp_title=FALSE) {
   metric = enexpr(metric)
+  xvar = quo(implant)
+  if (facet.exp_title) {
+    xvar = quo(exp_title)
+  }
   g = compared.pcs.df %>%
-    ggplot(aes(x=implant, y=!!metric)) +
+    ggplot(aes(x=!!xvar, y=!!metric)) +
     geom_violin(fill=single.colour, color=single.colour)+ 
     geom_violin(fill='transparent', colour='white', draw_quantiles=0.5, size=0.4) +
     geom_jitter(shape=16, width=0.4, height=0, size=0.1, alpha=0.15, color='#333333')+
@@ -177,7 +181,7 @@ plot.pc.stat = function(metric, facet.exp_title=FALSE) {
     theme(axis.title.x = element_blank(),
           legend.position = 'top')
   if (facet.exp_title) {
-    g = g + facet_grid(. ~ exp_title)
+    g = g + facet_grid(. ~ implant)
   }
   g
 }
@@ -189,12 +193,12 @@ summary.compared.pcs.df = compared.pcs.df %>%
 compared.pcs.df = filter(compared.pcs.df, signif.si)
 
 g.place.cell.count = summary.compared.pcs.df %>%
-  ggplot(aes(x=implant, y=pc.pct, colour=implant)) +
+  ggplot(aes(x=exp_title, y=pc.pct, colour=implant)) +
   #geom_point(shape=1) +
   stat_summary(fun.data='mean_cl_boot', geom='crossbar') +
   geom_jitter(shape=1, width=0.2, height=0, size=0.5) +
   scale_color_manual(values=main.two.colours) +
-  #facet_grid(. ~ exp_title) +
+  facet_grid(. ~ implant) +
   gtheme +
   ylab('Place cells (%)') + xlab('') + ylim(c(0,100)) +
   theme(axis.title.x = element_blank(),
@@ -638,13 +642,11 @@ plotted.npeaks.summary = npeaks.summary %>%
   dplyr::summarise(pct.mean = mean(pct.count), pct.sem = sem(pct.count)) 
 
 plotted.npeaks.summary %>%
-  ggplot(aes(x=mid, color=implant, fill=exp)) +
-  #geom_col(data = filter(plotted.npeaks.summary, exp=='habituation'), 
-  #         aes(y=pct.mean, color=exp, x=mid), fill='white', stat='identity', position='identity', width=1, alpha=0.5) +
+  ggplot(aes(x=mid, color=exp, fill=exp)) +
   geom_errorbar(aes(ymin=pct.mean - pct.sem, ymax=pct.mean + pct.sem), width=0.3) +
-  geom_step(aes(x=mid-0.5, y=pct.mean, group=implant, color=implant), size=1) +
-  facet_wrap(exp ~ .) +
-  scale_color_manual(values=main.two.colours) +
+  geom_step(aes(x=mid-0.5, y=pct.mean, group=exp), size=1) +
+  facet_wrap(implant ~ .) +
+  scale_color_manual(values=side.two.coulours) +
   xlab('# fields') + ylab('Place cells (%)') +
   xlim(c(0.5,4.5)) + ylim(c(0,100)) +
   gtheme
@@ -695,21 +697,42 @@ compared.habit.fields.at.test.rews = habit.fields.at.test.rews %>%
   dplyr::rename(date=date.reward,
                 day_desc=day_desc.reward)
 
+plot.densities = function(df, xvar.expr, fill.var, ..., include.means=FALSE) {
+  xvar.expr = enexpr(xvar.expr)
+  fill.var = enquo(fill.var)
+  group.vars = c(fill.var, enquos(...))
+  
+  df = unite(df, 'groups.concat', map_chr(group.vars, as_label), remove = FALSE) 
+  xvar.mean.summary = group_by(df, implant, groups.concat, !!!group.vars) %>%
+    dplyr::summarise(xvar.mean=mean(!!xvar.expr, na.rm=TRUE),
+                     .groups='drop')
+  
+  g = df %>%
+    ggplot(aes(x=!!xvar.expr, group=groups.concat)) +
+    geom_density(aes(fill=!!fill.var), alpha=0.3, adjust=1, color='#333333') +
+    scale_fill_manual(values=c('#999999', '#0098ff')) +
+    scale_color_manual(values=c('#999999', '#0098ff')) +
+    gtheme +
+    ylab('Density')
+  if (include.means) {
+    g = g +
+      geom_vline(data=xvar.mean.summary,
+                 mapping=aes(xintercept=xvar.mean, color=!!fill.var),
+                 linetype='longdash')
+  }
+  g
+}
+
 bind_rows(
   mutate(compared.habit.fields.at.test.rews, group.name='1_habituation'),
   filter(beforetest.peaks.at.current.rew, signif.si) %>% mutate(group.name='2_test')
 ) %>%
-  ggplot(aes(x=min.rew.dist * perc2dist, group=group.name)) +
-  geom_density(aes(fill=group.name), alpha=0.3, adjust=1, color='#333333') +
-  #facet_grid(animal ~ day_desc, scales='free') +
-  facet_grid(. ~ implant) +
+  plot.densities(min.rew.dist * perc2dist, group.name) +
   geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
-  scale_fill_manual(values=c('#999999', '#0098ff')) +
-  #scale_fill_manual(values=side.two.coulours) +
-  coord_flip() +
-  gtheme +
   xlim(c(0,100)) +
-  xlab('Distance (cm)') + ylab('Density')
+  facet_grid(. ~ implant) +
+  coord_flip() +
+  xlab('Distance (cm)')
 figure.ggsave('Figure_2FH_Left.pdf', height=6, width=8)
 ```
 
@@ -772,6 +795,31 @@ merged.summary.df %>%
 
 figure.ggsave('Figure_2FH_Right.pdf', height=6, width=5)
 ```
+
+## Differences in place cells close and further from the reward
+```{r}
+beforetest.peaks.at.current.rew %>%
+  filter(signif.si) %>%
+  mutate(is.goal.cell = npeaks.at.rew > 0) %>%
+  plot.densities(spatial.information - si.shuffle.mean, is.goal.cell, include.means = TRUE)  +
+  facet_grid(implant ~ .) +
+  xlim(c(0.06, 0.6))
+
+beforetest.peaks.at.current.rew %>%
+  filter(signif.si, npeaks > 0, npeaks <= 3) %>%
+  mutate(is.goal.cell = npeaks.at.rew > 0) %>%
+  plot.densities(field.size.50  / nbins / nbins * 100, is.goal.cell, npeaks, include.means = TRUE) + 
+  facet_grid(npeaks ~ implant, scales='free_x') +
+  coord_flip() + xlab('Field size (% of maze)')
+
+beforetest.peaks.at.current.rew %>%
+  filter(signif.si) %>%
+  ggplot(aes(x=min.rew.dist, y=field.size.50)) +
+  geom_point(shape=1, alpha=0.3, color='#333333') +
+  facet_grid(. ~ implant) +
+  gtheme
+```
+
 
 
 # Do cells have propoensity to be close to reward?

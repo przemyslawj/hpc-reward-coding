@@ -311,6 +311,23 @@ down.peaks.shuffle.mean.pcs %>%
   facet_grid(. ~ implant) +
   xlab('') + ylab('% of maze') +
   gtheme
+
+down.peaks.shuffle.mean.pcs %>%
+  ggplot() +
+  geom_density(aes(x=field.size, 
+                   fill=exp_title), 
+               alpha=0.3,
+               adjust=1,
+               color='#333333') +
+  facet_grid(. ~ implant) +
+  stat_summary()
+  geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dotted') +
+  coord_flip() +
+  scale_linetype_manual(values=c("dashed", "solid"))+
+  gtheme +
+  xlim(c(0,100))+
+  scale_fill_manual(values=c('#999999', '#0098ff')) +
+  xlab('Field size (% of maze)') + ylab('Density')
 ```
 
 ```{r}
