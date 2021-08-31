@@ -201,6 +201,7 @@ for (i in 1:nrow(last.day.trials.df)) {
 ```{r}
 all.rew.aligned.traces = rbindlist(rew.aligned.traces.list)
 all.rew.aligned.traces = all.rew.aligned.traces[as.data.table(mouse.meta.df), on='animal']
+all.rew.aligned.traces = all.rew.aligned.traces[animal %in% animal_names,]
 
 mean.rew.traces = all.rew.aligned.traces[,
                    .(mean.trace=mean(zscored_smooth_deconv_trace), 
@@ -216,9 +217,10 @@ all.rew.aligned.traces.comparison = all.rew.aligned.traces[
   !is.na(timestamp_from_end_bin) & !is.na(is.rew.cell) & !is.na(date)]
 ```
 
-<!--
+
 Difference between reward and other cells
 ```{r}
+# average over cells in the trial
 trial.rew.traces = all.rew.aligned.traces[,
                    .(mean.trace=mean(zscored_smooth_deconv_trace),
                      #mean.trace=mean(log(0.1 + smoothed_deconv_trace)),
@@ -251,77 +253,73 @@ rew.traces.norm %>%
   facet_grid(. ~ implant) + xlab('Time to reward (s)') + 
   geom_hline(yintercept = 0, linetype='dashed', color='#333333') +
   ylab('activity z-score diff') +
-  ylab('diff log(activity)') +
   gtheme
 
 ggsave('/home/prez/tmp/cheeseboard/4-approach-traces.pdf', device = cairo_pdf,
        units='cm', width=6.0, height=3.9)
-
-rew.traces.norm %>%
-  ggplot(aes(x=implant, y=trace.diff)) +
-   geom_hline(yintercept = 0,linetype='dashed', color='#333333') +
-  geom_violin(aes(fill=implant, color=implant)) +
-  geom_jitter(width=0.25, height=0.0, size=0.2, shape=1, alpha=0.4, color='#333333') +
-    stat_summary(fun=mean, geom="point", shape=23, size=2, color='white') +
-  ylim(c(-3,3))
-  gtheme
-lmer.test.print(rew.traces.norm,
-                var = trace.diff,
-                fixed.effects = implant,
-                diagnostics.groupvar = animal,
-                randef.str = '(1 + date | animal)')
 ```
 
 ```{r}
-bin.trial.rew.traces = as.data.table(rew.traces.norm)[timestamp_from_end_bin == 0,
+# average over cells in the trial in the timebin
+bin.trial.rew.traces = as.data.table(rew.traces.norm)[timestamp_from_end_bin == 0 | timestamp_from_end_bin == -4,
             .(bin.activity=mean(trace.diff)), 
               #bin.activity=trace.diff[1]),
             by=.(implant, animal, date, trial_id, trial, timestamp_from_end_bin)] 
 
 bin.trial.rew.traces$timestamp_from_end_bin = as.factor(bin.trial.rew.traces$timestamp_from_end_bin)
+bin.trial.rew.traces$is_proximal = as.factor(bin.trial.rew.traces$timestamp_from_end_bin == 0)
 bin.trial.rew.traces$aday = as.factor(
   paste(format(bin.trial.rew.traces$animal), 
         format(bin.trial.rew.traces$date), sep='_')) %>%
   as.integer() %>% as.factor()
 
+
+bin.trial.rew.traces.wide = pivot_wider(
+  bin.trial.rew.traces,
+  id_cols=c(implant, animal, date, trial_id, trial, aday),
+  values_from=bin.activity,
+  names_from=is_proximal,
+  names_prefix='is_proximal_') %>%
+  mutate(trace.change=is_proximal_TRUE - is_proximal_FALSE)
+
 bin.trial.rew.traces %>%
-  ggplot(aes(x=implant, y=bin.activity)) +
+  ggplot(aes(x=is_proximal, y=bin.activity)) +
   geom_hline(yintercept = 0,linetype='dashed', color='#333333') +
   geom_violin(aes(fill=implant, color=implant)) +
   geom_jitter(width=0.25, height=0.0, size=0.2, shape=1, alpha=0.4, color='#333333') +
     stat_summary(fun=mean, geom="point", shape=23, size=2, color='white') +
   scale_fill_manual(values=main.two.colours) +
   scale_color_manual(values=main.two.colours) +
-  #ylim(c(-0.5, 4.0)) +
   facet_grid(. ~ implant) +
-  ylab('difference log(activity)') + xlab('') +
+  ylab('activity z-score diff') + xlab('') +
   gtheme
 ggsave('/home/prez/tmp/cheeseboard/4-approach-traces-stats.pdf', device = cairo_pdf,
        units='cm', width=5.1, height=3.9)
   
 m.rew.activ.diff = lmer.test.print(
   filter(bin.trial.rew.traces) %>% 
-    mutate(val=bin.activity) %>% filter(!is.na(val), val < Inf),
+    mutate(val=log(2.0 + bin.activity)) %>% filter(!is.na(val), val < Inf),
   val,
   diagnostics.groupvar = animal,
-  fixed.effects = implant,
+  fixed.effects = implant * is_proximal,
   randef.str = '(1 | aday)')
+pairwise.post.hoc(m.rew.activ.diff, factor.interaction = 'implant:is_proximal')
 
 models = create.bayes.lm.pair(
-  filter(bin.trial.rew.traces) %>%
-    mutate(val=bin.activity) %>%
+  filter(bin.trial.rew.traces, implant=='vCA1') %>%
+    mutate(val=log(2.0+bin.activity)) %>%
     filter(!is.na(val), val < Inf),
-  formula.full = val ~ 1 + implant + aday,
+  formula.full = val ~ 1 + is_proximal + aday,
   formula.null = val ~ 1 + aday,
   whichRandom = c('aday'),
   iterations = 10000
 )
 models$full / models$null
 calc.pair.95CI(models$full, function(x) exp(x) - 1, show.percent.change = FALSE,
-               pair.vars = c('implant-dCA1', 'implant-vCA1'))
+               pair.vars = c('is_proximal-FALSE', 'is_proximal-TRUE'))
 
 ```
--->
+
 
 ```{r}
 mean.rew.traces %>%
