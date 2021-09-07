@@ -1,0 +1,804 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r setup} 
+library(dplyr)
+library(plyr)
+library(pracma)
+library(purrr)
+library(readr)
+library(tidyr)
+library(tibble)
+library(smoothie)
+library(stringr)
+library(DT)
+library(data.table)
+library(datatrace)
+
+library(ggplot2)
+library(cowplot)
+gtheme = theme_minimal() + theme_cowplot() +
+  theme(text = element_text(size=10), axis.text = element_text(size=8))
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+
+source('place_field_utils.R')
+
+nbins = 20
+```
+
+```{r}
+all.locations.df = map_dfr(rootdirs, read_locations)
+rewards.df =  all.locations.df %>%
+  filter(!is_test) %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
+prev.locations.df = all.locations.df %>%
+  filter(!is_test) %>%
+  add_prev_locations(prev.loc.set.diff=1) %>%
+  add_prev_locations(prev.loc.set.diff=2) %>%
+  add_prev_locations(prev.loc.set.diff=3) %>%
+  filter()
+```
+
+
+
+```{r}
+
+plot.field.comparison = function(animal_name, day, cell_name, plot.dir=NA) {
+  odd.pf = create.partial.df(odd.fields, odd.occupancies, animal_name, day, cell_name, 'Odd')
+  even.pf = create.partial.df(even.fields, even.occupancies, animal_name, day, cell_name, 'Even')
+  early.pf = create.partial.df(early.fields, early.occupancies, animal_name, day, cell_name, 'Early')
+  late.pf = create.partial.df(late.fields, late.occupancies,  animal_name, day, cell_name, 'Late')
+  
+  cell.row = run.trials.pc %>% filter(animal==animal_name, date==day, cell_id==cell_name)
+  
+  text.theme = theme(text = element_text(size=10),
+                     plot.title = element_text(size=10))
+  
+  g.placefield = bind_rows(odd.pf, even.pf, early.pf, late.pf) %>%
+    plot.pf(max.x=nbins, max.y=nbins) +
+    facet_wrap(. ~ group, ncol = 2) +
+    geom_rewards(rewards.df, animal_name, day, nbins) +
+    labs(title=paste0(animal_name,
+                      ', ', day,
+                      ', cell ', cell_name, 
+                      '\nSI = ', format(cell.row$spatial.information, digits=2), ' bits/s',
+                      ifelse(cell.row$signif.si, ' *', ''),
+                      ', ', format(cell.row$spatial.information.perspike, digits=2), ' bits/spike',
+                      '\nMI - bias = ', format(cell.row$mutual.info - cell.row$mutual.info.bias, digits=3),
+                      ifelse(cell.row$signif.mi, '*', ''),
+                      '\nsparsity = ', format(cell.row$sparsity, digits=2)),
+         fill='Deconv\ntrace') +
+    text.theme
+
+  
+  oddeven.cor = field.cor(odd.pf, even.pf, make.cor.plot=TRUE, max.xy=nbins)
+  cor.title = paste0('cor=', format(oddeven.cor$cor, digits=2))
+  g.oddeven.cor = oddeven.cor$g + labs(title=cor.title, fill='') + 
+    geom_rewards(rewards.df, animal_name, day, nbins) + text.theme
+  
+  earlylate.cor = field.cor(early.pf, late.pf, make.cor.plot=TRUE, max.xy=nbins)
+  cor.title = paste0('cor=', format(earlylate.cor$cor, digits=2))
+  g.earlylate.cor = earlylate.cor$g + labs(title=cor.title, fill='') + 
+    geom_rewards(rewards.df, animal_name, day, nbins) + text.theme +
+    theme(legend.position='none')
+  
+  g.cors = plot_grid(g.earlylate.cor, g.oddeven.cor, ncol=2, rel_widths=c(1, 1.7))
+  
+  g = plot_grid(g.placefield, g.cors, ncol=1, rel_heights=c(2,1))
+  if (!is.na(plot.dir)) {
+    if (cell.row$is.pc) {
+      plot.subdir = file.path(plot.dir, 'place_cell')
+    } else if (cell.row$is.pc) {
+      plot.subdir = file.path(plot.dir, 'signif')
+    } else {
+      plot.subdir = file.path(plot.dir, 'other')
+    }
+    dir.create(plot.subdir, recursive=TRUE)
+    fname = paste0('place_field_cell_', cell_name, '.jpg')
+    ggsave(file.path(plot.subdir, fname), 
+           g,
+           width=5.5, height=8, units='cm', dpi=300)
+  }
+  return(g)
+}
+```
+
+
+```{r}
+plot.dir = file.path('/tmp/pf_stability/', animal_name, day)
+plot.field.comparison(animal_name, day, cell_name, plot.dir=plot.dir)
+```
+
+```{r}
+save.field.comparison = function(animal_name, day, cell_name) {
+  plot.dir = file.path('/mnt/DATA/Prez/pf-daystability', animal_name, day)
+  plot.field.comparison(animal_name, day, cell_name, plot.dir)
+  return(1)
+}
+
+run.trials.si %>%
+  select(animal, date, cell_id) %>%
+  distinct() -> tmp.df
+
+for (i in 1:nrow(tmp.df)) {
+   tryCatch({save.field.comparison(tmp.df$animal[i],
+                                   tmp.df$date[i],
+                                   tmp.df$cell_id[i])},
+  error=function(e){cat("ERROR for row i=", num2str(i), ":",conditionMessage(e), "\n")})
+}
+```
+
+
+# Plots on example trace
+Load the traces
+```{r}
+# animal_name = 'F-TL'
+# exp_title='learning'
+# day = '2019-09-04'
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+animal_name = 'N-BL'
+exp_title='learning'
+day = '2020_10_18'
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
+
+
+caimg_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered/')
+data.traces = read.data.trace(caimg_result_dir)
+setorder(data.traces, trial_id, cell_id, timestamp)
+#data.traces$is_running = isRunning(data.traces, 2, 4, 500)
+# running speed min=2cm/s, avg min 4 cm/s                                     
+data.traces = add.running.col(data.traces, 3.3, 10)
+detect.events(data.traces, deconv.threshold=0.2)
+data.traces.run = data.traces[(is_running), ]
+
+```
+
+## Event vectors and place fields of the cell for each trial 
+```{r}
+frame.rate = 1000 / 200
+
+plot.cell.trials = function(cell.df, trace.var='trace', facet.ncols=3) {
+  if (nrow(cell.df) == 0) {
+    return(ggplot(data.frame()))
+  }
+  animal_name = cell.df$animal[1]
+  day = cell.df$date[1]
+  trials = unique(cell.df$trial)
+  
+  trials.spatial = c()
+  merged.pf.df = data.frame()
+  calc.place.field = function(cell.df, min.occupancy.sec=10, nshuffles=0) {
+    pf = cell.spatial.info(cell.df,
+                           nbins, nbins,
+                           trace.var = trace.var,
+                           generate.plots=FALSE,
+                           nshuffles=nshuffles,
+                           min.occupancy.sec=min.occupancy.sec)
+    pf.df = create.pf.df(pf$field, pf$occupancy, 
+                         frame.rate=frame.rate,
+                         min.occupancy.sec=min.occupancy.sec)
+    list(df=pf.df,pf=pf)
+  }
+  
+  for (trial_no in trials) {
+    pf.df = calc.place.field(cell.df[trial == trial_no & exp_title == 'trial', ],
+                                min.occupancy.sec = 0.1)$df
+    pf.df$trial = num2str(trial_no, fmt=0)
+    merged.pf.df = bind_rows(merged.pf.df, pf.df)
+  }
+  
+  aftertest.df = cell.df[exp_title == 'aftertest', ]
+  if (nrow(aftertest.df) > 0) {
+    pf.df = calc.place.field(aftertest.df,
+                             min.occupancy.sec=0.1, 
+                             nshuffles=0)$df
+    pf.df$trial = 'aftertest'
+    merged.pf.df = bind_rows(merged.pf.df, pf.df)
+  }
+  beforetest.df = cell.df[exp_title == 'beforetest', ]
+  if (nrow(beforetest.df) > 0) {
+    pf.df = calc.place.field(beforetest.df,
+                             min.occupancy.sec=0.7, 
+                             nshuffles=0)$df
+    pf.df$trial = 'beforetest'
+    merged.pf.df = bind_rows(merged.pf.df, pf.df)
+  }
+    
+  all.trials.pf = calc.place.field(cell.df[exp_title == 'trial', ],
+                                   min.occupancy.sec=1, 
+                                   nshuffles=1000)
+  all.trials.pf$df$trial = 'all_trials'
+  merged.pf.df = bind_rows(merged.pf.df, all.trials.pf$df) %>%
+    group_by(trial) %>%
+    dplyr::mutate(value.field = value.field - min(value.field, na.rm=TRUE),
+                  value.field = value.field / max(value.field, na.rm=TRUE))
+  
+  
+  cell_info = all.trials.pf$pf$cell_info
+  g = plot.pf(merged.pf.df, max.x=nbins, max.y=nbins) +
+    geom_rewards(prev.locations.df, animal_name, day, nbins) +
+    facet_wrap(. ~  trial, ncol=facet.ncols) +
+    labs(fill=paste(trace.var, 'values'),
+         title=paste0(format(day), ' ', animal_name, ' Cell ', cell_name, 
+                      '\nSI = ', format(cell_info$spatial.information, digits=2),
+                      ifelse(cell_info$signif.si, '*', ''),
+                      ' SI per spike = ', format(cell_info$spatial.information.perspike, digits=2),
+                      '\nMI - bias = ', format(cell_info$mutual.info - cell_info$mutual.info.bias, digits=3),
+                      ifelse(cell_info$signif.mi, '*', '')))
+  
+  
+  print(all.trials.pf$pf$cell_info$spatial.information)
+  print(all.trials.pf$pf$cell_info$mutual.info)
+  print(all.trials.pf$pf$cell_info$mfr)
+  return(g)
+}
+
+cell_name = 144
+cell.df = data.traces.run[cell_id == cell_name & x > 0 & y > 0, ]
+binned.cell.df = bin.time.space(cell.df, 
+                                nbins.x = nbins,
+                                nbins.y = nbins,
+                                get.bin.thresholds.fun=get.quantiles.fun(c(0.95, 1.0)),
+                                binned.var='deconv_trace',
+                                timebin.dur.msec=200)
+#binned.cell.df[,is_running:=as.logical(is_running)]
+
+gen_imgs_dir = '/home/prez/tmp/cheeseboard/'
+plot.cell.trials(binned.cell.df, trace.var='deconv_trace', facet.ncols=5)
+ggsave(file.path(gen_imgs_dir, paste0(cell_name, '_place_fields.svg')),
+       width=23, height=8, units='cm')
+
+binned.cell.df[, trial_name := paste(exp_title, trial, sep='_')]
+plot.event.vectors(binned.cell.df, event.var=nevents, event.thr=1) +
+  geom_path(data=binned.cell.df, mapping=aes(x=x,y=100-y,group=trial_id), alpha=0.6) +
+  geom_rewards(prev.locations.df, animal_name, day, 100) +
+  facet_wrap(. ~ trial_name, ncol = 5) +
+  theme(legend.position = 'none')
+
+
+ggsave(file.path(gen_imgs_dir, paste0(cell_name, '_trial_events.svg')),
+       width=23, height=8, units='cm')
+
+plot.trace.events(binned.cell.df, event.var=nevents, event.thr=1) +
+  geom_rewards(prev.locations.df, animal_name, day, 100) +
+  facet_grid(. ~ exp_title)
+
+ggsave(file.path(gen_imgs_dir, paste0(cell_name, '_exp_events.svg')),
+       width=11, height=4, units='cm')
+```
+## Plots for the same day on selected cells
+Plot traces
+```{r}
+#selected.cell_ids = unique(data.traces$cell_id)[1:6]
+selected.cell_ids = c(83, 144, 153, 165, 
+                      86, 89)
+cells.traces = data.traces[trial==1 & cell_id %in% selected.cell_ids,]
+cells.events = cells.traces[(is.event),]
+
+cells.traces %>%
+  ggplot(aes(x=timestamp/1000)) +
+  geom_line(aes(y=trace)) +
+  geom_point(data=cells.events, mapping=aes(x=timestamp/1000, y=pmax(trace) + 20), color='red', size=0.7) +
+  facet_grid(cell_id ~ ., scales='free') +
+  gtheme +
+  xlab('Time (s)') + ylab('Fluorescence \n(background subtracted)')
+
+ggsave('/tmp/traces_example.svg', width = 16, height = 8, units = 'cm')
+
+```
+
+Plot event vectors
+```{r}
+binned.cells.df = bin.time.space(data.traces[cell_id %in% selected.cell_ids], 
+                                 nbins.x = nbins,
+                                 nbins.y = nbins,
+                                 get.bin.thresholds.fun=get.quantiles.fun(c(0.95, 1.0)),
+                                 binned.var='trace',
+                                 timebin.dur.msec=200)
+
+g.events = plot.event.vectors(binned.cells.df, event.var=nevents, event.thr=1) +
+  geom_path(data=binned.cells.df, mapping=aes(x=x,y=100-y,group=trial_id), alpha=0.2) +
+  geom_rewards(rewards.df, animal_name, day, 100) +
+  facet_wrap(. ~ cell_id, nrow = 1) +
+  labs(colour='Running') +
+  theme(legend.position = 'right')
+g.events
+```
+
+Plot place fields
+```{r}
+all.pf.df = data.frame()
+cell.infos = data.frame()
+#selected.cell_ids = unique(data.traces$cell_id)[1:3]
+frame.rate = 5
+for (cell_name in selected.cell_ids) {
+  binned.cell.df = binned.cells.df[is_running & cell_id == cell_name & exp_title == 'beforetest', ]
+  if (nrow(binned.cell.df) > 0) {
+    pf = cell.spatial.info(binned.cell.df,
+                           nbins, nbins,
+                           trace.var = 'deconv_trace',
+                           generate.plots=FALSE,
+                           min.occupancy.sec = 0.5,
+                           gaussian.var=2,
+                           nshuffles=1000)
+    pf.df = create.pf.df(pf$field, pf$occupancy, 
+                         frame.rate=frame.rate)
+    pf.df$cell_id = cell_name
+    all.pf.df = bind_rows(all.pf.df, pf.df)
+    cell.infos = bind_rows(cell.infos, pf$cell_info)
+  }
+}
+
+g.pf = plot.pf(all.pf.df, max.x=nbins, max.y=nbins) +
+  geom_rewards(rewards.df, animal_name, day, nbins) +
+  geom_text(data=cell.infos, 
+            mapping=aes(x=8, y=nbins, 
+                        label=paste0('SI=', 
+                                     format(spatial.information, digits=2),
+                                     ifelse(signif.si, '*', '') ))) +
+    facet_wrap(. ~  cell_id, nrow=1) +
+    labs(fill='')
+
+g.pf
+```
+
+```{r}
+g.pf_example = plot_grid(g.events, g.pf, nrow = 2, rel_widths = c(1, 1,1))
+ggsave('/tmp/pf_example.svg', plot = g.pf_example, width = 16, height = 6, units = 'cm')
+```
+
+
+# Changes in PF over days
+```{r}
+trials.meta.df = data.table(trials.meta.df)
+create.animal.days.df = function(animal_name, cell_name, fields.list=run.fields) {
+  selected.days = names(fields.list[[animal_name]])
+  day_descs = map_chr(selected.days, ~ trials.meta.df[date==.x & animal == animal_name, day_desc][1])
+  data.frame(animal=animal_name,
+             cell_id=format(cell_name),
+             date=selected.days,
+             day_desc = day_descs,
+             stringsAsFactors = FALSE)  
+}
+
+
+place.cell.db = data.table(place.cell.db)
+pc.test.df = data.table(pc.test.df)
+
+create.all.day.pf = function(selected.cells.df, 
+                             fields.list=run.fields, 
+                             occupancies.list=run.occupancies,
+                             smooth.field=FALSE) {
+  # Creates DF for place field of a cell specified in the row
+  single.cell.pf = function(row, fields.list, occupancies.list) {
+    animal_name = as.character(row$animal)
+    cell_name = format(row$cell_id)
+    day = format(row$date)
+    
+    field = fields.list[[animal_name]][[day]][[cell_name]]
+    if (is.null(field)) {
+      #print(paste('Field not found for', animal_name, day, cell_name))
+      return(data.frame())
+    }
+    df = create.pf.df(field,
+                      occupancies.list[[animal_name]][[day]][[cell_name]], 
+                      smooth=smooth.field)
+  
+    df$animal = animal_name
+    df$cell_id = cell_name
+    return(df)
+  }
+
+  pf = selected.cells.df %>%
+    adply(.margins=1, .fun=single.cell.pf, fields.list, occupancies.list)
+
+  return(pf)
+}
+  
+rowwise.cell.desc = function(row, info.db=place.cell.db) {
+  animal_name = as.character(row$animal)
+  cell_name = format(row$cell_id)
+  day = format(row$date)
+  info.db.row = info.db[animal==animal_name & cell_id==cell_name & date==day,]
+  row$desc = ''
+  if (nrow(info.db.row) > 0) {
+    row$desc = ifelse(info.db.row$signif.si, 'PC ', '')
+  }
+  row
+}
+
+plot.all.day.fields = function(animal_name, cell_id) {
+  selected.cells.df = create.animal.days.df(animal_name, cell_id)
+  
+  pf = create.all.day.pf(selected.cells.df) %>%
+    day.normalize.fields()
+  
+  cell.desc.df = selected.cells.df %>%
+    adply(.margins=1, .fun=rowwise.cell.desc)
+  
+  plot.pf(pf, max.x=nbins, max.y=nbins) +
+    facet_wrap(. ~ day_desc, ncol=3) +
+    geom_text(data=cell.desc.df, mapping=aes(x=1, y=nbins - 2, label=desc), size=3, hjust=0) +
+    geom_rewards(rewards.df, animal_name, nbins=nbins) 
+}
+
+plot.all.day.fields('M-BR', 1)
+```
+Multicell plot of all day activity for selected cells
+```{r}
+rewards.df = as.data.table(rewards.df)
+animal_name = 'N-BL'
+
+#g.etr = map_dfr(c(89, 90, 99, 122, 139), ~ create.animal.days.df(animal_name, .x)) %>%
+g.etr = map_dfr(c(137, 1, 54, 295, 363, 6), ~ create.animal.days.df(animal_name, .x)) %>%
+  create.all.day.pf() %>%
+  #filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning3 day#3') %>% 
+  filter(day_desc != 'learning3 day#3') %>%
+  day.normalize.fields() %>% 
+  plot.pf(max.x=nbins, max.y=nbins) +
+    facet_grid(cell_id ~ day_desc) +
+    geom_rewards(rewards.df[day_desc != 'learning3 day#3',], animal_name, nbins=nbins) +
+  theme(legend.position = 'top')
+  
+g.etr
+ggsave('/tmp/pf_gebl.svg', plot = g.etr, width = 25, height = 12, units = 'cm')
+```
+
+
+Multicell plot for all cells, all days per cell / experiment
+```{r}
+rewards.df = as.data.table(rewards.df)
+place.cell.db = data.table(place.cell.db)
+pc.test.df = data.table(pc.test.df)
+beforetest.cell.db = data.table(beforetest.cell.db)
+trials.meta.df = data.table(trials.meta.df)
+plot.rootdir = "/mnt/DATA/Prez/pf-animal-alldays/"
+#plotted.trial.days = c('habituation day#3')
+plotted.trial.days = c()
+
+create.multifields.loc.df = function(...) {
+  input.row = tibble(...)
+  field = beforetest.fields[[input.row$animal]][[input.row$date]][[format(input.row$cell_id)]]
+  peaks.rowcol = fieldPeaks(field, min.peakheight=0.5, sigma=0.0)
+  df = as.data.frame(peaks.rowcol)
+  df %>% 
+    dplyr::mutate(animal=input.row$animal,
+                  date=input.row$date,
+                  day_desc=input.row$day_desc,
+                  cell_id=input.row$cell_id)
+}
+
+for (animal_name in names(run.fields)) {
+  plot.dir = file.path(plot.rootdir, animal_name)
+  if (!file.exists(plot.dir)) {
+    dir.create(plot.dir, recursive=TRUE)
+  }
+    
+  chunk_size = 25
+  if (length(plotted.trial.days) == 0) {
+    plotted.trial.days = unique(rewards.df$day_desc)
+  }
+  cell_ids = union(
+    place.cell.db[animal==animal_name & day_desc %in% plotted.trial.days, cell_id] %>% unique,
+    pc.test.df[animal==animal_name, cell_id] %>% unique) %>% 
+    sort
+  cell_chunks = split(sort(cell_ids), ceiling(seq_along(cell_ids)/chunk_size))
+  
+  merged.rewards.df = bind_rows(filter(rewards.df, animal == animal_name, day_desc %in% plotted.trial.days), 
+                                filter(test.rewards.df, animal == animal_name, exp_title == 'beforetest') %>% 
+                                  mutate(day_desc = paste0(day_desc, 't')))
+  merged.rewards.df$current_loc = TRUE
+  for (chunk_i in seq_along(cell_chunks)) {
+    cell_chunk = cell_chunks[[chunk_i]]
+    selected.cells.days.df = map_dfr(cell_chunk, ~ create.animal.days.df(animal_name, .x)) %>%
+      filter(day_desc %in% plotted.trial.days)
+      
+    trials.pf = create.all.day.pf(selected.cells.days.df)
+    
+    beforetest.pf = map_dfr(cell_chunk, ~ 
+                            create.all.day.pf(create.animal.days.df(animal_name, .x),
+                                              fields.list=beforetest.fields,
+                                              occupancies.list=beforetest.occupancies)) %>%
+      dplyr::mutate(trial_day_desc = day_desc,
+                    day_desc = paste0(day_desc, 't'))
+
+    beforetest.days.pf = dplyr::select(beforetest.pf, animal, cell_id, date, day_desc, trial_day_desc) %>%
+      dplyr::distinct()
+    
+    day.peaks.df = pmap_dfr(beforetest.days.pf, create.multifields.loc.df)
+      
+    cell.desc.df = bind_rows(
+      adply(selected.cells.days.df, .margins=1, .fun=rowwise.cell.desc, place.cell.db),
+      adply(beforetest.days.pf, .margins=1, .fun=rowwise.cell.desc, beforetest.cell.db))
+    
+    merged.pf.data = bind_rows(trials.pf, beforetest.pf) %>%
+      day.normalize.fields()
+      
+    g.chunk = ggplot() +
+      geom_rect(data=beforetest.days.pf, xmin=0, xmax=100, ymin=0, ymax=100, fill='#cccccc') +
+      geom_pf(merged.pf.data, max.x=nbins, max.y=nbins) + 
+      facet_grid(cell_id ~ day_desc) +
+      geom_text(data=cell.desc.df, mapping=aes(x=1, y=nbins - 2, label=desc), size=3, hjust=0) +
+      geom_rewards(merged.rewards.df, animal_name, nbins=nbins) +
+      theme(legend.position = 'top')
+    
+    if (nrow(day.peaks.df) > 0) {
+      g.chunk = g.chunk +     
+        geom_point(data=day.peaks.df, mapping=aes(x=pmax(0,row - 0.5), y=pmax(0, nbins-col) + 0.2), 
+                 color='black', size=2, alpha=0.5) 
+    }
+    
+    filename = paste0('cells_', as.integer(min(cell_chunk)), '-', as.integer(max(cell_chunk)), '.png')
+    ggsave(file.path(plot.dir, filename), plot=g.chunk, 
+           width = 45, height = 60, units = 'cm')
+           #width = 13, height = 60, units = 'cm')
+  }
+}
+```
+
+Plot selected multi fields during test trials
+```{r}
+#animal_name = 'K-BR'
+#selected.cells = c(61, 108, 39, 25, 120, 114) # 'K-BR'
+#selected.cells = c(108, 122, 36, 59, 62) # 'K-BR'
+animal_name = 'D-BR'
+# selected.cells = c(196, 198, 70, 194, 199, 266, 267, 268) # 'D-BR'
+# animal_name = 'B-BL'
+# selected.cells = c(86,93,94,108) # 'B-BL'
+animal_name = 'G-BR'
+#selected.cells = c(79, 213, 12, 62, 92) # 'G-BR'
+selected.cells = c(51,84,92,99,101) # 'G-BR'
+# animal_name = 'F-TL'
+# selected.cells = c(419,142,335,428,6,97, 98) # 'F-TL'
+# animal_name = 'N-BR'
+# selected.cells = c(236,24,69,89,97) # 'N-BR'
+# animal_name = 'E-BL'
+# selected.cells = c(329,169,79,78,82,98,131) # 'E-BL'
+# animal_name = 'F-BL'
+# selected.cells = c(105) # 'F-BL'
+# animal_name = 'N-BL'
+# selected.cells = c(1, 197, 137, 357, 363) # 'N-BL'
+g.gbr = map_dfr(selected.cells,
+                #c(36, 59, 62, 72, 122), 
+                #c(122, 72, 39, 111, 102),
+                #c(70, 170),
+                ~ create.animal.days.df(animal_name, .x, beforetest.fields)) %>%
+  create.all.day.pf(fields.list=beforetest.fields,
+                    occupancies.list=beforetest.occupancies) %>%
+  filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning4 day#3') %>%
+  filter(day_desc != 'learning4 day#3') %>%
+  day.normalize.fields() %>% 
+  plot.pf(max.x=nbins, max.y=nbins) +
+    facet_grid(cell_id ~ day_desc) +
+    geom_maze_contour(diameter = nbins) +
+    geom_rewards(beforetest.rewards.df %>% filter(day_desc != 'learning4 day#3'), 
+                 animal_name, nbins=nbins, 
+                 rew.colours = list('prev_rew'='white', 'current_rew'='white')) +
+  theme(legend.position = 'bottom')
+  
+g.gbr
+ggsave('/tmp/pf_k-br.pdf', plot = g.gbr, 
+       width = 7, height = 11, 
+       units = 'cm', dpi = 300, device = cairo_pdf)
+```
+
+Choose habit cells
+```{r}
+animal_name = 'F-TL'
+sampled.cells.df = filter(place.cell.db, day_desc == 'habituation day#3', animal == animal_name) %>%
+  filter(signif.si) %>%
+  arrange(field.size.50) %>%
+  sample_n(5)
+sampled.cells.df
+sampled.cells = sampled.cells.df$cell_id
+```
+
+
+Plot selected multi fields during habituation
+```{r}
+g.gbr = map_dfr(selected.cells, 
+                ~ create.animal.days.df(animal_name, .x, run.fields)) %>%
+  filter(day_desc == 'habituation day#3') %>%
+  #filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning3 day#3') %>%
+  create.all.day.pf(fields.list=run.fields,
+                    occupancies.list=run.occupancies) %>%
+  day.normalize.fields() %>% 
+  plot.pf(max.x=nbins, max.y=nbins) +
+    facet_grid(cell_id ~ day_desc) +
+    #geom_rewards(beforetest.rewards.df, animal_name, nbins=nbins, 
+    #             rew.colours = list('prev_rew'='white', 'current_rew'='white')) +
+  theme(legend.position = 'none')
+  
+g.gbr
+ggsave(paste0('/tmp/pf_habit_.', animal_name, '.pdf'), 
+       plot = g.gbr, width = 3, height = 9, units = 'cm', dpi = 300, device = cairo_pdf)
+```
+
+
+Save place fields for all days
+```{r}
+animal.cells.df = goal.cell.db %>%
+  select(animal, cell_id) %>% 
+  dplyr::distinct()
+
+plot.rootdir = "/mnt/DATA/Prez/pf-shuffled-changed-18-05-2020/"
+for (i in 1:nrow(animal.cells.df)) {
+  row = animal.cells.df[i, ]
+  animal_name = as.character(row$animal)
+  cell_name = format(row$cell_id)
+  g = plot.all.day.fields(animal_name, cell_name) +
+    labs(title = paste(animal_name, cell_name))
+  plot.dir = file.path(plot.rootdir, animal_name)
+  if (!file.exists(plot.dir)) {
+    dir.create(plot.dir, recursive=TRUE)
+  }
+  ggsave(file.path(plot.dir, paste0(row$cell_id, '.jpg')),
+         g, width=10, height=12, units='cm')
+}
+```
+
+## Plot event vectors
+```{r}
+animal_name = 'F-TL'
+exp_title = 'trial'
+
+animal.caimg_dirs = Filter(
+  function(caimg_dir) {
+    str_detect(caimg_dir, animal_name) & str_detect(caimg_dir, 'habituation') & str_detect(caimg_dir, '2019-08-29')
+  },
+  caimg_result_dirs)
+
+paths.df.list = list()
+binned.events.list = list()
+for (caimg_dir in animal.caimg_dirs) {
+  data.traces = read.data.trace(caimg_dir, filter_exp_title=exp_title)
+  if (nrow(data.traces) > 0) {
+    setorder(data.traces, trial_id, cell_id, timestamp)
+    detect.events(data.traces, deconv.threshold=0.3, minpeakdistance=10)
+    data.traces = add.running.col(data.traces, 3.3, 10)
+    data.traces$date = char2date(data.traces$date[1])
+    binned.traces = bin.time.space(data.traces, 
+                                   nbins.x = nbins,
+                                   nbins.y = nbins,
+                                   get.bin.thresholds.fun=get.quantiles.fun(c(0.2, 0.95, 1.0)),
+                                   binned.var='deconv_trace',
+                                   timebin.dur.msec=200)
+    binned.events.list[[caimg_dir]] = binned.traces[nevents >= 0.2, ]
+    
+    cell_name = binned.traces$cell_id[1]
+    paths.df.list[[caimg_dir]] = binned.traces[cell_id==cell_name, ]
+  }
+}
+binned.events = rbindlist(binned.events.list)
+paths.df = rbindlist(paths.df.list)
+trials.meta.df$date = as.IDate(trials.meta.df$date)  # This is a workaround for non-matching types
+#binned.events$date = char2date(binned.events$date)
+#paths.df$date = char2date(paths.df$date)
+binned.events = left_join(binned.events, trials.meta.df, by=c('animal', 'date'))
+paths.df = left_join(paths.df, trials.meta.df)
+binned.events = data.table(binned.events)
+paths.df = data.table(paths.df)
+```
+
+```{r}
+plot.dir = file.path('/mnt/DATA/Prez/cheeseboard-events', animal_name, exp_title)
+if (!file.exists(plot.dir)) {
+  dir.create(plot.dir, recursive=TRUE)
+}
+for (cell_name in unique(binned.events$cell_id)) {
+  cell.events.df = binned.events[cell_id==cell_name, ]
+  g = plot.event.vectors(cell.events.df) +
+    geom_path(data=paths.df, mapping=aes(x=x, y=100-y, group=trial_id), alpha=0.2) +
+    geom_rewards(rewards.df, animal_name, nbins=100) +
+    facet_wrap(day_desc ~ .)
+  ggsave(file.path(plot.dir, paste0(cell_name, '.jpg')),
+       g, width=16, height=13, units='cm')
+}
+```
+Save only event maps for selected cells
+```{r}
+event.thr=0.5
+day.events.df = binned.events[day_desc == 'habituation day#3' & cell_id %in% sampled.cells & is_running & nevents >= event.thr]
+all.paths.df = map_dfr(sampled.cells, ~ mutate(paths.df[day_desc == 'habituation day#3'], cell_id=.x))
+g = ggplot(day.events.df) +
+  geom_point(aes(x=x, y=100-y), color='red', size=0.5) +
+  xlim(c(0, 100)) + ylim(c(0, 100)) +
+  geom_path(data=all.paths.df, mapping=aes(x=x, y=100-y, group=trial_id), alpha=0.2) +
+  facet_grid(cell_id ~ .) +
+  theme_void()
+g
+ggsave(paste0('/tmp/pf_habit_', animal_name, '_events.pdf'), 
+       width = 3, height = 12, units = 'cm', dpi = 300, device = cairo_pdf)
+```
+
+
+# Population activity across space
+```{r}
+animal_name = 'G-BR'
+exp_title='learning'
+day = '2020-01-31'
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01'
+#cell_name = 47
+
+caimg_result_dir = file.path(root_dir, exp_title, day, 'caiman', animal_name, 'filtered/')
+data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
+setorder(data.traces, trial_id, cell_id, timestamp)
+detect.events(data.traces, deconv.threshold=0.2)
+
+```
+
+```{r}
+binned.traces = bin.time.space(data.traces, 
+                               nbins.x = nbins,
+                               nbins.y = nbins,
+                               get.bin.thresholds.fun=get.quantiles.fun(c(0.2, 0.95, 1.0)),
+                               binned.var='deconv_trace',
+                               timebin.dur.msec=200)
+
+all.pf.df = data.frame()
+
+for (trial_no in unique(binned.traces$trial)) {
+  pf = cell.spatial.info(binned.traces[trial == trial_no, ],
+                         nbins, nbins,
+                         trace.var = 'deconv_trace',
+                         generate.plots=FALSE,
+                         nshuffles=0,
+                         min.occupancy = 1)
+  pf.df = create.pf.df(pf$field, pf$occupancy, 
+                       frame.rate=frame.rate,
+                       min.occupancy.sec = 0.1)
+  pf.df$trial = trial_no
+  all.pf.df = bind_rows(all.pf.df, pf.df)
+}
+plot.pf(all.pf.df, max.x=nbins, max.y=nbins) +
+  geom_rewards(rewards.df, animal_name, day, nbins) +
+  facet_wrap(. ~ trial)
+```
+
+# Population activity across days for all mice
+```{r}
+all.pf.df = data.frame()
+for (caimg_result_dir in caimg_result_dirs) {
+  data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
+  setorder(data.traces, trial_id, cell_id, timestamp)
+  
+  data.traces.immobile = data.traces[velocity <= 2.5, ]
+  #detect.events(data.traces, deconv.threshold=0.2)
+  data.traces.immobile$is.event = 0
+  binned.traces = bin.time.space(data.traces.immobile, 
+                                 nbins.x = nbins,
+                                 nbins.y = nbins,
+                                 get.bin.thresholds.fun=get.quantiles.fun(c(0.95, 1.0)),
+                                 timebin.dur.msec=200)
+  
+  pf = cell.spatial.info(binned.traces,
+                         nbins, nbins,
+                         trace.var = 'deconv_trace',
+                         generate.plots=FALSE,
+                         nshuffles=0,
+                         min.occupancy = 1)
+  pf.df = create.pf.df(pf$field, pf$occupancy, 
+                       frame.rate=5,
+                       min.occupancy.sec = 1)
+  pf.df$animal = data.traces$animal[1]
+  pf.df$date = data.traces$date[1]
+  all.pf.df = bind_rows(all.pf.df, pf.df)
+}
+```
+
+```{r}
+g = plot.pf(all.pf.df, max.x=nbins, max.y=nbins) +
+  geom_rewards(rewards.df, nbins=nbins) +
+  facet_wrap(date ~ animal) +
+  scale_fill_gradientn(limits=c(0, 0.3), colours=jet.colours(7))
+
+ggsave('/tmp/all_fields_immobile.png', g, width=20, height=20, units='cm')
+g
+```
+

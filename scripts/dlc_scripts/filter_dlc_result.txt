@@ -1,0 +1,5 @@
++ *.pickle
++ *.h5
++ **/locations.csv
++ **/locations-*.csv
+- *

@@ -1,0 +1,436 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r library setup}
+library(dplyr)
+library(plyr)
+library(pracma)
+library(readr)
+library(tidyr)
+library(tibble)
+library(stringr)
+library(DT)
+library(data.table)
+library(permute)
+#library(doParallel)
+#library(foreach)
+library(tictoc)
+
+library(ggplot2)
+library(cowplot)
+gtheme = theme_minimal() + theme_cowplot() +
+  theme(text = element_text(size=18), axis.text = element_text(size=15))
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+
+source('locations.R')
+```
+
+```{r data dirs setup}
+nbins = 20
+
+root_dir07 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
+root_dir08 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+root_dir01 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
+rootdirs = c(root_dir07, root_dir08, root_dir01)
+
+caimg_result_dirs = c(
+  get.subject.result.dirs(root_dir08, 'E-BL'),
+  get.subject.result.dirs(root_dir08, 'E-TR'),
+  get.subject.result.dirs(root_dir08, 'F-BL'),
+  get.subject.result.dirs(root_dir08, 'F-TL'),
+  get.subject.result.dirs(root_dir07, 'A-BL'),
+  get.subject.result.dirs(root_dir07, 'B-BL'),
+  get.subject.result.dirs(root_dir07, 'C-1R'),
+  get.subject.result.dirs(root_dir07, 'D-BR'),
+  get.subject.result.dirs(root_dir01, 'G-BR'),
+  get.subject.result.dirs(root_dir01, 'K-BR'),
+  get.subject.result.dirs(root_dir01, 'L-TL')
+)
+
+caimg_result_dirs = Filter(
+  function(ca_img_dir) {file.exists(paste(ca_img_dir, 'traces_and_positions.csv', sep='/'))},
+  caimg_result_dirs)
+
+learning_caimg_result_dirs = Filter(function(x) str_detect(x, 'learning'), caimg_result_dirs)
+```
+
+Read rewards locations
+```{r}
+all.locations.df = map_dfr(rootdirs, read_locations)
+rewards.df =  all.locations.df %>%
+  filter(!is_test) %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
+```
+
+```{r}
+normalize.stim.vec = function(stim.vec) {
+  # The stim needs to start from 1
+  min.stim = min(stim.vec)
+  stim.vec = stim.vec - min.stim + 1
+  stim.vec
+}
+
+calc.stim.mutual.info = function(binned.traces, stim.var, nshuffles=1000, fr.hz=20, nstim=0) {
+  binned.traces[[stim.var]] = normalize.stim.vec(binned.traces[[stim.var]])
+  if (nstim == 0) {
+    nstim = max(binned.traces[[stim.var]])
+  }
+  nresponseBins = max(binned.traces$response_bin)
+  
+  cells = unique(binned.traces$cell_id) %>% sort
+  res = data.frame()
+  for (cell_name in cells) {
+    cell.df = binned.traces[cell_id == cell_name,]
+    trace.vals = cell.df$response_bin %>% as.integer()
+    
+    mi_stim = mutual_info_with_shuffles(
+      trace.vals,
+      nresponseBins=nresponseBins,
+      stimulus=cell.df[[stim.var]], 
+      nstim=nstim,
+      get.trial.ends(cell.df$timestamp),
+      nshuffles=nshuffles,
+      shuffleChunkLength=2*fr.hz)
+    mi_stim.signif.thresh = quantile(mi_stim$shuffle.mi, 0.95, na.rm=TRUE)[[1]]
+    stim.mfr_model = create_mfr_model(cell.df[[stim.var]], nstim, cell.df$nevents, minOccupancy=10)
+    cell_info = list(date=binned.traces$date[[1]],
+                     animal=binned.traces$animal[[1]],
+                     cell_id=cell_name,
+                     mi = mi_stim[['mutual.info']],
+                     bias = mi_stim[['mutual.info.bias']],
+                     signif.thresh = mi_stim.signif.thresh,
+                     signif = mi_stim[['mutual.info']] > mi_stim.signif.thresh,
+                     mfr = mean(cell.df$nevents) * fr.hz)
+    
+    cell_mfr_info = stim.mfr_model$fr * fr.hz
+    names(cell_mfr_info) = map_chr(1:nstim, ~ paste0('fr', .x))
+    
+    res = bind_rows(res, c(cell_info, as.list(cell_mfr_info)))
+  }
+  
+  return(res)
+}
+
+```
+
+
+```{r}
+calc.reward.info = function(binned.traces) {
+  binned.traces[,  atAnyReward := ifelse(atReward0 + atReward1 > 0, 1, 0)]
+  binned.traces[, atReward0 := ceil(atReward0)]
+  binned.traces[, atReward1 := ceil(atReward1)]
+  binned.traces[, atReward := atReward0 + atReward1 * 2 + 1]
+  
+  atAnyRew.res = calc.stim.mutual.info(binned.traces, 'atAnyReward')
+  atRew.res = calc.stim.mutual.info(binned.traces, 'atReward')
+  
+  left_join(atAnyRew.res, atRew.res, by=c('date', 'animal', 'cell_id'), 
+            suffix=c('.anyrew', '.rew'))
+}
+```
+
+```{r}
+rewards.df = all.locations.df = map_dfr(rootdirs, read_locations) %>%
+  filter(!is_test) 
+```
+
+
+```{r}
+filter.running = TRUE
+trial.reward.info = data.frame()
+
+prev.locations.df = all.locations.df %>%
+  filter(!is_test) %>%
+  add_prev_locations(prev.loc.set.diff=1)
+prev.locations.df = as.data.table(prev.locations.df)
+rewards.df = as.data.table(rewards.df)
+
+for (caimg_result_dir in learning_caimg_result_dirs) {
+  dir_parts = str_split(caimg_result_dir, '/')
+  animal_name = dir_parts[[1]][length(dir_parts[[1]]) - 2]
+  date_str = dir_parts[[1]][length(dir_parts[[1]]) - 4]
+  day.rewards.df = rewards.df[animal==animal_name & date == date_str, ]
+  if (nrow(day.rewards.df) > 0) {
+    data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
+    setorder(data.traces, trial_id, cell_id, timestamp)
+    detect.events(data.traces, deconv.threshold=0.3)
+    
+   if (filter.running) {
+      running.index = isRunning(data.traces, 2, 4, 500) 
+      data.traces.filtered = data.traces[which(running.index), ]
+    } else {
+      data.traces.filtered = data.traces[x >= 0 & y >= 0, ]
+    }
+  
+    timebinned.traces = timebin.traces(data.traces.filtered, timebin.dur.msec = 200)
+    bin.quantile.fractions = c(0.9, 1.0)
+    binned.traces = bin.responses(timebinned.traces, 
+                                  get.bin.thresholds.fun = get.quantiles.fun(bin.quantile.fractions),
+                                  binned.var='trace')
+    
+    tic('Calculation of mutual information')
+    reward.info.df = calc.reward.info(binned.traces)
+    
+    if (nrow(day.rewards.df) > 0) {
+      rew.dist.df = calc.min.rew.dist(day.rewards.df, date_str, animal_name, binned.traces$x, binned.traces$y)
+      
+      binned.traces$close2rew = rew.dist.df$rew.dist <= max.rew.dist.thr
+      binned.traces$close.rew = ifelse(binned.traces$close2rew, rew.dist.df$location.ordinal, 0)
+      binned.traces$close.rew = factor(binned.traces$close.rew, levels=sort(unique(binned.traces$close.rew))) %>% as.numeric()
+      
+      close2rew.info.df = calc.stim.mutual.info(binned.traces, 'close2rew')
+      closerew.info.df = calc.stim.mutual.info(binned.traces, 'close.rew', nstim=3)
+      
+      rew.info.df = left_join(close2rew.info.df, closerew.info.df,
+                              by=c('date', 'animal', 'cell_id'),
+                              suffix=c('.close2rew', '.close.rew'))
+      #names(close2rew.info.df)[4:length(close2rew.info.df)] = 
+      #  paste0(names(close2rew.info.df)[4:length(close2rew.info.df)], '.close2rew')
+      
+      reward.info.df = left_join(reward.info.df, rew.info.df, 
+                                 by=c('date', 'animal', 'cell_id'))
+      trial.reward.info = bind_rows(trial.reward.info, reward.info.df)
+    }
+    
+    toc()
+  }
+}
+```
+Add meta info about the trials
+```{r}
+mouse.meta.df = read.mouse.meta(rootdirs)
+trials.meta.df = read.trials.meta(rootdirs)
+
+trial.reward.info = trial.reward.info %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  left_join(trials.meta.df, by=c('date', 'animal'))
+```
+
+Distribution of reward mutual information
+```{r}
+trial.reward.info %>%
+  ggplot() +
+  geom_violin(aes(x=day_desc,y=mi.close.rew-bias.close.rew, color=signif.close.rew)) +
+  #geom_violin(aes(x=date,y=mi.onerew-mi.onerew.bias, color=mi.onerew.signif)) +
+  gtheme +
+  facet_grid(implant ~ .) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+Signif active at one rew when running
+```{r}
+closerew.signif.info.df = trial.reward.info %>%
+  dplyr::mutate(frmax.close.rew=pmax(fr2.close.rew, fr3.x, na.rm=TRUE),
+                signif.active = signif.close.rew & (frmax.close.rew > fr1.close.rew))
+      
+signif.summary.df = closerew.signif.info.df %>%
+  group_by(exp, implant, animal, date, day_desc) %>%
+  dplyr::summarise(nsignif=sum(signif.close.rew),
+                   nsignif.active=sum(signif.active),
+                   n=n(),
+                   signif.pct = nsignif/n*100,
+                   signif.active.pct = nsignif.active/n*100) 
+
+closerew.signif.info.df %>%
+  filter(day_desc %in% c('learning1 day#5', 'learning2 day#2')) %>%
+  filter(signif.active | day_desc != 'learning1 day#5') %>%
+  reshape2::dcast(implant + animal + cell_id ~ day_desc, 
+                  value.var='signif.active') %>% 
+  filter(!is.na(`learning1 day#5`)) %>% 
+  dplyr::group_by(implant) %>%
+  dplyr::summarise(both.signif.active=mean(`learning2 day#2`, na.rm=TRUE),
+                   nboth.present=sum(!is.na(`learning2 day#2`)),
+                   both.present=nboth.present / n()) %>%
+  #dplyr::group_by(implant) %>%
+  #dplyr::summarise(median(both.signif.active, na.rm=TRUE),
+  #                 sem(both.signif.active),
+  #                 median(nboth.present, na.rm=TRUE),
+  #                 max(nboth.present)) %>%
+  dplyr::mutate_if(is.numeric, round, 2)
+  
+
+learning15.summary.df = subset(signif.summary.df, day_desc == 'learning1 day#5')
+wilcox.test(signif.active.pct ~ implant, learning15.summary.df)
+tapply(learning15.summary.df$signif.active.pct, learning15.summary.df$implant, summary)
+
+signif.summary.df %>%
+  ggplot() +
+  facet_grid(implant ~ .) +
+  geom_point(aes(x=day_desc, y=signif.active.pct, color=animal)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+How many of reward active cells significat couple of days later after moved the reward.
+
+
+How many of them are place cells when running?
+```{r}
+trial.reward.pc = left_join(trial.reward.info, place.cell.db, by=c('date', 'animal', 'cell_id'))
+```
+
+
+```{r}
+trial.reward.pc %>%
+  mutate(active.rew = fr2.anyrew > fr1.anyrew,
+         active.rew0 = fr2.rew > fr1.rew,
+         active.rew1 = fr3 > fr1.rew,
+         is.rew.pc = is.pc & active.rew) %>%
+  group_by(date) %>%
+  dplyr::summarise(anyrew.n = (sum(signif.anyrew) / n() * 100) %>% round,
+                   anyrew.active.n = (sum(signif.anyrew & active.rew) / n() * 100) %>% round,
+                   pc.n = (sum(is.pc) / n()  * 100) %>% round,
+                   #rew.pc.n = sum(is.rew.pc) / n(),
+                   anyrew.pc.n = (sum(signif.anyrew & is.rew.pc) / n() * 100) %>% round,
+                   onerew.n = (sum(signif.rew) / n() * 100) %>% round,
+                   onerew.active.n = (sum(signif.rew & (active.rew0 | active.rew1)) / n() * 100) %>% round,
+                   onerew.pc.n = (sum(signif.rew & is.rew.pc) / n() * 100) %>% round)
+                   
+  
+```
+Close to 30 % of cells active at reward, only 3-5 % of them are place cells. However these cells seem to be variable between trials as seen on the place fields.
+Could be SWRs related..
+
+
+- What if split time at reward into parts: level of activity vs time at reward. Need to look at population firing to see the timing of firing at reward.
+
+
+# Head dip information
+```{r}
+headdip.mi = data.frame()
+for (caimg_result_dir in caimg_result_dirs) {
+  dir_parts = str_split(caimg_result_dir, '/')
+  exp_name = dir_parts[[1]][length(dir_parts[[1]])-5]
+  if (exp_name == 'habituation') {
+    data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
+    detect.events(data.traces, deconv.threshold=0.2)
+      
+    data.traces = data.table(data.traces)
+    data.traces = data.traces[x >= 0 & y >= 0, ]
+    
+    timebinned.traces = timebin.traces(data.traces, timebin.dur.msec = 200)
+    bin.quantile.fractions = c(0.95, 1.0)
+    binned.traces = bin.responses(timebinned.traces, 
+                                  get.bin.thresholds.fun = get.quantiles.fun(bin.quantile.fractions),
+                                  binned.var='trace')
+    
+    binned.traces[, is_headdip := round(is_headdip)]
+    headdip.res = calc.stim.mutual.info(binned.traces, 'is_headdip')
+    
+    headdip.mi = bind_rows(headdip.mi, headdip.res)
+  }
+}
+```
+
+```{r}
+headdip.mi = headdip.mi %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  left_join(trials.meta.df, by=c('date', 'animal'))
+headdip.mi = mutate(headdip.mi, is.headdip.cell = (fr2>fr1) & signif)
+```
+
+
+Pct of cells with cells active during headdips which have signif mutual info
+```{r}
+ headdip.mi %>%
+  group_by(implant, animal, date, day_desc) %>%
+  dplyr::summarise(nheaddip=sum(is.headdip.cell),
+                   n=n(),
+                   pct.headdip = nheaddip/n*100) %>%
+  ggplot() +
+  geom_point(aes(x=implant, y=pct.headdip, color=animal))
+```
+
+Plot time course of dF/F at headdips
+```{r}
+# selected cell
+date_str = '2020-01-27'	
+animal_name = 'G-BR'
+
+caimg_result_dir = find.caimg.dir(caimg_result_dirs, animal_name, date_str)
+data.traces = read.data.trace(caimg_result_dir, filter_exp_title='trial')
+detect.events(data.traces, deconv.threshold=0.2)
+fr.hz = 2
+timebin.msec = 1000 / fr.hz
+timebinned.traces = timebin.traces(data.traces, timebin.dur.msec = timebin.msec)
+timebinned.traces = data.table(timebinned.traces)
+timebinned.traces[, is_headdip := round(is_headdip)]
+setorder(timebinned.traces, trial_id, cell_id, timestamp)
+```
+
+```{r}
+get.cell.headdip.traces = function(cell.trace) {
+  headdip.starts = which(diff(cell.trace$is_headdip) == 1) + 1
+  before.window.bins = 10 * fr.hz
+  after.window.bins = 20 * fr.hz
+  headdip.traces = map2_dfr(
+    1:length(headdip.starts), 
+    cell.trace$time_bin[headdip.starts],
+    ~ cell.trace[time_bin >= .y - before.window.bins & time_bin <= .y + after.window.bins, ][,
+                  headdip_start := headdip.starts[.x], ][,
+                  headdip_no := .x ][,                       
+                  abs_time_bin := time_bin - .y ])
+  headdip.traces
+}
+
+timebinned.traces$date = date_str
+timebinned.traces$animal = animal_name
+mean.headdip.traces = map_dfr(unique(timebinned.traces$cell_id), function(selected.cell_id) {
+  cell.trace = timebinned.traces[cell_id == selected.cell_id,]
+  headdip.traces = get.cell.headdip.traces(cell.trace)
+  mean.traces = headdip.traces[, .(date, animal, cell_id, abs_time_bin, mean.trace=mean(trace)), 
+                               by=list(date, animal, cell_id, abs_time_bin)]
+  mean.traces
+})
+
+max.time_bin.df = select(mean.headdip.traces, cell_id, abs_time_bin, mean.trace) %>%
+  group_by(cell_id) %>%
+  dplyr::summarize(max.trace_time_bin = abs_time_bin[which.max(mean.trace)],
+                   max.trace = max(mean.trace),
+                   min.trace_time_bin = abs_time_bin[which.min(mean.trace)],
+                   min.trace = min(mean.trace))
+  
+day.headdip.mi = filter(headdip.mi, animal==animal_name, date==date_str) %>%
+  left_join(max.time_bin.df, by='cell_id') %>%
+  dplyr::arrange(signif, fr2>fr1, if_else(fr2>fr1, max.trace_time_bin, min.trace_time_bin))
+day.headdip.mi$cell_rank = 1:nrow(day.headdip.mi)
+
+mean.headdip.traces = left_join(mean.headdip.traces, 
+                               select(day.headdip.mi, date, animal, cell_id, mi, bias, fr1, fr2, signif, is.headdip.cell, cell_rank), 
+                               by=c('date', 'animal', 'cell_id'))
+
+
+mean.headdip.traces %>%
+  ggplot() +
+  geom_tile(aes(x=abs_time_bin / fr.hz, y=cell_rank, fill=mean.trace, width=1/fr.hz)) +
+  facet_grid(signif ~ .) +
+  ylab('Cell') + xlab('Time (s)')
+```
+
+
+## Headdip mutual info
+Distribution of mutual info in signif headdip cells
+```{r}
+sample.by.animal = function(df, nsamples=50) {
+  group_by(df, animal, date) %>%
+    sample_n(nsamples, replace = TRUE) %>%
+    ungroup()
+}
+
+headdip.mi %>%
+  filter(signif) %>%
+  filter(fr2 > fr1) %>%
+  sample.by.animal() %>%
+  ggplot(aes(x=day_desc, y=mi-bias, color=implant)) +
+  geom_violin() +
+  gtheme +
+  #facet_grid(signif ~ .) +
+  stat_summary(fun.y=median, geom="point", shape=23, size=2) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+

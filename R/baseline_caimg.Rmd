@@ -1,0 +1,87 @@
+---
+title: "Baseline recording"
+output: html_notebook
+---
+
+```{r}
+library(dplyr)
+library(readr)
+library(tidyr)
+library(stringr)
+library(DT)
+
+library(ggplot2)
+library(cowplot)
+gtheme = theme_minimal() + theme_cowplot() + 
+  theme(text = element_text(size=18), axis.text = element_text(size=15))
+
+```
+
+```{r}
+data_dir = '/mnt/DATA/Prez/cheeseboard/2019-03-learning/'
+ca_img_result_dir = paste0(data_dir, 'joined_caimg/')
+subject = '1BR'
+gen_imgs_dir = '/tmp/'
+traces_file = paste0(ca_img_result_dir, 'traces_and_positions.csv')
+data = read.csv(traces_file)
+data$session_type = as.factor(data$session_type)
+
+#data = filter(data, session_type %in% c('Baseline','Rewarded', 'Trial', 'Test'))
+```
+
+Transform events df
+```{r}
+data = data %>%
+  gather('cell', 'nevents', starts_with('events_')) %>%
+  gather('trace_cell', 'norm_trace', starts_with('normTrace_')) 
+data$cell = str_replace(data$cell,'events_[.]?','')
+data$trace_cell = str_replace(data$trace_cell,'normTrace_[.]?','')
+data = filter(data, cell == trace_cell) %>%
+  select(-trace_cell)
+data = data %>%
+  gather('trace_cell', 'trace', starts_with('trace_')) 
+data$trace_cell = str_replace(data$trace_cell,'trace_[.]?','')
+data = filter(data, cell == trace_cell) %>%
+  select(-trace_cell)
+data$trace = as.double(data$trace)
+
+eata$cell = as.integer(data$cell)
+data$inside_roi = data$inside_roi > 0
+```
+
+```{r}
+ncells = unique(data$cell) %>% length
+
+first_learning_day = as.Date('2019-02-20')
+last_day = max(char2date(data$date))
+max_trial = max(data$trial)
+data = mutate(data, 
+              learning_day = as.integer(char2date(date) - first_learning_day + 1),
+              trial_no = (learning_day - 1) * max_trial + trial)
+```
+
+
+```{r}
+events_total.df = data %>% 
+  group_by(date, trial, cell, learning_day, session_type) %>%
+  summarise(total_events = sum(nevents), 
+            duration_sec = max(timestamp) / 1000,
+            mer = total_events / duration_sec) %>%
+  arrange(cell, date, trial) 
+```
+
+```{r}
+
+events_total.df$cell = as.factor(events_total.df$cell)
+events_total.df %>%
+  ggplot() +
+  geom_boxplot(aes(x=cell, y=mer, colour=session_type))
+
+```
+```{r}
+events_total.df %>%
+  ggplot() +
+  geom_boxplot(aes(x=session_type,y=mer, color=session_type))
+```
+
+

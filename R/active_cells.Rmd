@@ -1,0 +1,962 @@
+---
+title: "Cells active between days"
+output: html_notebook
+---
+
+```{r include=FALSE}
+library(dplyr)
+library(plyr)
+library(pracma)
+library(readr)
+library(tidyr)
+library(tibble)
+library(stringr)
+library(DT)
+library(data.table)
+library(datatrace)
+
+library(ggplot2)
+library(cowplot)
+library(plotly)
+library(scales)
+
+
+gxaxis.blank = theme(axis.line.x = element_blank(),
+                     axis.title.x = element_blank(),
+                     axis.text.x = element_blank(),
+                     axis.ticks.x = element_blank())
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+select = dplyr::select
+
+source('fixed_effects.R')
+source('locations.R')
+source('utils.R')
+source('traces_input.R')
+source('plotting_params.R')
+```
+
+
+```{r}
+gen_imgs_dir = '/tmp/'
+mouse.meta.df = read.mouse.meta(rootdirs)
+trials.meta.df = read.trials.meta(rootdirs)
+```
+
+
+```{r}
+fr=20
+cell.trial.activity.df = data.frame()
+cell.trial.mobility.mer = data.frame()
+cell.day.activity.df = data.frame()
+cell.mobility.mer.diff = data.frame()
+cell.mobility.mer = data.frame()
+cell.mobility.cors = data.frame()
+timebin.dur.sec = 0.2
+
+behav.summary.df = data.frame()
+
+#for (caimg_result_dir in caimg_result_dirs) {
+for (caimg_result_dir in habit_caimg_dirs) {
+  data.traces = read.data.trace(caimg_result_dir)
+  data.traces$date = rep(char2date(data.traces$date[1]), nrow(data.traces))
+  data.traces = detect.events(data.traces, deconv.threshold=0.3)
+  
+  dir_parts = str_split(caimg_result_dir, '/')
+  animal_name = dir_parts[[1]][length(dir_parts[[1]]) - 2]
+  data.traces$animal = rep(animal_name, nrow(data.traces))
+  
+  trial.meta.row = filter(trials.meta.df, animal == animal_name, date == data.traces$date[1]) %>%
+    mutate(short_day_desc = paste0(substr(exp,1,1), location_set, ' d', day_ordinal))
+  
+  data.traces = add.running.col(data.traces, 3.3, 10)
+  timebinned.traces = timebin.traces(data.traces, timebin.dur.msec=1000 * timebin.dur.sec) 
+
+  timebinned.traces[, trial_name := paste(trial.meta.row$short_day_desc[1], exp_title, num2str(trial, fmt=0))]
+  cell.events.df = timebinned.traces[, .(day.nevents=sum(nevents)), by=.(animal, date, cell, cell_id)]
+  
+  trial.activity.df = timebinned.traces[, 
+    .(event.rate = sum(nevents) / (.N * timebin.dur.sec),
+      deconv.mean = mean(deconv_trace)), 
+    by=.(animal, date, exp_title, trial_id, trial_name, cell, cell_id)
+  ][cell.events.df, on=c('animal', 'date', 'cell', 'cell_id')]
+
+  day.activity.df = timebinned.traces[,
+    .(event.rate = sum(nevents) / (.N * timebin.dur.sec),
+      deconv.mean = mean(deconv_trace)), 
+    by=.(animal, date, exp_title, cell, cell_id)
+  ][cell.events.df, on=c('animal', 'date', 'cell', 'cell_id')]
+  
+  cell.trial.activity.df = bind_rows(cell.trial.activity.df, trial.activity.df)
+  cell.day.activity.df = bind_rows(cell.day.activity.df, day.activity.df)
+  
+  # Behaviour summary
+  timebinned.traces[, .N]
+  day.behav.summary.df = timebinned.traces[cell_id==timebinned.traces$cell_id[1], 
+                                           .(running_pct = mean(is_running, na.rm=TRUE),
+                                             mean_running_velocity = mean(
+                                               smooth_velocity[which(ifelse(is_running, smooth_velocity, 0) > 0)])),
+                                           by=.(date, animal, exp_title, trial, trial_id)]
+  behav.summary.df = bind_rows(behav.summary.df, day.behav.summary.df)
+  
+  # MER for mobile vs immobile
+  timebinned.traces[, mobile:=ifelse(is_running >= 0.5, 'mobile', 'immobile')]
+  cell.day.mobility.mer = timebinned.traces[!is.na(mobile), 
+                                            .(event.rate = sum(nevents) / (.N * timebin.dur.sec), 
+                                            mobility.dur.sec = .N * timebin.dur.sec), 
+                                            by=.(animal, date, exp_title, cell_id, mobile)]
+  cell.mobility.mer = bind_rows(cell.mobility.mer, cell.day.mobility.mer)
+  
+  cell.day.trial.mobility.mer = timebinned.traces[!is.na(mobile), 
+                                                  .(event.rate = sum(nevents) / (.N * timebin.dur.sec), 
+                                                  mobility.dur.sec = .N * timebin.dur.sec), 
+                                                  by=.(animal, date, exp_title, trial_id, trial_name, cell_id, mobile)]
+  cell.trial.mobility.mer = bind_rows(cell.trial.mobility.mer, cell.day.trial.mobility.mer)
+  
+  cell.mer.diff = spread(dplyr::select(cell.day.mobility.mer, -mobility.dur.sec), mobile, event.rate) %>%
+    mutate(mer.diff = mobile - immobile,
+           mer.diff.pct = mer.diff / pmin(mobile, immobile))
+  
+  cell.mobility.mer.diff = bind_rows(cell.mobility.mer.diff, cell.mer.diff)
+    
+  
+  # Correlation of the activity with velocity
+  cors.df = timebinned.traces[mobile == 'mobile', 
+                              .(deconv.cor = cor(velocity, deconv_trace), 
+                                time.sec = .N * timebin.dur.sec), 
+                             by=.(animal, date, exp_title, cell_id)]
+  
+  cell.mobility.cors = bind_rows(cell.mobility.cors, cors.df)
+}
+```
+
+Prepare meta info
+```{r}
+cell.trial.activity.df = cell.trial.activity.df %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  left_join(trials.meta.df, by=c('date', 'animal')) %>%
+  as.data.table()
+
+cell.day.activity.df = cell.day.activity.df %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  left_join(trials.meta.df, by=c('date', 'animal')) %>%
+  as.data.table()
+
+cell.mobility.mer = cell.mobility.mer %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  left_join(trials.meta.df, by=c('date', 'animal')) %>%
+  as.data.table()
+
+cell.trial.mobility.mer = cell.trial.mobility.mer %>%
+  left_join(mouse.meta.df, by='animal') %>% 
+  left_join(trials.meta.df, by=c('date', 'animal')) %>%
+  as.data.table()
+
+behav.summary.df = behav.summary.df %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('date', 'animal')) %>%
+  as.data.table()
+```
+
+
+# Histograms of activity in the detectd cells
+
+Mean deconv values during the day in the detected cells, one datapoint per cell per day
+```{r}
+cell.day.activity.df$exp_title = factor(cell.day.activity.df$exp_title,
+                                        levels = c('homecage', 'trial', 'aftertest', 'beforetest', 'novel_box'))
+
+cell.mobility.mer %>%
+  filter(exp_title != 'aftertest') %>%
+  ggplot() +
+  geom_histogram(aes(event.rate, y = stat(width*density))) +
+  facet_grid(implant + mobile ~ exp_title) +
+  xlim(c(0, 0.4)) + 
+  xlab('Mean event rate (Hz)') + ylab('Cells (%)') +
+  scale_y_continuous(labels = percent_format())
+
+g.mer = cell.mobility.mer %>%
+  filter(exp_title != 'aftertest') %>%
+  ggplot() +
+  geom_boxplot(aes(y=event.rate, x=implant, fill=implant)) +
+  facet_grid(mobile ~ exp_title) +
+  gtheme +
+  gxaxis.blank +
+  ylim(c(0,0.5)) +
+  ylab('Cell event rate (Hz)') + labs(fill='') +
+  theme(legend.position = 'top')
+g.mer
+```
+Check for difference in mobility between mice
+```{r}
+trial.behav.summary.df = filter(behav.summary.df, running_pct > 0) %>% # filter trial
+  mutate(aday = paste(animal, day_desc, sep='_'))
+trial.behav.summary.df$aday = as.factor(trial.behav.summary.df$aday) %>% as.integer() %>% as.factor
+g.run.time = trial.behav.summary.df %>%
+  ggplot(aes(y=running_pct, x=implant, text=paste(animal, day_desc))) +
+  geom_jitter(height=0, width=0.3, shape=1, size=0.5, color='#333333') +
+  gtheme +
+  ylab('Time running (%)') + xlab('') + ylim(c(0, 0.7))
+ggplotly(g.run.time)
+
+g.speed = trial.behav.summary.df %>%
+  ggplot(aes(y=mean_running_velocity * 1.2, x=implant, text=paste(animal, day_desc))) +
+  geom_jitter(height=0, width=0.3, shape=1, size=0.5, color='#333333') +
+  gtheme +
+  ylab('Running speed (cm/s)') + xlab('') + ylim(c(0,25))
+ggplotly(g.speed)
+
+plot_grid(g.run.time, g.speed)
+ggsave('running_stats.pdf', 
+       path = '/home/prez/tmp/cheeseboard',
+       device=cairo_pdf, units='cm',
+       width=5.5, height=3.3)
+```
+Statistical comparison of time running
+```{r}
+lmer.test.print(trial.behav.summary.df,
+                var = running_pct,
+                fixed.effects = implant,
+                randef.str = '(1 | animal)',
+                diagnostics.groupvar = implant)
+
+models = create.bayes.lm.pair(mutate(trial.behav.summary.df, val=running_pct),
+                              formula.full = val ~ 1 + implant + animal,
+                              formula.null = val ~ 1 + animal,
+                              whichRandom = 'animal',
+                              iterations=100000)
+models$full / models$null
+```
+Statistical comparison of running velocity
+```{r}
+lmer.test.print(trial.behav.summary.df,
+                var = log(mean_running_velocity),
+                fixed.effects = implant,
+                randef.str = '(1 | animal)',
+                diagnostics.groupvar = implant)
+
+models = create.bayes.lm.pair(mutate(trial.behav.summary.df, val=log(mean_running_velocity)),
+                              formula.full = val ~ 1 + implant + animal,
+                              formula.null = val ~ 1 + animal,
+                              whichRandom = 'animal',
+                              iterations = 100000)
+models$full / models$null
+```
+
+
+```{r}
+cell.mobility.mer %>%
+  filter(exp_title == 'trial', exp=='habituation') %>%
+  ggplot(aes(y=event.rate, x=mobile)) +
+  geom_violin(fill=single.colour, color=single.colour) +
+  geom_jitter(shape=16, width=0.4, height=0, size=0.1, alpha=0.15, color='#333333')+
+  stat_summary(fun.y=median, geom="point", shape=23, size=2, color='white') +
+  facet_grid( ~ exp_title + implant) +
+  gtheme +
+  scale_y_log10() +
+  ylab('Event rate (Hz)')
+  #theme(legend.position = 'top')
+
+ggsave('event_rate_stats.pdf', path='/home/prez/tmp/cheeseboard', 
+       width=4.5, height=4.2, units='cm',
+       device=cairo_pdf, dpi=300)
+```
+Statistical comparison
+```{r}
+library(lmerTest)
+habit.mobility.mer = filter(cell.mobility.mer, exp_title == 'trial', exp=='habituation') %>%
+  filter(event.rate > 0) %>%
+  dplyr::mutate(aday = paste(animal, format(date), sep='_'),
+                log.event.rate = log(event.rate))
+habit.mobility.mer$aday = as.factor(habit.mobility.mer$aday) %>% as.integer() %>% as.factor()
+habit.mobility.mer$mobile = as.factor(habit.mobility.mer$mobile)
+
+m = lmerTest::lmer(log(event.rate) ~ implant * mobile + (1 + day_desc | animal),
+                   data=habit.mobility.mer,
+                   REML=TRUE)
+summary(m)
+anova(m, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(m, 
+                       habit.mobility.mer$animal, 
+                       habit.mobility.mer$implant)
+pairwise.post.hoc(m, factor.interaction = c('implant:mobile'))
+
+group_by(habit.mobility.mer, implant, mobile) %>%
+  dplyr::summarise(mean(event.rate), median(event.rate), sem(event.rate))
+
+models = create.bayes.lm.pair(habit.mobility.mer,
+                              formula.full = log.event.rate ~ implant * mobile + aday,
+                              formula.null = log.event.rate ~ implant + mobile + aday,
+                              whichRandom = 'aday', iterations=10000)
+models$full/models$null
+calc.pair.95CI(models$full, pair.vars = c('implant-dCA1', 'implant-vCA1'))
+
+samples = BayesFactor::posterior(models$full, iterations = 10000, columnFilter="^aday$")
+samples.mobile.dca1 = samples[, 'mu'] + samples[, 'implant-dCA1'] + samples[, 'mobile-mobile'] + samples[, 'implant:mobile-dCA1.&.mobile']
+samples.mobile.dca1 = samples[, 'mu'] + samples[, 'implant:mobile-dCA1.&.mobile']
+samples.immobile.dca1 = samples[, 'mu'] + samples[, 'implant-dCA1'] + samples[, 'mobile-immobile'] + samples[, 'implant:mobile-dCA1.&.immobile']
+dca1.mobility.diff = samples[, 'mobile-mobile'] - samples[, 'mobile-immobile'] + 
+  samples[, 'implant:mobile-dCA1.&.immobile'] - samples[, 'implant:mobile-dCA1.&.mobile']
+samples.mobile.vca1 = samples[, 'mu'] + samples[, 'implant-vCA1'] + samples[, 'mobile-mobile'] + samples[, 'implant:mobile-vCA1.&.mobile']
+samples.mobile.vca1 = samples[, 'mu'] + samples[, 'implant:mobile-vCA1.&.mobile']
+samples.immobile.vca1 = samples[, 'mu'] + samples[, 'implant-vCA1'] + samples[, 'mobile-immobile'] + samples[, 'implant:mobile-vCA1.&.immobile']
+
+exp(samples.mobile.dca1 - samples.immobile.dca1) %>% summary
+exp(samples.mobile.vca1 - samples.immobile.vca1) %>% summary
+```
+
+Bayes models not modelling posterior correctly - or does it? check if mean per animal more representative
+```{r}
+models = create.bayes.lm.pair(subset(habit.mobility.mer, implant=='vCA1'),
+                              formula.full = log.event.rate ~ 1 + mobile + aday,
+                              formula.null = log.event.rate ~ 1 + aday,
+                              whichRandom = 'aday', iterations=10000)
+models$full/models$null
+samples = BayesFactor::posterior(models$full, iterations = 10000, columnFilter="^aday$")
+calc.pair.95CI(models$full, pair.vars = c('mobile-mobile', 'mobile-immobile'),
+               ytransform = exp)
+```
+
+## Cell Event rates for place cells vs other cells
+```{r}
+habituation.mobility.mer.joined = left_join(
+  filter(cell.mobility.mer, exp_title=='trial', exp=='habituation', event.rate > 0),
+  place.cell.db,
+  by=c('animal', 'date', 'cell_id', 'implant', 'exp', 'day_desc')) %>%
+  filter(is.pc) %>%
+  mutate(aday = paste(animal, day_desc, sep='_'))
+
+habituation.mobility.mer.joined$aday = as.factor(habituation.mobility.mer.joined$aday) %>% as.integer() %>% as.factor()
+
+habituation.mobility.mer.joined %>%
+  ggplot(aes(y=event.rate, x=mobile)) +
+  geom_violin(fill=single.colour, color=single.colour) +
+  geom_jitter(shape=16, width=0.4, height=0, size=0.1, alpha=0.15, color='#333333')+
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2, color='white') +
+  facet_grid(. ~ implant + is.pc) +
+  gtheme +
+  scale_y_log10() +
+  ylab('Event rate (Hz)')
+
+group_by(habituation.mobility.mer.joined, implant, mobile) %>%
+  dplyr::summarise(mean(event.rate), median(event.rate), sem(event.rate))
+
+ggsave('event_rate_stats.pdf', path='/home/prez/tmp/cheeseboard', 
+       width=4.5, height=4.3, units='cm',
+       device=cairo_pdf, dpi=300)
+```
+
+Pairwise comparisons lmer
+```{r}
+habituation.mobility.mer.joined$mobile = as.factor(habituation.mobility.mer.joined$mobile)
+habituation.mobility.mer.joined$is.pc = as.factor(habituation.mobility.mer.joined$is.pc)
+habituation.mobility.mer.joined$implant = as.factor(habituation.mobility.mer.joined$implant)
+m = lmerTest::lmer(log(event.rate) ~ implant + mobile + implant:mobile + (1 + day_desc | animal),
+                   #log(event.rate) ~ implant * mobile * is.pc + (1 + day_desc | animal),
+                   data=habituation.mobility.mer.joined,
+                   REML=TRUE)
+summary(m)
+anova(m, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(m, 
+                       habituation.mobility.mer.joined$animal, 
+                       habituation.mobility.mer.joined$implant)
+pairwise.post.hoc(m, factor.interaction = c('implant:mobile'))
+#pairwise.post.hoc(m, factor.interaction = c('mobile:is.pc'))
+#pairwise.post.hoc(m, factor.interaction = c('implant:mobile:is.pc'))
+
+models = create.bayes.lm.pair(habituation.mobility.mer.joined %>% 
+                                mutate(log.event.rate = log(event.rate)) %>%
+                                filter(implant=='vCA1'),
+                              formula.full = log.event.rate ~ mobile + aday,
+                              formula.null = log.event.rate ~ aday,
+                              whichRandom = 'aday', iterations=100000)
+models$full / models$null
+calc.pair.95CI(models$full, exp, show.percent.change = FALSE, pair.vars=c('mobile-immobile', 'mobile-mobile'))
+```
+
+
+Event rates of cells during different experiments on the same day
+```{r}
+selected.days = c('habituation day#1', 'habituation day#3', 
+  cell.mobility.mer[exp_title=='beforetest' | exp_title =='novel_box', sort(unique(day_desc))])
+filter(cell.mobility.mer, day_desc %in% selected.days) %>%
+  ggplot(aes(x=day_desc, y=event.rate, fill=exp_title)) +
+  geom_boxplot() +
+  facet_grid(implant ~ mobile) +
+  ylim(c(0,0.5)) +
+  gtheme
+```
+Is the beforetest event rate highest due to running? doesn't explain lower in aftertest
+
+Count of active cells per animal:
+```{r}
+filter(cell.day.activity.df, exp_title=='trial') %>%
+  group_by(animal, date) %>%
+  dplyr::summarise(n=n()) %>%
+  group_by(animal) %>%
+  dplyr::summarise(mean.n=mean(n),
+                   sem.n=sem(n)) %>%
+  dplyr::mutate_if(is.numeric, round, 0) %>%
+  DT::datatable()
+```
+
+Active cells per implant
+```{r}
+filter(cell.day.activity.df, exp_title=='trial') %>%
+  group_by(implant, animal, date) %>%
+  dplyr::summarise(n=n()) %>%
+  group_by(implant) %>%
+  dplyr::summarise(mean.n=mean(n),
+                   sem.n=sem(n),
+                   animal_n=length(unique(animal))) %>%
+  dplyr::mutate_if(is.numeric, round, 0) %>%
+  DT::datatable()
+```
+
+
+# Cell activity across days and trials
+
+## Active cells per day
+```{r}
+min.day.nevents = 10
+min.event.rate = 0.002
+
+g.nactive.cells = cell.day.activity.df %>%
+  filter(exp_title == 'trial') %>%
+  group_by(day_desc, animal, implant) %>%
+  mutate(is.active = event.rate >= min.event.rate) %>%
+  dplyr::summarise(nactive=sum(is.active)) %>%
+  dplyr::arrange(day_desc) %>%
+  ddply(.(animal), mutate, active.ratio=nactive/max(nactive)) %>% 
+  select(day_desc, implant, animal, active.ratio) %>%
+  ggplot(aes(x=day_desc, y=active.ratio, color=animal,
+             text=paste(day_desc, 
+                        '<br>active=', format(active.ratio, digits=2),
+                        '<br>animal=', animal))) +
+  geom_jitter(height=0, width=0.1) +
+  geom_hline(yintercept=1, linetype='dashed') +
+  facet_grid(implant ~ .) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x='', y='Active cells\nratio of maximum')
+ggplotly(g.nactive.cells, tooltip = "text")
+
+g.animal.mer = cell.day.activity.df %>%
+  filter(exp_title == 'trial') %>%
+  group_by(day_desc, animal, implant) %>%
+  dplyr::summarise(mer=mean(event.rate)) %>%
+  dplyr::arrange(day_desc) %>%
+  ggplot(aes(x=day_desc, y=mer, color=animal,
+             text=paste(day_desc, 
+                        '<br>MER=', format(mer, digits=2),
+                        '<br>animal=', animal))) +
+  geom_jitter(height=0, width=0.1) +
+  #geom_hline(yintercept=1, linetype='dashed') +
+  facet_grid(implant ~ ., scales='free') +
+  gtheme +
+  scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x='', y='MER (Hz)')
+ggplotly(g.animal.mer, tooltip = 'text')
+
+
+plot_grid(g.nactive.cells, g.mer, nrow=1, rel_widths = c(1.0, 0.8))
+ggsave('/tmp/active_cells_ratio.svg', 
+       units = 'cm', width=24, height=11)
+```
+
+## Mean event rate
+```{r}
+day.mer.df = cell.day.activity.df %>%
+  filter(day.nevents >= min.day.nevents) %>%
+  group_by(day_desc, implant, animal, exp_title) %>%
+  dplyr::summarise(mean.er = mean(event.rate),
+                   median.er = median(event.rate),
+                   sem.er = sem(event.rate),
+                   ncells=n())
+median.eventrate = median(day.mer.df$median.er)
+
+g = day.mer.df %>%
+  filter(exp_title == 'trial') %>%
+  ggplot(aes(x=day_desc, color=animal)) +
+  #geom_errorbar(aes(ymin=median.er-sem.er, ymax=median.er+sem.er), width=0.2) +
+  geom_line(aes(y=median.er, group=animal)) +
+  facet_grid(implant ~ ., scales = 'free') +
+  geom_hline(yintercept=median.eventrate, linetype='dashed') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+ggplotly(g)
+```
+Not higher mean rates due to novelty across days or initially higher anxiety...
+But within day flactuations are present
+
+```{r}
+trial.mer.df = cell.trial.mobility.mer %>%
+  #filter(day.nevents >= min.day.nevents) %>%
+  group_by(day_desc, implant, animal, exp_title, trial_id, trial_name, mobile) %>%
+  dplyr::summarise(mean.er = mean(event.rate),
+                   median.er = median(event.rate),
+                   sem.er = sem(event.rate),
+                   ncells=n())
+trial.median.eventrate = median(day.mer.df$median.er)
+
+g = trial.mer.df %>%
+  filter(exp_title == 'trial', implant=='dCA1', mobile=='mobile') %>%
+  #filter(str_starts(day_desc, 'learning1')) %>%
+  group_by(trial_name, exp_title, implant, animal) %>%
+  dplyr::summarise(group.med.er = median(median.er),
+                   group.mean.er = mean(mean.er)) %>%
+  ggplot(aes(x=trial_name, color=implant)) +
+  #geom_errorbar(aes(ymin=median.er-sem.er, ymax=median.er+sem.er), width=0.2) +
+  geom_line(aes(y=group.mean.er, group=animal)) +
+  facet_grid(exp_title + animal ~ ., scales='free') +
+  geom_hline(yintercept=median.eventrate, linetype='dashed') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+ggplotly(g)
+```
+Mean event rate during mobility is lower on trial 8 than 1, both for dCA1 and vCA1. This effect is more pronounced
+in early days of learning that the last day. This could be due to learning. But behaviour could possibly also explain
+
+```{r}
+compared.trial.mer.df = trial.mer.df %>%
+  #filter(str_starts(day_desc, 'learning1 day#4')) %>%
+  dplyr::mutate(trial_no = as.integer(str_sub(trial_id, nchar(trial_id), -1)),
+                early_trial = trial_no <= 4) %>% 
+  filter(exp_title == 'trial', mobile=='mobile', trial_no %in% c(1, 2, 7, 8)) 
+
+trial.mer.model = lmerTest::lmer(mean.er ~ early_trial + implant + (1 + day_desc | animal), 
+                                 data=compared.trial.mer.df, REML=TRUE)
+summary(trial.mer.model)
+anova(trial.mer.model, refit=FALSE, ddf='Satterthwaite')
+
+```
+Firing in trials before and during novel_box:
+For novel and trial, FR higher in mobility, mer lower in novel box than during trial
+```{r}
+novel_box.days = filter(trial.mer.df, exp_title=='novel_box') %>% pull(day_desc) %>% unique
+trials.mobile.mer = filter(trial.mer.df, day_desc %in% novel_box.days, 
+                           exp_title %in% c('trial', 'novel_box'))
+g = ggplot(trials.mobile.mer, 
+           aes(x=trial_name, y=mean.er, 
+               color=animal,
+               text=paste(trial_name, 
+                          '<br>animal', animal,
+                          '<br>mer', format(mean.er, digits=2)))) +
+  geom_point() +
+  scale_y_log10() +
+  facet_grid(mobile ~ implant) +
+  gtheme +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+ggplotly(g, tooltip = 'text')
+```
+
+## Plot a cell activity over days
+# Show inactive cells as 0
+# ```{r}
+# expand.cell_ids = function(df, join.cols) {
+#   animal.cell_ids.df = mutate(df, animal_cell_id = paste(animal, cell_id, sep='_'))
+#   animal.cell_ids = animal.cell_ids.df$animal_cell_id %>% unique
+#   
+#   expanded.cols.list = list()
+#   for (col in join.cols) {
+#     expanded.cols.list[[col]] = unique(df[[col]])  
+#   }
+#   expanded.cell.day = expand.grid(expanded.cols.list)
+#   
+#   expanded.cell.day = expanded.cell.day %>%
+#     mutate(animal_cell_id = paste(animal, cell_id, sep='_')) %>%
+#     filter(animal_cell_id %in% animal.cell_ids) %>%
+#     dplyr::mutate(deconv.mean=0)
+#   
+#   full.cell.day.activity = 
+#     left_join(expanded.cell.day, df, by=join.cols, suffix=c('.x', '.y')) %>%
+#     mutate(deconv.mean = pmax(deconv.mean.x, deconv.mean.y, na.rm=TRUE)) %>%
+#     select(-deconv.mean.x, -deconv.mean.y)
+#   return(full.cell.day.activity)
+# }
+# ```
+# 
+# ## Cell activity across days
+# ```{r}
+# 
+# join.cols = c('animal', 'date', 'exp_title', 'cell_id')
+# full.cell.day.activity = expand.cell_ids(cell.day.activity.df, join.cols)
+# ```
+# Order cells by correlations with TSNE
+# ```{r}
+# create.cell_order = function(df.input, grouping.col) {
+#   cell.order.df = data.frame()
+#   for (animal_name in unique(df.input$animal)) {
+#     df.input %>%
+#       filter(animal == animal_name) %>%
+#       #mutate(trial_id=paste(animal, trial_name, sep='_')) %>%
+#       select(grouping.col, cell_id, deconv.mean) -> df
+#   
+#     trial.activity.df = spread(df, cell_id, deconv.mean) %>%
+#       column_to_rownames(var=grouping.col)
+#       
+#     cor.data = cor(trial.activity.df)
+#     
+#     # deal with standard dev equal 0
+#     cor.data[is.na(cor.data)] = 0
+#     
+#     tsne.vals = tsne::tsne(cor.data, k=1)
+#     
+#     cell_ids = rownames(cor.data) 
+#     tsne.df = data.frame(cell_id=cell_ids, tsne.val=tsne.vals) %>%                
+#       dplyr::arrange(tsne.val) %>%                                                       
+#       dplyr::mutate(cell_order = dplyr::row_number(),
+#                     animal = animal_name)
+#     cell.order.df = bind_rows(cell.order.df, select(tsne.df, -tsne.val))
+#   }
+#   cell.order.df$cell_id = as.integer(cell.order.df$cell_id)
+#   
+#   return(cell.order.df)
+# }
+# ```
+# 
+# ```{r}
+# cell.order.df = full.cell.day.activity %>%
+#   filter(exp_title=='trial') %>%
+#   mutate(date_exp = paste(date, exp_title, sep='_')) %>%
+#   create.cell_order('date_exp')
+# cell.day.activity.ordered = full.cell.day.activity %>% 
+#     left_join(cell.order.df, by=c('animal','cell_id')) %>%
+#     arrange(animal, cell_order, date) 
+# ```
+# 
+# ```{r}
+# cell.day.activity.ordered %>%
+# #full.cell.day.activity %>%
+#   filter(exp_title == 'trial') %>%
+#   ggplot() +
+#   geom_tile(aes(x=date, y=cell_id, fill=deconv.mean + 1), width=1) +
+#   facet_grid(animal ~ ., scales = 'free_y') +
+#   labs(fill='deconv dF/F') +
+#   #scale_fill_viridis(breaks=c(0, 1)) +
+#   scale_fill_gradient(low='black', high='white', trans='log') + 
+#   ylab('Cell') +
+#   xlab('Session') +
+#   gtheme +
+#   theme(axis.text.x = element_text(angle=90, hjust=1))
+# ```
+# 
+# ## Cell activity across trials
+# ```{r}
+# join.cols = c('animal', 'trial_name', 'cell_id')
+# full.trial.activity.df = expand.cell_ids(
+#   filter(cell.trial.activity.df, exp_title=='trial'), 
+#   join.cols)
+# ```
+# 
+# ```{r}
+# cell.order.df = create.cell_order(filter(full.trial.activity.df, exp_title=='trial'), 'trial_name')
+# data.ordered = full.trial.activity.df %>% 
+#     left_join(cell.order.df, by=c('animal','cell_id')) %>%
+#     arrange(animal, cell_order, trial_name) 
+# ```
+# 
+# 
+# ```{r}
+# data.ordered %>%
+#   #filter(exp_title == 'trial') %>%
+#   ggplot() +
+#   geom_tile(aes(x=trial_name, y=cell_order, fill=deconv.mean + 1), width=1) +
+#   facet_grid(animal ~ ., scales='free_y') +
+#   labs(fill='deconv dF/F') +
+#   #scale_fill_viridis(breaks=c(0, 1)) +
+#   scale_fill_gradient(low='black', high='white', trans='log') + 
+#   ylab('Cell') +
+#   xlab('Session') + 
+#   theme(axis.text.x = element_text(angle=90, hjust=1))
+#```
+
+# Count of active cells
+
+
+Proportion of the same cells active between days during the experiment
+```{r}
+cell.overlap.df = data.frame()
+cell.day.activity.df = data.table(cell.day.activity.df)
+for (animal_name in unique(cell.day.activity.df$animal)) {
+  all.days = cell.day.activity.df[animal==animal_name, unique(date)] %>% char2date
+  implant = cell.day.activity.df[animal==animal_name]$implant[1]
+  day.comb = combn(1:length(all.days), 2)
+  for (i in 1:ncol(day.comb)) {
+    days_i = day.comb[,i]
+    days = all.days[days_i]
+
+    fstday.cells = cell.day.activity.df[animal_name == animal & date == days[1], unique(cell_id)]
+    sndday.cells = cell.day.activity.df[animal_name == animal & date == days[2], unique(cell_id)]
+    new.row = list(
+      animal = animal_name,
+      implant = implant,
+      day1 = days[1],
+      day2 = days[2],
+      days.diff = days[2] - days[1],
+      nfstday.cells = length(fstday.cells),
+      nsndday.cells = length(sndday.cells),
+      overlap = length(intersect(fstday.cells, sndday.cells)) /
+                length(union(fstday.cells, sndday.cells)) * 100,
+      recall = length(intersect(fstday.cells, sndday.cells)) /
+                length(fstday.cells) * 100)
+    cell.overlap.df = bind_rows(cell.overlap.df, new.row)
+  }
+}
+```
+
+```{r}
+summary.cell.overlap = cell.overlap.df %>%
+  group_by(implant, animal, days.diff) %>%
+  dplyr::summarise(overlap.mean = mean(overlap),
+                   overlap.sem = sem(overlap),
+                   recall.mean = mean(recall),
+                   recall.sem = sem(recall))
+
+ndays = max(cell.overlap.df$days.diff)
+ggplot(data=summary.cell.overlap) +
+  geom_line(aes(x=days.diff, y=recall.mean, group=animal)) +
+  geom_ribbon(aes(x=days.diff, ymin=recall.mean - recall.sem, 
+                  ymax=recall.mean + recall.sem, group=animal), alpha=0.2) +
+  #geom_point(data=cell.overlap.df, aes(x=days.diff, y=overlap, color=animal)) +
+  facet_grid(. ~ implant) +
+  gtheme +
+  ylab('Cell recall (%)') +
+  xlab('Days apart') +
+  scale_x_continuous(breaks=1:ndays, limits=c(1,ndays-1))
+
+ggsave('/tmp/cell_recall_pct.svg', 
+       width = 15, height = 8, units='cm')
+```
+
+Next day recall
+```{r}
+cell.overlap.df %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'day1'='date')) %>% 
+  dplyr::rename(day_desc1 = day_desc) %>% 
+  left_join(trials.meta.df, by=c('animal'='animal', 'day2'='date')) %>% 
+  dplyr::rename(day_desc2 = day_desc) %>%
+  #filter(as.integer(days.diff) == 1)  %>%
+  filter(day_desc1 == 'habituation day#3', day_desc2 == 'learning2 day#1') %>%
+  dplyr::mutate(nrecalled=recall/100*nfstday.cells,
+                recall=round(recall)) %>%
+  select(animal, implant, day_desc1, day_desc2, day2, recall, nrecalled) %>%
+  DT::datatable()
+```
+```{r}
+cell.overlap.df %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'day1'='date')) %>% 
+  dplyr::rename(day_desc1 = day_desc) %>% 
+  left_join(trials.meta.df, by=c('animal'='animal', 'day2'='date')) %>% 
+  dplyr::rename(day_desc2 = day_desc) %>%
+  filter(as.integer(days.diff) == 1)  %>%
+  dplyr::mutate(nrecalled=recall/100*nfstday.cells,
+                recall=round(recall)) %>%
+  select(animal, implant, day_desc1, day_desc2, recall, nrecalled) %>%
+  DT::datatable()
+```
+
+
+
+Total days a cell active
+```{r}
+cell.day.activity.df %>%
+  filter(day.nevents > min.day.nevents) %>%
+  group_by(animal, cell_id) %>%
+  dplyr::summarise(ndays = n()) %>%
+  arrange(desc(ndays)) %>%
+  ggplot(aes(ndays,color=animal)) +
+  #geom_histogram(aes(y=..count../sum(..count..), group=animal), bins=10) +
+  #geom_freqpoly(aes( y=..count../sum(..count..) * 100, group=animal), bins=ndays) +
+  stat_ecdf() +
+  scale_x_continuous(breaks=1:ndays, limits=c(1,ndays)) +
+  geom_abline(slope=1/15, linetype='dashed') + # line for uniform dist of # days
+  ylab('Cells (%)') +
+  xlab('Days active')
+```
+
+Number of consecutive days a cell active
+```{r}
+source('utils.R')
+
+#active.day.df$date = char2date(active.day.df$date)
+ncons.days.df = cell.day.activity.df %>%
+  filter(day.nevents > min.day.nevents) %>%
+  ddply(.(animal, cell_id), summarise, ncons=max.consecutive.days(date))
+
+ggplot(ncons.days.df, aes(ncons, color=animal)) +
+  #geom_freqpoly(aes(x=ncons, y=..count../sum(..count..) * 100, color=animal, group=animal), bins=ndays) +
+  stat_ecdf(geom = "step") +
+  scale_x_continuous(breaks=1:5, limits=c(1,5)) +
+  ylab('Cells (%)') +
+  xlab('Consecutive days active')
+  
+  
+```
+
+# Event rates
+## Mobile vs immobile
+```{r}
+cell.mobility.mer.diff = left_join(cell.mobility.mer.diff, mouse.meta.df, by=c('animal')) %>%
+  left_join(trials.meta.df, by=c('animal', 'date'))
+cell.mobility.cors = left_join(cell.mobility.cors, mouse.meta.df, by=c('animal')) %>%
+  left_join(trials.meta.df, by=c('animal', 'date'))
+```
+
+```{r plot-correlations}
+library(rlang)
+
+plot.xy.cor = function(df, xvar, yvar, facetcols, facetrows=NULL) {
+  xvar = enquo(xvar)
+  yvar = enquo(yvar)
+  facetcols = enquo(facetcols)
+  facetrows = enquo(facetrows)
+  
+  g = df %>%
+    filter(!is.na(!!xvar), !is.na(!!yvar)) %>%
+    ggplot(aes(x=!!xvar, y=!!yvar, 
+           text=paste(quo_name(xvar), '=', format(!!xvar, digits=3),
+                       '<br>', quo_name(yvar), '=', format(!!yvar, digits=3),
+                       '<br>animal=', animal))) +
+    geom_point(shape=1, alpha=0.6) +
+    geom_abline(slope=1, linetype='dashed') +
+    facet_grid(cols=dplyr::vars(!!facetcols), scales='free') +
+    scale_x_log10() +
+    scale_y_log10() +
+    gtheme
+  
+  if (!is.null(get_expr(facetrows))) {
+    facetrows = enquo(facetrows)
+    g = g + facet_grid(cols=dplyr::vars(!!facetcols),
+                       rows=dplyr::vars(!!facetrows))
+  } 
+  g
+}
+
+plot.xy.diff.hist = function(df, xvar, yvar, facetcols, facetrows=NULL, ylab.height=0.5) {
+  xvar = enquo(xvar)
+  yvar = enquo(yvar)
+  facetcols = enquo(facetcols)
+  facetrows = enquo(facetrows)
+  group_by_vars = dplyr::vars(!!facetcols)
+  if (!is.null(get_expr(facetrows))) {
+    group_by_vars = quos(!!facetcols, !!facetrows)
+  }
+  
+  hist.df = dplyr::mutate(df, var.diff = !!xvar - !!yvar) %>%
+    filter(!is.na(var.diff))
+  df.summary = hist.df %>%
+     sample.by.animal(n=100, other.cols = c('day_desc')) %>%
+     dplyr::group_by(!!!group_by_vars) %>%
+     dplyr::summarise(med.diff = median(var.diff, na.rm=TRUE))
+  
+  p.vals.df = hist.df %>%
+    dplyr::group_by(!!!group_by_vars) %>%
+    dplyr::summarise(p.val = wilcox.test(!!xvar, !!yvar, paired=TRUE)$p.value,
+                     med = median(var.diff)) %>%
+    dplyr::mutate(p.valtext = sprintf('med=%.1e p-val=%.1e', med, p.val))
+  
+  g = ggplot(hist.df, aes(var.diff)) +
+    geom_histogram(aes(y = stat(width*density))) +
+    geom_vline(data=df.summary, 
+               mapping=aes(xintercept=med.diff),
+               linetype='dashed') +
+    geom_text(data=p.vals.df, mapping=aes(x=0, y=ylab.height, label=p.valtext)) +
+    facet_grid(cols=dplyr::vars(!!facetcols), 
+               scales = 'free') +
+    scale_y_continuous(labels = percent_format()) +
+    ylab('Cells (%)') +
+    gtheme
+  
+  if (!is.null(get_expr(facetrows))) {
+    g = g + facet_grid(cols=dplyr::vars(!!facetcols), 
+                       rows=dplyr::vars(!!facetrows),
+                       scales = 'free')
+  }
+  g
+}
+```
+
+Potentially higher fraction of cells in vCA1 that are more active when immobile than mobile (TODO to quantify).
+```{r}
+sample.by.animal = function(df, nsamples=50, other.cols=c('date.fst', 'date.snd')) {
+  cols = c('animal', other.cols)
+  group_by_at(df, dplyr::vars(cols)) %>%
+    sample_n(nsamples, replace = TRUE) %>%
+    ungroup()
+}
+
+g = cell.mobility.mer.diff %>%
+  filter(exp_title %in% c('trial', 'beforetest')) %>%
+  filter(day_desc %in% c('learning3 day#1', 'learning2 day#1')) %>%
+  #filter(day_desc %in% c('habituation day#1', 'habituation day#2', 'habituation day#3')) %>%
+  sample.by.animal(n=50, other.cols = c('date', 'exp_title', 'day_desc')) %>%
+  plot.xy.cor(mobile, immobile, implant, exp_title) +
+  #xlim(c(0, 0.5)) + ylim(c(0, 0.5)) +
+  gtheme
+ggplotly(g, tooltip = 'text')
+
+cell.mobility.mer.diff %>%
+  filter(exp_title %in% c('trial', 'beforetest')) %>%
+  filter(day_desc %in% c('learning3 day#1', 'learning2 day#1')) %>%
+  sample.by.animal(n=50, other.cols = c('date', 'exp_title', 'day_desc')) %>%
+  plot.xy.diff.hist(mobile, immobile, implant, exp_title) +
+  xlab('MER mobile - immobile')
+
+```
+
+
+## Corr with velocity
+```{r}
+cors.summary = cell.mobility.cors %>%
+  filter(exp_title != 'homecage') %>%
+  sample.by.animal(n=100, other.cols = c('date', 'exp_title')) %>%
+  dplyr::group_by(implant, exp_title) %>%
+  dplyr::summarise(med.cor = median(deconv.cor, na.rm=TRUE))
+
+cell.mobility.cors %>%
+  filter(exp_title != 'homecage') %>%
+  sample.by.animal(n=100, other.cols = c('date')) %>%
+  ggplot() +
+  geom_histogram(aes(x=deconv.cor)) +
+  geom_vline(data=cors.summary,
+             mapping=aes(xintercept=med.cor), 
+             linetype='dashed') +
+  facet_grid(exp_title ~ implant, scales='free_y') +
+  gtheme
+
+```
+
+## Trial type and MER
+When immobile, the Event rates higher inside the homecage than during the trial
+```{r}
+cell.mobility.mer.diff = as.data.table(cell.mobility.mer.diff)
+exp.immobile.mer = data.table::dcast(cell.mobility.mer.diff, 
+                                     implant + animal + day_desc + cell_id ~ exp_title, 
+                                     value.var='immobile')
+exp.mobile.mer = data.table::dcast(cell.mobility.mer.diff, 
+                                   implant + animal + day_desc + cell_id ~ exp_title, 
+                                    value.var='mobile')
+
+plot_grid(
+  plot.xy.cor(exp.immobile.mer, trial, homecage, implant),
+  exp.immobile.mer %>%
+    filter(day_desc %in% c('learning1 day#5')) %>%
+    plot.xy.diff.hist(trial, homecage, implant, ylab.height=0.3) +
+    xlab('MER Trial - homecage'),
+  ncol=1)
+
+
+plot_grid(
+  plot.xy.cor(exp.immobile.mer, trial, beforetest, implant) + xlim(c(0, 0.5)) + ylim(c(0,0.8)),
+  plot.xy.diff.hist(exp.immobile.mer, trial, beforetest, implant) + xlim(c(-0.3, 0.3)) +
+    xlab('MER Trial - beforetest'),
+  ncol=1)
+
+plot_grid(
+  plot.xy.cor(filter(exp.immobile.mer, implant=='vCA1'), beforetest, aftertest, implant),
+  plot.xy.diff.hist(filter(exp.immobile.mer, implant=='vCA1'), beforetest, aftertest, implant) + xlim(c(-0.3, 0.3)) +
+    xlab('MER beforetest - aftertest'),
+  ncol=1)
+```
+

@@ -1,0 +1,353 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r setup}
+library(dplyr)
+library(plyr)
+library(pracma)
+library(readr)
+library(tidyr)
+library(stringr)
+library(DT)
+library(data.table)
+library(tictoc)
+library(datatrace)
+library(foreach)
+library(doSNOW)
+
+setwd("~/mnt_code/cheeseboard_analysis/R")
+
+# Plotting
+library(ggplot2)
+library(cowplot)
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+
+source('distances.R')
+source('fixed_effects.R')
+source('locations.R')
+source('plotting_params.R')
+source('place_field_utils.R')
+source('utils.R')
+
+perc2dist = 1.2
+goal.cell.max.dist = 20 / perc2dist
+```
+
+# Stats on place field
+Calculate distance to closer reward
+```{r}
+down.test.rewdist = 
+  down.test.si %>%
+  #test.trials.si %>%
+  dplyr::group_by(date, animal) %>%
+  dplyr::mutate(
+        min.rew.dist=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
+                                       field.max.x, field.max.y)$rew.dist,
+        closest.location.ordinal=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date[1], animal[1]),
+                                                   field.max.x, field.max.y)$location.ordinal) %>%
+  dplyr::ungroup()
+
+down.habit.rewdist = 
+  down.habit.si %>%
+  #habit.trials.si %>%
+  dplyr::group_by(date, date.test, animal) %>%
+  dplyr::mutate(
+        min.rew.dist=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date.test[1], animal[1]),
+                                       field.max.x, field.max.y)$rew.dist,
+        closest.location.ordinal=calc.min.rew.dist(filter.rews.df(beforetest.rewards.df, date.test[1], animal[1]),
+                                                   field.max.x, field.max.y)$location.ordinal) %>%
+  dplyr::ungroup()
+
+trials.meta.df = read.trials.meta(rootdirs)
+down.rewdist = bind_rows(
+  mutate(down.habit.rewdist, exp_title = '1_habituation') %>% dplyr::select(-date) %>% dplyr::rename(date=date.test),
+  mutate(down.test.rewdist, exp_title = '2_test')
+) %>%
+  left_join(trials.meta.df) %>%
+  left_join(mouse.meta.df) %>%
+  filter(animal != 'L-TL') # remove animal with few cells during test
+```
+
+Plot distribution of distance to reward 
+```{r}
+down.rewdist %>%
+  filter(signif.si) %>%
+  ggplot() +
+  geom_density(aes(x=min.rew.dist, linetype=exp_title), adjust=1/2) +
+  #facet_grid(implant ~ day_desc) +
+  facet_wrap(animal ~ day_desc, scales='free') +
+  geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
+  coord_flip() +
+  scale_linetype_manual(values=c("dashed", "solid"))+
+  gtheme +
+  xlim(c(0,100)) +
+  xlab('Place field distance from closer reward (%)') + ylab('Density') +
+  ggtitle('Downsampled trials')
+
+ggsave('/tmp/downsampled_dist.svg', units='cm', width=22, height=22)
+```
+
+
+```{r}
+summarize.downrew.pc.pct = function(df, dist.var=min.rew.dist, dist.threshold) {
+  dist.var = enquo(dist.var)
+  df %>%
+    group_by(date, day_desc, animal, implant, exp_title) %>%
+    dplyr::summarise(at.reward=sum((!!dist.var <= dist.threshold) & signif.si),
+                     mean.cells = n() / max(shuffle_i),
+                     npcs = sum(signif.si),
+                     pct.pcs = npcs / n() * 100,
+                     mean.pcs = npcs / max(shuffle_i),
+                     pct.reward=at.reward / npcs * 100) %>%
+    dplyr::select(-npcs, -at.reward)
+}
+
+summary.df = summarize.downrew.pc.pct(down.rewdist, dist.threshold=goal.cell.max.dist) %>%
+  dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_'))
+
+# library(reshape2)
+# summary.wide.df = reshape2::dcast(summary.df, day_desc + animal + implant ~ exp_title, value.var = 'pct.reward') %>%
+#   dplyr::mutate(pc.pct.change = `2_test` - `1_habituation`) %>%
+#   left_join(dplyr::select(crossings.change.df, -date, -location_set, -habituation, -test), 
+#             by=c('animal', 'day_desc', 'implant'))
+#   
+# summary.wide.df %>%
+#   mutate_if(is.double, round, 1) %>%
+#   DT::datatable()
+# 
+# kept.testtrials = summary.wide.df %>% 
+#   dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_')) %>%
+#   filter(norm_crossings_change > 0.1) 
+
+dca1.rew.pc.pct = subset(summary.df, implant == 'dCA1')
+                        #& animal_beforetest_day %in% kept.testtrials$animal_beforetest_day & animal != 'C-1R')
+vca1.rew.pc.pct = subset(summary.df, implant == 'vCA1' & !is.na(pct.reward))
+                         #& animal_beforetest_day %in% kept.testtrials$animal_beforetest_day)
+fem.dca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + day_desc | animal), data=dca1.rew.pc.pct)
+print('Fraction of dCA1 place cells at reward')
+summary(fem.dca1)
+plot.model.diagnostics(fem.dca1, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp_title)
+
+fem.vca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + day_desc | animal), data=vca1.rew.pc.pct)
+print('Fraction of vCA1 place cells did not increase')
+summary(fem.vca1)
+plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp_title)
+
+summary.df %>%
+  #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
+  filter(animal != 'C-1R') %>% 
+  ggplot(aes(x=exp_title, y=pct.reward, group=animal_beforetest_day)) +
+  #geom_point(aes(color=animal)) +
+  geom_line() +
+  facet_grid(. ~ implant, scales = 'free') +
+  xlab('') +
+  gtheme +
+  ylab('Place cells at reward (%)') +
+  ggtitle('Fraction of place cells at reward increased at test trial')
+```
+Fewer pct of cells are place cells during test than in habituation
+```{r}
+summary.df %>%
+  #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
+  ggplot(aes(x=exp_title, y=pct.pcs, group=animal_beforetest_day)) +
+  geom_line() +
+  facet_grid(. ~ implant, scales = 'free') +
+  xlab('') +
+  gtheme +
+  ylab('Place cells (%)') +
+  ggtitle('Fraction of place cells lower during test trial')
+
+fem.dca1.pcs = lmerTest::lmer(pct.pcs ~  exp_title + (1 + day_desc | animal), data=dca1.rew.pc.pct)
+print('Fraction of dCA1 place cells during test')
+summary(fem.dca1.pcs)
+plot.model.diagnostics(fem.dca1.pcs, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp_title)
+```
+
+
+# Stats on multifields
+```{r}
+source('place_field_utils.R')
+
+down.peaks.dist = bind_rows(
+  mutate(down.habit.si, exp_title = '1_habituation') %>% dplyr::select(-date) %>% dplyr::rename(date=date.test),
+  mutate(down.test.si, exp_title = '2_test')
+) %>%
+  left_join(trials.meta.df) %>%
+  left_join(mouse.meta.df) %>%
+  filter(animal != 'L-TL') # remove animal with few cells during test
+```
+
+Plot distribution of distance to reward 
+```{r}
+down.peaks.dist %>%
+  filter(signif.si) %>%
+  dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_')) %>%
+  #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day, animal != 'C-1R') %>%
+  ggplot() +
+  geom_density(aes(x=min.rew.dist * perc2dist, 
+                   #linetype=exp_title, 
+                   fill=exp_title), 
+               alpha=0.3,
+               adjust=1,
+               color='#333333') +
+               #adjust=1/2) +
+  facet_grid(. ~ implant) +
+  #facet_wrap(animal ~ day_desc, scales='free') +
+  geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dotted') +
+  coord_flip() +
+  scale_linetype_manual(values=c("dashed", "solid"))+
+  gtheme +
+  xlim(c(0,100))+
+  scale_fill_manual(values=c('#999999', '#0098ff')) +
+  xlab('Distance (cm)') + ylab('Density') +
+  ggtitle('Field distance from reward in downsampled data')
+
+ggsave('/home/prez/tmp/cheeseboard/downsampled_dist_multifield.pdf',
+       height=6, width=8, units='cm', device=cairo_pdf, dpi=300)
+```
+
+```{r}
+peaks.summary.df = summarize.downrew.pc.pct(down.peaks.dist, dist.threshold=goal.cell.max.dist) %>%
+  dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_')) %>%
+  filter(pct.pcs > 0) %>% 
+  dplyr::ungroup()
+
+peaks.summary.df$exp_title = as.factor(peaks.summary.df$exp_title)
+
+print('Fraction of dCA1 place cells at reward increased')
+fem.model = lmerTest::lmer(pct.reward ~ exp_title*implant + (1 + exp_title + day_desc | animal), 
+                           data=peaks.summary.df, REML = TRUE)
+plot.model.diagnostics(fem.model, peaks.summary.df$implant, peaks.summary.df$exp_title)
+anova(fem.model, refit=FALSE, ddf='Satterthwaite')
+pairwise.post.hoc(fem.model, factor.interaction=c('exp_title:implant'))
+create.summary(peaks.summary.df, pct.reward, implant, exp_title)
+
+peaks.summary.df$aday = as.factor(peaks.summary.df$animal_beforetest_day) %>% as.integer %>% as.factor
+peaks.summary.df$animal = as.factor(peaks.summary.df$animal)
+
+# dCA1 BF
+dca1.rew.pc.pct = filter(peaks.summary.df, implant == 'dCA1')
+models = create.bayes.lm.pair(dca1.rew.pc.pct, 
+                              formula.full = pct.reward ~ 1 + exp_title + aday + animal,
+                              formula.null = pct.reward ~ 1 + aday + animal,
+                              whichRandom = c('aday', 'animal'),
+                              iterations=10000)
+models$full / models$null
+calc.pair.95CI(models$full, pair.vars = c('exp_title-1_habituation', 'exp_title-2_test'))
+
+# vCA1 BF
+vca1.rew.pc.pct = filter(peaks.summary.df, implant == 'vCA1')
+models = create.bayes.lm.pair(vca1.rew.pc.pct, 
+                              formula.full = pct.reward ~ 1 + exp_title + aday + animal,
+                              formula.null = pct.reward ~ 1 + aday + animal,
+                              whichRandom = c('aday', 'animal'),
+                              iterations=10000)
+models$full / models$null
+calc.pair.95CI(models$full, pair.vars = c('exp_title-1_habituation', 'exp_title-2_test'))
+
+
+# vca1.rew.pc.pct = subset(peaks.summary.df, implant == 'vCA1')
+#   #& animal_beforetest_day %in% kept.testtrials$animal_beforetest_day)
+# fem.dca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + day_desc | animal), data=dca1.rew.pc.pct)
+# print('Fraction of dCA1 place cells at reward')
+# summary(fem.dca1)
+# anova(fem.dca1, refit=FALSE, ddf='Satterthwaite')
+# plot.model.diagnostics(fem.dca1, dca1.rew.pc.pct$animal, dca1.rew.pc.pct$exp_title)
+# x = lsmeansLT(fem.dca1, pairwise = T)
+# print('Percentage change in percent of dCA1 place cells at reward')
+# x / lsmeansLT(fem.dca1)['exp_title1_habituation', 'Estimate']
+# 
+# fem.vca1 = lmerTest::lmer(pct.reward ~  exp_title + (1 + day_desc | animal), data=vca1.rew.pc.pct)
+# print('Fraction of vCA1 place cells did not increase')
+# summary(fem.vca1)
+# anova(fem.vca1, refit=FALSE, ddf='Satterthwaite')
+# plot.model.diagnostics(fem.vca1, vca1.rew.pc.pct$animal, vca1.rew.pc.pct$exp_title)
+
+peaks.summary.df %>%
+  #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day) %>%
+  ggplot(aes(x=exp_title, y=pct.reward, group=animal_beforetest_day)) +
+  #geom_point(aes(color=animal)) +
+  geom_line(size=0.25) +
+  facet_grid(. ~ implant, scales = 'free') +
+  xlab('') +
+  gtheme +
+  ylab('Place cells at reward (%)') +
+  ggtitle('Fraction of fields at reward increased at test trial')
+
+ggsave('/home/prez/tmp/cheeseboard/downsampled_dist_multifield_stat.pdf',
+       height=6, width=6, units='cm', device=cairo_pdf, dpi=300)
+```
+
+Change in the field size
+```{r}
+summarize.shuffle = function(df) {
+  df %>%
+    dplyr::select(date, day_desc, animal, implant, exp, exp_title, cell_id, 
+                  field.size.50, signif.si, field.max, field.mean, npeaks.at.rew, min.rew.dist) %>%
+    group_by(date, day_desc, animal, implant, exp, exp_title, cell_id) %>%
+    dplyr::summarise(across(.fns=~ mean(.x, na.rm=TRUE)),
+                     .groups='drop')
+}
+down.peaks.shuffle.mean = summarize.shuffle(down.peaks.dist) 
+```
+
+```{r}
+down.peaks.shuffle.mean.pcs = down.peaks.shuffle.mean %>%
+  filter(signif.si > 0.5) %>%
+  mutate(field.size = field.size.50 / nbins/nbins * 100,
+         aday = paste(animal, format(date), sep='_'))
+down.peaks.shuffle.mean.pcs$aday = as.factor(down.peaks.shuffle.mean.pcs$aday) %>% as.integer() %>% as.factor()
+
+down.peaks.shuffle.mean.pcs %>%
+  ggplot(aes(x=exp_title, y=field.size)) +
+  geom_violin(fill=single.colour, color=single.colour) +
+  geom_violin(fill='transparent', colour='white', draw_quantiles=0.5, size=1) +
+  geom_jitter(shape=16, width=0.4, height=0, size=0.5, alpha=0.15, color='#333333') +
+  facet_grid(. ~ implant) +
+  xlab('') + ylab('% of maze') +
+  gtheme
+
+down.peaks.shuffle.mean.pcs %>%
+  ggplot() +
+  geom_density(aes(x=field.size, 
+                   fill=exp_title), 
+               alpha=0.3,
+               adjust=1,
+               color='#333333') +
+  facet_grid(. ~ implant) +
+  stat_summary()
+  geom_vline(xintercept = goal.cell.max.dist * perc2dist, linetype='dotted') +
+  coord_flip() +
+  scale_linetype_manual(values=c("dashed", "solid"))+
+  gtheme +
+  xlim(c(0,100))+
+  scale_fill_manual(values=c('#999999', '#0098ff')) +
+  xlab('Field size (% of maze)') + ylab('Density')
+```
+
+```{r}
+lmer.test.print(
+  df = filter(down.peaks.shuffle.mean.pcs, implant=='vCA1'),
+  var = log(field.size),
+  fixed.effects = exp_title,
+  randef.str = '(1 + day_desc | animal)',
+  diagnostics.groupvar = exp_title)
+
+models = create.bayes.lm.pair(
+  filter(down.peaks.shuffle.mean.pcs, implant=='vCA1') %>% mutate(val=log(field.size)),
+  formula.full = val ~ 1 + aday + exp_title,
+  formula.null = val ~ 1 + aday)
+models$full/models$null
+calc.pair.95CI(models$full, ytransform = function(x) {exp(x) * 100}, 
+               pair.vars = c('exp_title-1_habituation', 'exp_title-2_test'),
+               show.percent.change = TRUE)
+  
+```
+
+
+

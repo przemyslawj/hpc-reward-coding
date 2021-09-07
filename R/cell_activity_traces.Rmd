@@ -1,0 +1,463 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Plots activity traces in individual trials
+
+
+```{r setup}
+library(dplyr)
+library(pracma)
+library(purrr)
+library(readr)
+library(tidyr)
+library(stringr)
+library(data.table)
+library(datatrace)
+library(tidyr)
+
+source('locations.R')
+source('utils.R')
+source('traces_input.R')
+source('plotting_params.R')
+source('tracking_info.R')
+source('behav_analysis.R')
+#source('rew_aligned_activity.R')
+
+perc2dist = 1.2
+```
+
+
+```{r}
+mouse.meta.df = read.mouse.meta(rootdirs)
+trials.meta.df = read.trials.meta(rootdirs) %>%
+  filter(!(animal %in% c('A-BL', 'C-1R', 'L-TL','P-BR', 'missing')))
+last.learning.days = c('learning1 day#5', 'learning2 day#2', 'learning3 day#2', 'learning4 day#2')
+```
+
+
+```{r}
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
+# animal_name = 'F-TL'
+# exp_title='learning'
+# #day = '2019-09-03'
+# #day = '2019-09-05'
+# day = '2019-09-07'
+
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
+animal_name = 'K-BR'
+exp_title='learning'
+#day = '2020-02-10' # learning 3 day2
+day_desc_name = 'learning3 day#2'
+#animal_name='F-BL'
+
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
+# animal_name = 'D-BR'
+# exp_title='learning'
+# day = '2019-07-29' # learning 2 day2
+#day = '2019-08-01' # learning 3 day2
+
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
+# animal_name = 'O-TR'
+# exp_title='learning'
+# day = '2020_10_17'
+
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
+# animal_name = 'N-BR'
+# exp_title='learning'
+# day = '2020_10_23'
+
+get.rew.aligned.traces = function(animal_name, day_desc_name, min.bout.dur=3000) {
+
+  day = filter(trials.meta.df, animal == animal_name, day_desc == day_desc_name) %>% pull(date)
+  caimg_result_dir = find.caimg.dir(caimg_result_dirs, animal_name, day)
+  timebin.dur.msec = 200
+  binned.traces = prepare.binned.traces(caimg_result_dir, timebin.dur.msec=timebin.dur.msec)
+  behav.traces = get.behav.traces(binned.traces)
+  mobility.bouts = get.mobility.bouts(behav.traces, timebin.dur.msec=timebin.dur.msec,
+                                      mobility.expr=is_running, min.bout.len.msec = min.bout.dur)
+  reward.arriving.bouts = mobility.bouts[rew_at_end > 0,]# & (timestamp_end - timestamp_start) >= min.bout.dur,]
+  rew.aligned.traces = binned.traces[exp_title=='trial', 
+                                   center.timestamps.around.events(.SD, 
+                                                                   reward.arriving.bouts,
+                                                                   exp_title[1],
+                                                                   padding.after.event=6000/timebin.dur.msec), 
+                                   by=.(exp_title, trial_id, cell_id)][aligned_event_id >= 0,]
+}
+
+#rew.aligned.traces = get.rew.aligned.traces(animal_name, day_desc_name, min.bout.dur = 3000)
+
+rew.aligned.traces = data.table::rbindlist(list(
+  get.rew.aligned.traces(animal_name, day_desc_name, min.bout.dur = 3000)))
+  #get.rew.aligned.traces(animal_name, 'learning1 day#1', min.bout.dur = 3000),
+  #get.rew.aligned.traces(animal_name, 'learning2 day#1', min.bout.dur = 3000),
+  #get.rew.aligned.traces(animal_name, 'learning2 day#2', min.bout.dur = 3000),
+  #get.rew.aligned.traces(animal_name, 'learning3 day#1', min.bout.dur = 3000),
+  #get.rew.aligned.traces(animal_name, 'learning3 day#2', min.bout.dur = 3000),
+  #get.rew.aligned.traces(animal_name, 'learning1 day#5', min.bout.dur = 3000)))
+
+#rew.aligned.traces$aligned_event_order_name = with(rew.aligned.traces, 
+#                                              paste(date, ' trial=', trial, ' event_id=', aligned_event_id, 'rew=', rew_at_end))
+rew.aligned.traces$aligned_event_order = with(rew.aligned.traces, 
+                                              as.factor(paste(date, rew_at_end, trial, aligned_event_id))) %>%
+                                              #as.factor(paste(rew_at_end, aligned_event_id))) %>%
+  as.integer()
+```
+
+
+
+```{r}
+#selected.cell_id = 122 # K-BR reward active from early trials.
+selected.cell_id = 220 # K-BR learning3 day#2 
+#selected.cell_id = 89 # F-BL learning3 day#2
+
+fill.var = quo(zscored_smooth_deconv_trace)
+xvar = expr(timestamp_from_end/1000)
+tile.width=timebin.dur.msec/1000
+
+rew.aligned.traces %>%
+  filter(cell_id == selected.cell_id) %>% 
+  left_join(trials.meta.df) %>%
+  filter(day_desc == 'learning3 day#2') %>%
+  #filter(aligned_event_order < 6) %>%
+  ggplot() +
+  geom_tile(aes(x=!!xvar, 
+                y=aligned_event_order, 
+                fill=!!fill.var),
+            width=tile.width*2) +
+  xlab('Time (s)') +
+  ylab('Approach') +
+  scale_x_continuous(limits=c(-5, 5), breaks=seq(-4,4,2)) +
+  facet_wrap(rew_at_end ~ day_desc, scales = 'free_y', nrow=1) +
+  gtheme +
+  #theme(legend.position = 'none') +
+  #scale_fill_gradient(low='white', high = 'black') +
+  scale_fill_gradientn(colours = jet.colours(7)) + 
+  #scale_fill_viridis_c(option='B') +
+  scale_color_manual(values=c('#0098ffff', 'white')) +
+  scale_y_reverse()
+
+ggsave('/home/prez/tmp/cheeseboard/4-approach-traces-example.pdf', device = cairo_pdf,
+       units='cm', width=9.5, height=3.4)
+```
+
+Activity of reward cells vs other cells
+```{r}
+min.timestamp.from.end = -6000
+max.timestamp.from.end = 6000
+beforetest.peaks.at.current.rew = as.data.table(beforetest.peaks.at.current.rew)
+day = rew.aligned.traces$date[1]
+reward.cells = beforetest.peaks.at.current.rew[date == day+1 & animal == animal_name & 
+                                            signif.si & min.rew.dist <= goal.cell.max.dist, cell_id]
+rew.aligned.traces$is.rew.cell = rew.aligned.traces$cell_id %in% reward.cells 
+mean.rew.traces = rew.aligned.traces[timestamp_from_end >= min.timestamp.from.end & 
+                                       timestamp_from_end <= max.timestamp.from.end, 
+                   .(mean.trace=mean(zscored_smooth_deconv_trace), 
+                     sem.trace=sem(zscored_smooth_deconv_trace),
+                     n=.N), 
+                   by=.(is.rew.cell, timestamp_from_end)] 
+mean.rew.traces %>%
+  ggplot(aes(x=timestamp_from_end/1000, y=mean.trace)) +
+  #geom_line() +
+  geom_ribbon(aes(ymin=mean.trace-sem.trace, 
+                  ymax=mean.trace+sem.trace, 
+                  fill=is.rew.cell),
+              alpha=0.3) +
+  gtheme
+```
+
+```{r}
+last.day.trials.df = expand.grid(animal=unique(trials.meta.df$animal), 
+                                 day_desc_name=last.learning.days)
+
+min.timestamp.from.start = -6000
+max.timestamp.from.start = 6000
+trial.peaks.at.current.rew = as.data.table(trial.peaks.at.current.rew)
+beforetest.peaks.at.current.rew = as.data.table(beforetest.peaks.at.current.rew)
+rew.aligned.traces.list = list()
+for (i in 1:nrow(last.day.trials.df)) {
+  rew.aligned.traces = get.rew.aligned.traces(last.day.trials.df$animal[i],
+                                              last.day.trials.df$day_desc_name[i])
+  
+  day = rew.aligned.traces$date[1]
+  cell_ids.present = beforetest.peaks.at.current.rew[date == day+1 &
+                                                       animal == last.day.trials.df$animal[i],
+                                                     cell_id]
+                                              
+  reward.cells = beforetest.peaks.at.current.rew[date == day+1 & 
+                                                   animal == last.day.trials.df$animal[i] & 
+                                                   signif.si & min.rew.dist <= goal.cell.max.dist, 
+                                                 cell_id]
+  rew.aligned.traces$is.rew.cell = rew.aligned.traces$cell_id %in% reward.cells 
+  rew.aligned.traces.list[[i]] = rew.aligned.traces[
+    timestamp_from_end >= min.timestamp.from.end & 
+      timestamp_from_end <= max.timestamp.from.end &
+      cell_id %in% cell_ids.present, ]
+}
+  
+```
+
+```{r}
+all.rew.aligned.traces = rbindlist(rew.aligned.traces.list)
+all.rew.aligned.traces = all.rew.aligned.traces[as.data.table(mouse.meta.df), on='animal']
+all.rew.aligned.traces = all.rew.aligned.traces[animal %in% animal_names,]
+
+mean.rew.traces = all.rew.aligned.traces[,
+                   .(mean.trace=mean(zscored_smooth_deconv_trace), 
+                     sem.trace=sem(zscored_smooth_deconv_trace),
+                     n=.N), 
+                   by=.(implant, is.rew.cell, timestamp_from_end)] 
+
+timebin.width = 1000
+all.rew.aligned.traces.comparison = all.rew.aligned.traces[
+    (timestamp_from_end <= -4000) & (timestamp_from_end > -5000) |
+    (timestamp_from_end > -1000) & (timestamp_from_end <= 0)][
+    , timestamp_from_end_bin := ceiling(timestamp_from_end / timebin.width)] [
+  !is.na(timestamp_from_end_bin) & !is.na(is.rew.cell) & !is.na(date)]
+```
+
+
+Difference between reward and other cells
+```{r}
+# average over cells in the trial
+trial.rew.traces = all.rew.aligned.traces[,
+                   .(mean.trace=mean(zscored_smooth_deconv_trace),
+                     #mean.trace=mean(log(0.1 + smoothed_deconv_trace)),
+                     n=.N), 
+                   by=.(implant, animal, date, trial_id, trial, is.rew.cell, timestamp_from_end)] 
+data.table::setorder(trial.rew.traces, implant, animal, date, trial_id, trial, timestamp_from_end, is.rew.cell)
+
+rew.traces.norm = trial.rew.traces %>%
+  filter(!is.na(is.rew.cell)) %>%
+  #filter(n >= 3) %>%
+  pivot_wider(id_cols=c(implant, animal, date, trial_id, trial, timestamp_from_end),
+              values_from='mean.trace', 
+              names_from=is.rew.cell,
+              names_prefix='rew.cell.') %>%
+  mutate(trace.diff = rew.cell.TRUE - rew.cell.FALSE,
+         trace.ratio = rew.cell.TRUE / rew.cell.FALSE,
+         timestamp_from_end_bin = ceiling(timestamp_from_end / timebin.width))%>%
+  filter(!is.na(trace.diff))
+
+rew.traces.norm %>%
+  group_by(implant, timestamp_from_end) %>%
+  dplyr::summarise(mean.trace=mean(trace.diff, na.rm=TRUE), 
+                     sem.trace=sem(trace.diff)) %>%
+  ggplot(aes(x=timestamp_from_end/1000, y=mean.trace)) +
+  geom_ribbon(aes(ymin=mean.trace-sem.trace, 
+                  ymax=mean.trace+sem.trace),
+                  fill='#888888') +
+  scale_x_continuous(limits=c(-5, 5), breaks=seq(-4,4,2)) +
+  scale_fill_manual(values=rev(side.two.coulours)) +
+  facet_grid(. ~ implant) + xlab('Time to reward (s)') + 
+  geom_hline(yintercept = 0, linetype='dashed', color='#333333') +
+  ylab('activity z-score diff') +
+  gtheme
+
+ggsave('/home/prez/tmp/cheeseboard/4-approach-traces.pdf', device = cairo_pdf,
+       units='cm', width=6.0, height=3.9)
+```
+
+```{r}
+# average over cells in the trial in the timebin
+bin.trial.rew.traces = as.data.table(rew.traces.norm)[timestamp_from_end_bin == 0 | timestamp_from_end_bin == -4,
+            .(bin.activity=mean(trace.diff)), 
+              #bin.activity=trace.diff[1]),
+            by=.(implant, animal, date, trial_id, trial, timestamp_from_end_bin)] 
+
+bin.trial.rew.traces$timestamp_from_end_bin = as.factor(bin.trial.rew.traces$timestamp_from_end_bin)
+bin.trial.rew.traces$is_proximal = as.factor(bin.trial.rew.traces$timestamp_from_end_bin == 0)
+bin.trial.rew.traces$aday = as.factor(
+  paste(format(bin.trial.rew.traces$animal), 
+        format(bin.trial.rew.traces$date), sep='_')) %>%
+  as.integer() %>% as.factor()
+
+
+bin.trial.rew.traces.wide = pivot_wider(
+  bin.trial.rew.traces,
+  id_cols=c(implant, animal, date, trial_id, trial, aday),
+  values_from=bin.activity,
+  names_from=is_proximal,
+  names_prefix='is_proximal_') %>%
+  mutate(trace.change=is_proximal_TRUE - is_proximal_FALSE)
+
+bin.trial.rew.traces %>%
+  ggplot(aes(x=is_proximal, y=bin.activity)) +
+  geom_hline(yintercept = 0,linetype='dashed', color='#333333') +
+  geom_violin(aes(fill=implant, color=implant)) +
+  geom_jitter(width=0.25, height=0.0, size=0.2, shape=1, alpha=0.4, color='#333333') +
+    stat_summary(fun=mean, geom="point", shape=23, size=2, color='white') +
+  scale_fill_manual(values=main.two.colours) +
+  scale_color_manual(values=main.two.colours) +
+  facet_grid(. ~ implant) +
+  ylab('activity z-score diff') + xlab('') +
+  gtheme
+ggsave('/home/prez/tmp/cheeseboard/4-approach-traces-stats.pdf', device = cairo_pdf,
+       units='cm', width=5.1, height=3.9)
+  
+m.rew.activ.diff = lmer.test.print(
+  filter(bin.trial.rew.traces) %>% 
+    mutate(val=log(2.0 + bin.activity)) %>% filter(!is.na(val), val < Inf),
+  val,
+  diagnostics.groupvar = animal,
+  fixed.effects = implant * is_proximal,
+  randef.str = '(1 | aday)')
+pairwise.post.hoc(m.rew.activ.diff, factor.interaction = 'implant:is_proximal')
+
+models = create.bayes.lm.pair(
+  filter(bin.trial.rew.traces, implant=='vCA1') %>%
+    mutate(val=log(2.0+bin.activity)) %>%
+    filter(!is.na(val), val < Inf),
+  formula.full = val ~ 1 + is_proximal + aday,
+  formula.null = val ~ 1 + aday,
+  whichRandom = c('aday'),
+  iterations = 10000
+)
+models$full / models$null
+calc.pair.95CI(models$full, function(x) exp(x) - 1, show.percent.change = FALSE,
+               pair.vars = c('is_proximal-FALSE', 'is_proximal-TRUE'))
+
+```
+
+
+```{r}
+mean.rew.traces %>%
+  ggplot(aes(x=timestamp_from_end/1000, y=mean.trace)) +
+  geom_ribbon(aes(ymin=mean.trace-sem.trace, 
+                  ymax=mean.trace+sem.trace, 
+                  fill=is.rew.cell),
+              alpha=0.75) +
+  xlim(c(-5,5)) +
+  scale_fill_manual(values=rev(side.two.coulours)) +
+  facet_grid(. ~ implant) + xlab('Time (s)') +ylab('z-scored F') +
+  gtheme
+ggsave('/home/prez/tmp/cheeseboard/4-approach-traces.pdf', device = cairo_pdf,
+       units='cm', width=8.4, height=3.9)
+```
+
+```{r}
+all.rew.aligned.traces.per.cell.group = all.rew.aligned.traces.comparison[,
+   .(bin.activity=mean(zscored_smooth_deconv_trace),
+     ntrials=length(unique(trial_id))),
+   by=.(animal, date, is.rew.cell, cell_id, timestamp_from_end_bin)
+ ][mouse.meta.df, on='animal']
+all.rew.aligned.traces.per.cell.group$timestamp_from_end_bin = 
+  as.factor(all.rew.aligned.traces.per.cell.group$timestamp_from_end_bin)
+all.rew.aligned.traces.per.cell.group$aday = as.factor(
+  paste(format(all.rew.aligned.traces.per.cell.group$animal), 
+        format(all.rew.aligned.traces.per.cell.group$date), sep='_')) %>%
+  as.integer() %>% as.factor()
+all.rew.aligned.traces.per.cell.group$is.rew.cell = as.factor(all.rew.aligned.traces.per.cell.group$is.rew.cell)
+
+# all.rew.aligned.traces.per.cell.group.diff = all.rew.aligned.traces.per.cell.group %>%
+#     filter(!is.na(is.rew.cell)) %>%
+#     pivot_wider(id_cols=c(implant, animal, date, is.rew.cell, cell_id, ntrials),
+#               values_from='bin.activity',
+#               names_from='timestamp_from_end_bin',
+#               names_prefix='timestamp_from_end_bin.') %>%
+#   mutate(bin.activity.diff = timestamp_from_end_bin.0 - `timestamp_from_end_bin.-4`,
+#          bin.activity.ratio = timestamp_from_end_bin.0 / `timestamp_from_end_bin.-4`)
+```
+
+
+```{r}
+# all.rew.aligned.traces.per.cell.trial = all.rew.aligned.traces.comparison[,
+#    .(bin.activity=mean(zscored_smooth_deconv_trace),
+#      n=.N),
+#    by=.(animal, date, trial_id, is.rew.cell, cell_id, timestamp_from_end_bin)
+#  ][n>=1000/timebin.dur.msec]
+# 
+# all.rew.aligned.traces.per.cell.trial.diff = all.rew.aligned.traces.per.cell.trial %>%
+#     filter(!is.na(is.rew.cell)) %>%
+#     pivot_wider(id_cols=c(animal, date, trial_id, is.rew.cell, cell_id),
+#               values_from='bin.activity',
+#               names_from='timestamp_from_end_bin',
+#               names_prefix='timestamp_from_end_bin.') %>%
+#   mutate(bin.activity.diff = timestamp_from_end_bin.0 - `timestamp_from_end_bin.-4`,
+#          bin.activity.ratio = timestamp_from_end_bin.0 / `timestamp_from_end_bin.-4`) %>%
+#   filter(!is.na(bin.activity.diff))
+
+# all.rew.aligned.traces.per.cell.group = 
+#   as.data.table(all.rew.aligned.traces.per.cell.trial.diff)[,
+#     .(bin.activity.diff.mean = mean(bin.activity.diff, na.rm=TRUE)),
+#     by=.(animal, date, is.rew.cell, cell_id)
+#   ][mouse.meta.df, on='animal']
+# 
+# all.rew.aligned.traces.per.cell.group$aday = as.factor(
+#   paste(format(all.rew.aligned.traces.per.cell.group$animal), 
+#         format(all.rew.aligned.traces.per.cell.group$date), sep='_')) %>%
+#   as.integer() %>% as.factor()
+# all.rew.aligned.traces.per.cell.group$is.rew.cell = as.factor(all.rew.aligned.traces.per.cell.group$is.rew.cell)
+# 
+# 
+# all.rew.aligned.traces.per.cell.group %>%
+#   ggplot(aes(x=is.rew.cell, y=bin.activity.diff.mean)) +
+#   geom_hline(yintercept = 0, linetype='dashed', color='#333333') +
+#   geom_violin(aes(fill=implant, color=implant)) +
+#   geom_jitter(width=0.35, height=0.0, size=0.8, shape=1, alpha=0.4, color='#333333') +
+#     stat_summary(fun=mean, geom="point", shape=23, size=2, color='white') +
+#   scale_fill_manual(values=rev(side.two.coulours)) +
+#   scale_color_manual(values=rev(side.two.coulours)) +
+#   ylim(c(-2.0, 3.0)) +
+#   #scale_y_log10() +
+#   ylab('z-scored F') +
+#   facet_grid(. ~ implant) +
+#   gtheme
+# 
+# m.pc.proximal = lmer.test.print(
+#   all.rew.aligned.traces.per.cell.group %>% 
+#     mutate(val = (bin.activity.diff.mean)) %>%
+#     filter(!is.na(val), val < Inf),
+#   val,
+#   diagnostics.groupvar = is.rew.cell,
+#   fixed.effects = is.rew.cell * implant,
+#   randef.str = '(1 + date | animal)')
+# lsmeansLT(m.pc.proximal, pairwise=FALSE, ddf='Satterthwaite')
+
+all.rew.aligned.traces.per.cell.group %>%
+  filter(timestamp_from_end_bin == 0) %>%
+  ggplot(aes(x=is.rew.cell, y=bin.activity)) +
+  geom_hline(yintercept = 0, linetype='dashed', color='#333333') +
+  geom_violin(aes(fill=is.rew.cell, color=is.rew.cell)) +
+  geom_jitter(width=0.35, height=0.0, size=0.1, shape=1, alpha=0.2, color='#333333') +
+    stat_summary(fun=mean, geom="point", shape=23, size=2, color='white') +
+  scale_fill_manual(values=rev(side.two.coulours)) +
+  scale_color_manual(values=rev(side.two.coulours)) +
+  facet_grid(. ~ implant) +
+  ylim(c(-0.5, 4.0)) +
+  ylab('z-scored F') +
+  gtheme
+  
+ggsave('/home/prez/tmp/cheeseboard/4-approach-traces-stats.pdf', device = cairo_pdf,
+       units='cm', width=7.4, height=4.1)
+```
+
+```{r}
+implant.loc = 'dCA1'
+
+m.pc.proximal = lmer.test.print(
+  subset(all.rew.aligned.traces.per.cell.group, implant==implant.loc & timestamp_from_end_bin==0),
+  log(2.0 + bin.activity),
+  diagnostics.groupvar = is.rew.cell,
+  fixed.effects = is.rew.cell,
+  randef.str = '(1 + date | animal)')
+lsmeansLT(m.pc.proximal, pairwise=FALSE, ddf='Satterthwaite')
+
+models = create.bayes.lm.pair(
+  subset(all.rew.aligned.traces.per.cell.group, implant==implant.loc & timestamp_from_end_bin==0) %>%
+    mutate(val=log(2.0 + bin.activity)),
+  formula.full = val ~ 1 + is.rew.cell + aday,
+  formula.null = val ~ 1 + aday,
+  whichRandom = c('aday'),
+  iterations = 10000
+)
+models$full / models$null
+calc.pair.95CI(models$full, function(x) exp(x) - 1, show.percent.change = FALSE,
+               pair.vars = c('is.rew.cell-FALSE', 'is.rew.cell-TRUE'))
+
+group_by(subset(all.rew.aligned.traces.per.cell.group, implant==implant.loc), 
+         is.rew.cell, timestamp_from_end_bin) %>%                
+  dplyr::summarise(mean(bin.activity), sem(bin.activity), n())
+```
+

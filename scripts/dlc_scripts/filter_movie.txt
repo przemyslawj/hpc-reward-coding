@@ -1,0 +1,3 @@
+- msCam*.avi
++ *.avi
+- *
