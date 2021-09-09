@@ -1,0 +1,152 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r setup} 
+library(dplyr)
+library(plyr)
+library(pracma)
+library(purrr)
+library(readr)
+library(tidyr)
+library(tibble)
+library(smoothie)
+library(stringr)
+library(DT)
+library(data.table)
+library(datatrace)
+
+library(ggplot2)
+library(cowplot)
+gtheme = theme_minimal() + theme_cowplot() +
+  theme(text = element_text(size=10), axis.text = element_text(size=8))
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+
+source('place_field_utils.R')
+
+nbins = 20
+```
+
+# Changes in PF over days
+```{r}
+trials.meta.df = data.table(trials.meta.df)
+create.animal.days.df = function(animal_name, cell_name, fields.list=run.fields) {
+  selected.days = names(fields.list[[animal_name]])
+  day_descs = map_chr(selected.days, ~ trials.meta.df[date==.x & animal == animal_name, day_desc][1])
+  data.frame(animal=animal_name,
+             cell_id=format(cell_name),
+             date=selected.days,
+             day_desc = day_descs,
+             stringsAsFactors = FALSE)  
+}
+
+
+place.cell.db = data.table(place.cell.db)
+pc.test.df = data.table(pc.test.df)
+
+create.all.day.pf = function(selected.cells.df, 
+                             fields.list=run.fields, 
+                             occupancies.list=run.occupancies,
+                             smooth.field=FALSE) {
+  # Creates DF for place field of a cell specified in the row
+  single.cell.pf = function(row, fields.list, occupancies.list) {
+    animal_name = as.character(row$animal)
+    cell_name = format(row$cell_id)
+    day = format(row$date)
+    
+    field = fields.list[[animal_name]][[day]][[cell_name]]
+    if (is.null(field)) {
+      #print(paste('Field not found for', animal_name, day, cell_name))
+      return(data.frame())
+    }
+    df = create.pf.df(field,
+                      occupancies.list[[animal_name]][[day]][[cell_name]], 
+                      smooth=smooth.field)
+  
+    df$animal = animal_name
+    df$cell_id = cell_name
+    return(df)
+  }
+
+  pf = selected.cells.df %>%
+    adply(.margins=1, .fun=single.cell.pf, fields.list, occupancies.list)
+
+  return(pf)
+}
+```
+
+#Plot selected test trial place cells
+```{r}
+#animal_name = 'K-BR'
+#selected.cells = c(61, 108, 39, 25, 120, 114) # 'K-BR'
+#selected.cells = c(108, 122, 36, 59, 62) # 'K-BR'
+animal_name = 'D-BR'
+# selected.cells = c(196, 198, 70, 194, 199, 266, 267, 268) # 'D-BR'
+# animal_name = 'B-BL'
+# selected.cells = c(86,93,94,108) # 'B-BL'
+animal_name = 'G-BR'
+#selected.cells = c(79, 213, 12, 62, 92) # 'G-BR'
+selected.cells = c(51,84,92,99,101) # 'G-BR'
+# animal_name = 'F-TL'
+# selected.cells = c(419,142,335,428,6,97, 98) # 'F-TL'
+# animal_name = 'N-BR'
+# selected.cells = c(236,24,69,89,97) # 'N-BR'
+# animal_name = 'E-BL'
+# selected.cells = c(329,169,79,78,82,98,131) # 'E-BL'
+# animal_name = 'F-BL'
+# selected.cells = c(105) # 'F-BL'
+# animal_name = 'N-BL'
+# selected.cells = c(1, 197, 137, 357, 363) # 'N-BL'
+g.gbr = map_dfr(selected.cells,
+                ~ create.animal.days.df(animal_name, .x, beforetest.fields)) %>%
+  create.all.day.pf(fields.list=beforetest.fields,
+                    occupancies.list=beforetest.occupancies) %>%
+  filter(stringr::str_starts(day_desc, 'learning'), day_desc != 'learning4 day#3') %>%
+  filter(day_desc != 'learning4 day#3') %>%
+  day.normalize.fields() %>% 
+  plot.pf(max.x=nbins, max.y=nbins) +
+    facet_grid(cell_id ~ day_desc) +
+    geom_maze_contour(diameter = nbins) +
+    geom_rewards(beforetest.rewards.df %>% filter(day_desc != 'learning4 day#3'), 
+                 animal_name, nbins=nbins, 
+                 rew.colours = list('prev_rew'='white', 'current_rew'='white')) +
+  theme(legend.position = 'bottom')
+  
+g.gbr
+ggsave('/tmp/pf_k-br.pdf', plot = g.gbr, 
+       width = 7, height = 11, 
+       units = 'cm', dpi = 300, device = cairo_pdf)
+```
+
+Select habituation cells to show
+```{r}
+animal_name = 'F-TL'
+sampled.cells.df = filter(place.cell.db, day_desc == 'habituation day#3', animal == animal_name) %>%
+  filter(signif.si) %>%
+  arrange(field.size.50) %>%
+  sample_n(5)
+sampled.cells.df
+sampled.cells = sampled.cells.df$cell_id
+```
+
+
+Plot selected habituation place cells
+```{r}
+g.gbr = map_dfr(selected.cells, 
+                ~ create.animal.days.df(animal_name, .x, run.fields)) %>%
+  filter(day_desc == 'habituation day#3') %>%
+  create.all.day.pf(fields.list=run.fields,
+                    occupancies.list=run.occupancies) %>%
+  day.normalize.fields() %>% 
+  plot.pf(max.x=nbins, max.y=nbins) +
+    facet_grid(cell_id ~ day_desc) +
+  theme(legend.position = 'none')
+  
+g.gbr
+ggsave(paste0('/tmp/pf_habit_.', animal_name, '.pdf'), 
+       plot = g.gbr, width = 3, height = 9, units = 'cm', dpi = 300, device = cairo_pdf)
+```

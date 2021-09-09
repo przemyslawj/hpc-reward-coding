@@ -1,0 +1,351 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r include=FALSE}
+library(dplyr)
+library(data.table)
+library(datatrace)
+library(permute)
+
+source('distances.R')
+source('traces_input.R')
+source('locations.R')
+source('plotting_params.R')
+source('fixed_effects.R')
+source('utils.R')
+source('decoder_utils.R')
+```
+
+```{r}
+perc2dist = 1.2
+goal.cell.max.dist = 20 / perc2dist
+#subset.caimg_result_dirs = caimg_result_dirs[shuffle(caimg_result_dirs)[1:5]]
+subset.caimg_result_dirs = caimg_result_dirs
+
+mouse.meta.df = read.mouse.meta(rootdirs)
+trials.meta.df = read.trials.meta(rootdirs)
+all.locations.df = map_dfr(rootdirs, read_locations)
+rewards.df =  all.locations.df %>%
+  filter(!is_test) %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
+```
+
+# At reward Decoder
+
+## Eval beforetest trials
+```{r include=FALSE}
+bayes.atreward.decoder.config = list(
+  predicted.var = quo(close2rew),
+  predictor.var = quo(response_bin),
+  nclasses = 2,
+  train.fun = create.discrete.bayes,
+  predict.fun = bayesmax,
+  error.fun = function(x,y) {abs(x-y)}
+)
+
+mfr.bayes.atreward.decoder.config = list(
+  predicted.var = quo(close2rew),
+  predictor.var = quo(smoothed_deconv_trace),
+  nclasses = 2,
+  train.fun = create.mfr.bayes,
+  predict.fun = bayesmax_poisson,
+  error.fun = function(x,y) {abs(x-y)}
+)
+
+add.close2rew.fun = function(min.rew.dist.thresh) {
+  function(data.trace) {
+    data.trace[, close2rew := as.integer((dist_reward0 <= min.rew.dist.thresh | dist_reward1 <= min.rew.dist.thresh)) + 1]  
+  }
+}
+```
+
+
+## Eval reward decoder trained on two trials and evaluated on on anotherbeforetest trial
+
+Beforetest reward decoding on leave-one-out day data
+```{r include=FALSE}
+test.rewards.df = all.locations.df %>%
+  filter(is_test, exp_title=='beforetest') %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(dplyr::select(trials.meta.df, -location_set), by=c('date', 'animal')) %>%
+  as.data.table()
+
+# Returns test.rewards DF present on 2 dates
+rew.present.both.tests = function(rewards.dates.df) {
+  # loc ordinal for reward present on both days
+  reward.loc_ord = rewards.dates.df %>%
+    dplyr::count(location_ordinal) %>% dplyr::filter(n==2) %>% dplyr::pull(location_ordinal)
+
+  filter(rewards.dates.df, location_ordinal %in% reward.loc_ord ) %>%
+    dplyr::select(location_ordinal, trans_x, trans_y) %>%
+    dplyr::distinct()
+}
+
+# Returns test.rewards of the that not exclude the given rewards DF
+exclude.loc.ordinals = function(animal.rews.df, excluded.rews.df) {
+  rewards.loc_ords = pull(animal.rews.df, location_ordinal)
+  included.reward.loc_ord = setdiff(rewards.loc_ords, pull(excluded.rews.df, location_ordinal))
+  
+  filter(animal.rews.df, location_ordinal %in% included.reward.loc_ord) %>%
+    dplyr::select(location_ordinal, trans_x, trans_y) %>%
+    dplyr::distinct()
+}
+
+# Filters test.traces to epochs at the tested reward location that was not present during training data and vice-verse
+filter.at.present.or.future.rew = function(test.traces, train.traces,
+                                           filter.dist.thresh=15/perc2dist) {
+  animal.test.rewards.df = filter(test.rewards.df, animal == test.traces$animal[1]) 
+  training.rewards.df = filter(animal.test.rewards.df, date %in% unique(train.traces$date)) 
+  
+  tested.locs.df = bind_rows(rew.present.both.tests(training.rewards.df),
+                             exclude.loc.ordinals(filter(animal.test.rewards.df, date == test.traces$date[1]), 
+                                                  training.rewards.df)) %>%
+    dplyr::distinct()
+  
+  x = test.traces[, dist.rews := calc.min.rew.dist(tested.locs.df, x, y)$rew.dist]
+  x[dist.rews <= filter.dist.thresh, ]
+}
+
+# Filters train.traces to epochs at the tested reward location that was not present during training data and vice-verse
+filter.train.present.or.future.rew = function(test.traces, train.traces,
+                                              filter.dist.thresh=15/perc2dist) {
+  animal.test.rewards.df = filter(test.rewards.df, animal == test.traces$animal[1]) 
+  training.rewards.df = filter(animal.test.rewards.df, date %in% unique(train.traces$date)) 
+  
+  tested.locs.df = bind_rows(rew.present.both.tests(training.rewards.df),
+                             exclude.loc.ordinals(animal.test.rewards.df, training.rewards.df)) %>%
+    dplyr::distinct()
+  
+  x = train.traces[, dist.rews := calc.min.rew.dist(tested.locs.df, x, y)$rew.dist]
+  x[dist.rews <= filter.dist.thresh, ]
+}
+```
+
+
+##Decoder evaluated on training data
+```{r include=FALSE}
+beforetest.onedayout.reward.training = eval.decoder.all.other.days(
+  bayes.atreward.decoder.config, 
+  test.days.df,
+  equal.prior = TRUE,
+  prepare.vars.fun = add.close2rew.fun(goal.cell.max.dist),
+  filter.train.traces.fun = function(binned.traces) {
+    binned.traces[pmin(dist_reward0, dist_reward1) <= 15/perc2dist | pmin(dist_reward0, dist_reward1) >= 40 / perc2dist, ]
+  },
+  filter.test.traces.fun = filter.train.present.or.future.rew,
+  min.ncells.for.eval = 10,
+  min.present.times = 3,
+  test.day.indecies=c(1,3))
+
+beforetest.onedayout.reward.training.summary = beforetest.onedayout.reward.training %>%
+  left_join(mouse.meta.df) %>%
+  group_by(implant, animal, test_date) %>%
+  dplyr::summarise(mean.error=mean(error), sem.error=sem(error), 
+                   mean.rand.error=mean(random_error), sem.rand.error=sem(random_error)) %>%  
+  dplyr::mutate(mean.rand.diff=mean.rand.error-mean.error)
+beforetest.onedayout.reward.training.summary %>% 
+  group_by(implant) %>%
+  dplyr::summarise(mean(mean.error), sem(mean.error), 
+                   mean(mean.rand.diff), sem(mean.rand.diff),
+                   mean(mean.rand.error), sem(mean.rand.error))
+```
+
+```{r}
+ggplot(beforetest.onedayout.reward.training.summary,
+       aes(x=implant, y=100*mean.rand.diff, color=implant)) +
+  stat_summary(fun.data='mean_cl_boot', geom='crossbar') +
+  geom_jitter(shape=1, height=0, width=0.15, size=0.5) +
+  geom_hline(yintercept = 0, linetype='dashed') +
+  scale_color_manual(values=main.two.colours) +
+  gtheme +
+  theme(legend.position = 'none') +
+  xlab('') + ylab('Accuracy above random (%)') + ylim(c(-50,50))
+figure.ggsave('FigS4D-at_rew_classifier_training_dataset.pdf', width=3.0, height=3.2)
+```
+
+
+##Decoder evaluated on test data
+```{r include=FALSE}
+beforetest.onedayout.reward = eval.decoder.all.other.days(
+  bayes.atreward.decoder.config, 
+  test.days.df,
+  equal.prior = TRUE,
+  prepare.vars.fun = add.close2rew.fun(goal.cell.max.dist),
+  filter.train.traces.fun = function(binned.traces) {
+    binned.traces[pmin(dist_reward0, dist_reward1) <= 15/perc2dist | pmin(dist_reward0, dist_reward1) >= 40 / perc2dist, ]
+  },
+  filter.test.traces.fun = filter.at.present.or.future.rew,
+  min.ncells.for.eval = 10,
+  min.present.times = 3,
+  test.day.indecies=c(1,3))
+```
+
+
+```{r}
+beforetest.onedayout.reward.summary = beforetest.onedayout.reward %>%
+  left_join(mouse.meta.df) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date')) %>%
+  group_by(implant, animal, test_date) %>%
+  dplyr::summarise(mean.error=mean(error), sem.error=sem(error), 
+                   mean.rand.error=mean(random_error), sem.rand.error=sem(random_error)) %>%  
+  dplyr::mutate(mean.rand.diff=mean.rand.error-mean.error)
+  
+beforetest.onedayout.reward.summary %>% 
+  group_by(implant) %>%
+  dplyr::summarise(mean(mean.error), sem(mean.error), 
+                   mean(mean.rand.diff), sem(mean.rand.diff),
+                   mean(mean.rand.error), sem(mean.rand.error))
+
+
+```
+
+```{r}
+ggplot(beforetest.onedayout.reward.summary,
+       aes(x=implant, y=100*mean.rand.diff, color=implant)) +
+  stat_summary(fun.data='mean_cl_boot', geom='crossbar') +
+  geom_jitter(shape=1, height=0, width=0.15, size=0.5) +
+  geom_hline(yintercept = 0, linetype='dashed') +
+  scale_color_manual(values=main.two.colours) +
+  gtheme +
+  theme(legend.position = 'none') +
+  xlab('') + ylab('Accuracy above random (%)') + ylim(c(-50,50))
+figure.ggsave('Fig4G-at_rew_classifier.pdf', width=3.0, height=3.2)
+
+lmer.test.print(
+  beforetest.onedayout.reward.summary,
+  var=mean.rand.diff,
+  fixed.effects = implant,
+  randef.str = '(1 | animal)',
+  diagnostics.groupvar = implant)
+```
+Bayes factors
+```{r}
+models = create.bayes.lm.pair(beforetest.onedayout.reward.summary,
+                     formula.full = mean.rand.diff ~ 1 + implant + animal,
+                     formula.null = mean.rand.diff ~ 1 + animal,
+                     whichRandom = 'animal',
+                     iterations = 100000)
+models$full / models$null
+calc.pair.95CI(models$full, show.percent.change = FALSE)
+```
+
+
+# Decoding if at reward on other beforetest day from mean population activity
+```{r include=FALSE}
+min.rew.dist.thresh = goal.cell.max.dist
+
+beforetest.field.dist2current.rew = as.data.table(beforetest.field.dist2current.rew)
+beforetest.cell.db = as.data.table(beforetest.cell.db)
+
+avg.pop.activity = function(binned.traces) {
+  min.times_rew_cell = 1
+  trace.dates = unique(binned.traces$date) %>% char2date()
+  cell.db.daily =  beforetest.field.dist2current.rew[
+    (date %in% trace.dates & animal == binned.traces$animal[1]), 
+    .(animal, date, cell_id, signif.si)]
+  cell.db = beforetest.field.dist2current.rew[
+    (date %in% trace.dates & animal == binned.traces$animal[1]), 
+    .(animal, date, cell_id, 
+      signif.si,
+      is.rew.cell = min.rew.dist <= min.rew.dist.thresh,
+      is.signif.rew.cell = signif.si & (min.rew.dist <= min.rew.dist.thresh) )][
+      ,.(times_signif_rew_cell = sum(is.signif.rew.cell),
+         times_rew_cell = sum(is.rew.cell),
+         times_signif_cell = sum(signif.si),
+         npresent = .N,
+         times_signif_rew_cell_pct = sum(is.signif.rew.cell) / .N),
+      .(animal, cell_id)]
+  # restrict to cells present on all 3 days
+  sprintf('#cells at all three beforetests: %d', nrow(cell.db[npresent == 3, ]) ) %>% print
+  sprintf('#signif reward cells amongst them: %d', 
+          nrow(cell.db[npresent == 3 & times_signif_rew_cell >= min.times_rew_cell]) ) %>% print
+  sprintf('# reward cells amongst them: %d',
+          nrow(cell.db[npresent == 3 & times_rew_cell >= 2]) ) %>% print
+  joined.data.traces = merge(binned.traces, cell.db.daily, by=c('animal','cell_id', 'date'), all.x = TRUE)
+  joined.data.traces[, min.rew.dist := pmin(dist_reward0, dist_reward1)]
+  joined.data.traces[, rew.cell.group := as.integer(signif.si)]
+  joined.data.traces[, close2rew := as.integer(min.rew.dist <= min.rew.dist.thresh) + 1]  
+  joined.data.traces[, cell.active := zscored_smooth_deconv_trace >= 0.5]
+
+  pop.traces.rew.cells = joined.data.traces[,
+                                            .(avg.val = mean(response_bin)-1),
+                                            #.(avg.val = mean(cell.active)),
+                                            by=list(animal, date, exp_title, trial_id, trial, x, y,
+                                                    close2rew, min.rew.dist, timestamp, time_bin, rew.cell.group)]
+
+  pop.traces.rew.cells$cell_id = pop.traces.rew.cells$rew.cell.group
+  pop.traces.rew.cells[timestamp <= 120000, ]
+}
+
+pop.bayes.atreward.decoder.config = mfr.bayes.atreward.decoder.config
+pop.bayes.atreward.decoder.config$predictor.var = quo(avg.val)
+beforetest.pop.oneydayout.reward = eval.decoder.all.other.days(
+  pop.bayes.atreward.decoder.config, 
+  test.days.df,
+  equal.prior = TRUE,
+  prepare.vars.fun = avg.pop.activity,
+  filter.train.traces.fun = function(binned.traces) {
+    binned.traces[min.rew.dist <= 15/perc2dist | min.rew.dist >= 40 / perc2dist, ]
+  },
+  filter.test.traces.fun = filter.at.present.or.future.rew,
+  test.day.indecies=c(1,3),
+  min.ncells.for.eval=1,
+  min.present.times=3)
+```
+
+
+```{r}
+beforetest.pop.oneydayout.reward.summary = beforetest.pop.oneydayout.reward %>%
+  left_join(mouse.meta.df) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'test_date'='date')) %>%
+  group_by(implant, animal, test_date) %>%
+  dplyr::summarise(mean.error=mean(error), sem.error=sem(error), 
+                   mean.rand.error=mean(random_error)) %>%  
+  dplyr::mutate(mean.rand.diff=mean.rand.error-mean.error)
+    
+beforetest.pop.oneydayout.reward.summary %>% 
+  group_by(implant) %>%
+  dplyr::summarise(mean(mean.error), sem(mean.error), 
+                   mean(mean.rand.diff), sem(mean.rand.diff))
+
+beforetest.pop.oneydayout.reward.summary %>% 
+  group_by(implant, animal) %>%
+  dplyr::summarise(mean(mean.error), sem(mean.error), 
+                   mean(mean.rand.diff), sem(mean.rand.diff)) %>% View
+```
+
+
+```{r}
+ggplot(beforetest.pop.oneydayout.reward.summary, 
+           aes(text=animal, test_day=test_date)) +
+  geom_jitter(aes(x=implant, y=100*mean.rand.diff, color=implant),
+              shape=1, height=0, width=0.15, size=0.5) +
+  geom_hline(yintercept = 0, linetype='dashed') +
+  scale_color_manual(values=main.two.colours) +
+  gtheme +
+  theme(legend.position = 'none') +
+  xlab('') + ylab('Accuracy (%)') + ylim(c(-50,50)) + ggtitle('Population decoder')
+
+figure.ggsave('Fig4H_at_rew_pop_classifier.pdf', width=3.0, height=3.75)
+
+# m = lmer.test.print(
+#   filter(beforetest.pop.oneydayout.reward.summary, implant=='dCA1'),
+#   var=mean.rand.diff,
+#   fixed.effects = 1,
+#   randef.str = '(1 | animal)',
+#   diagnostics.groupvar = implant)
+#
+# m.full = BayesFactor::lmBF(mean.rand.diff ~ 1 + animal, 
+#                            data=filter(beforetest.pop.oneydayout.reward.summary, implant=='dCA1'),
+#                            whichRandom = 'animal', 
+#                            iterations = 10000)
+# m.full
+t.test(subset(beforetest.pop.oneydayout.reward.summary, implant=='dCA1')$mean.rand.diff)
+m.full = BayesFactor::ttestBF(subset(beforetest.pop.oneydayout.reward.summary, implant=='dCA1')$mean.rand.diff)
+m.full
+samples = BayesFactor::posterior(m.full, iterations = 10000)
+quantile(samples[, 'mu'], c(0.025, 0.975))
+```

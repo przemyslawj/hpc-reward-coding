@@ -1,0 +1,145 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r include=FALSE}
+library(dplyr)
+library(data.table)
+library(datatrace)
+library(permute)
+
+source('distances.R')
+source('traces_input.R')
+source('locations.R')
+source('plotting_params.R')
+source('fixed_effects.R')
+source('utils.R')
+source('decoder_utils.R')
+```
+
+```{r}
+perc2dist = 1.2
+goal.cell.max.dist = 20 / perc2dist
+#subset.caimg_result_dirs = caimg_result_dirs[shuffle(caimg_result_dirs)[1:5]]
+subset.caimg_result_dirs = caimg_result_dirs
+
+mouse.meta.df = read.mouse.meta(rootdirs)
+trials.meta.df = read.trials.meta(rootdirs)
+all.locations.df = map_dfr(rootdirs, read_locations)
+rewards.df =  all.locations.df %>%
+  filter(!is_test) %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
+```
+
+
+# Spatial decoder evaluation
+Load data saved after running position_decoder_eval.R
+
+Utility functions for summarising and plotting the errors
+```{r}
+create.error.summary = function(df, ...) {
+  grouping.vars = enquos(...)
+  df %>%
+    group_by(!!!grouping.vars) %>%
+    dplyr::summarise(median.error=median(error),
+                     sem.error=sem(error),
+                     sd.error=sd(error),
+                     error.p25=quantile(error, 0.25)[1],
+                     error.p20=quantile(error, 0.2)[1],
+                     median.random.error=median(random_error),
+                     mean(random_error),
+                     sem.random.error=sem(random_error)) %>%
+    dplyr::mutate(error.fraction = median.error / median.random.error,
+                  rand.error.diff = median.random.error - median.error)
+}
+
+group.error.summary = function(df, ...) {
+  grouping.vars = enquos(...)
+  df %>%
+    group_by(!!!grouping.vars) %>%
+    dplyr::summarise(mean(median.error),
+                     sem(median.error),
+                     mean(median.random.error),
+                     sem(median.random.error))
+}
+```
+
+```{r spatial_error}
+spatial.error.summary = create.error.summary(spatial.error.df, implant, animal, day_desc, decoder_ncells) 
+
+group.error.summary(
+  spatial.error.summary,
+  implant)
+```
+
+```{r}
+compare.decoding.error = function(error.summary) {
+  error.model = lmerTest::lmer(median.error ~ implant + (1 | animal), 
+                               data=error.summary,
+                               REML=TRUE)
+  print(summary(error.model))
+  print(anova(error.model, refit=FALSE, ddf='Satterthwaite'))
+  g = plot.model.diagnostics(error.model, error.summary$animal, error.summary$implant)
+  print(g)
+  return(error.model)
+}
+
+spatial.error.hist.df = filter(spatial.error.df, str_starts(day_desc, 'habituation')) %>%
+  group_by(implant, animal, day_desc, decoder_ncells) %>%
+  dplyr::summarise(create.hist.tibble(error, hist.breaks=seq(0,130,10)), nsamples=n()) 
+
+spatial.error.hist.df %>%
+  group_by(implant, decoder_ncells, mid) %>%
+  dplyr::summarise(mean.pct.count=mean(pct.count), sem.pct.count=sem(pct.count)) %>%
+  ggplot(aes(y=mean.pct.count, x=mid-5, color=implant)) +
+  geom_step(position = 'identity', alpha=1.0) +
+  geom_errorbar(aes(x=mid, ymin=mean.pct.count-sem.pct.count, ymax=mean.pct.count+sem.pct.count), 
+                width=4, size=0.25) +
+  ylab('%') + xlab('Error (cm)') +
+  scale_color_manual(values=main.two.colours) +
+  facet_grid(. ~ decoder_ncells) +
+  gtheme
+figure.ggsave('Fig1J-spatial_decoding_histogram.pdf', width=7.5, height=3.8)
+
+habit.error.summary = filter(spatial.error.summary, str_starts(day_desc, 'habituation')) %>%
+  mutate(animal_day_desc = paste(animal, day_desc, sep='_'))
+habit.error.summary$decoder_ncells = as.factor(habit.error.summary$decoder_ncells)
+
+random.error.df = habit.error.summary %>% 
+  dplyr::ungroup() %>%
+  dplyr::summarise(m.random.error = mean(median.random.error), 
+                   sem.random.error=sem(median.random.error)) 
+
+habit.error.summary %>%
+  filter(decoder_ncells==30) %>%
+  ggplot(aes(x=implant, y=median.error, group=implant, color=implant, day=day_desc, animal_name=animal)) +
+  stat_summary(fun.data='mean_cl_boot', geom='crossbar') +
+  geom_jitter(shape=1, width=0.2, height=0, size=0.5) +
+  geom_hline(yintercept = random.error.df$m.random.error[1]-random.error.df$sem.random.error[1]) +
+  geom_hline(yintercept = random.error.df$m.random.error[1]+random.error.df$sem.random.error[1]) +
+  scale_color_manual(values=main.two.colours) +
+  gtheme +
+  ylab('Median error (cm)') + xlab('') + ylim(c(0,61))
+figure.ggsave('Fig1J-spatial_decoding_comparison.pdf', width=7.5, height=3.8)
+
+print('Compare spatial decoder for habituation with ncells=30')
+compare.decoding.error(filter(habit.error.summary, decoder_ncells == 30))
+
+group.error.summary(habit.error.summary, implant, decoder_ncells)
+
+models = create.bayes.lm.pair(
+  filter(habit.error.summary, decoder_ncells == 30),
+  formula.full = median.error ~ 1 + implant + animal,
+  formula.null = median.error ~ 1 + animal,
+  whichRandom = 'animal')
+print('Insufficient evidence to say if different spatial decoding accuracy on 30 cells')
+models$full / models$null
+calc.pair.95CI(models$full, show.percent.change = FALSE)
+```
+
+
+

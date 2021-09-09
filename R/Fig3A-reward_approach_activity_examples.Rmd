@@ -1,0 +1,189 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+library(dplyr)
+library(pracma)
+library(purrr)
+library(readr)
+library(tidyr)
+library(stringr)
+library(data.table)
+library(datatrace)
+library(tidyr)
+
+source('locations.R')
+source('utils.R')
+source('traces_input.R')
+source('plotting_params.R')
+source('tracking_info.R')
+source('behav_analysis.R')
+source('reward_approach_activity_utils.R')
+
+perc2dist = 1.2
+```
+
+```{r}
+mouse.meta.df = read.mouse.meta(rootdirs)
+trials.meta.df = read.trials.meta(rootdirs)
+```
+
+
+```{r}
+root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
+animal_name = 'G-BR'
+exp_title='learning'
+day = '2020-02-10' # learning 3 day2
+
+# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
+# animal_name = 'N-BR'
+# exp_title='learning'
+# day = '2020_10_23'
+
+caimg_result_dir = find.caimg.dir(caimg_result_dirs, animal_name, day)
+timebin.dur.msec = 200
+binned.traces = prepare.binned.traces(caimg_result_dir, timebin.dur.msec=timebin.dur.msec)
+
+deconv_trace.matrix = reshape2::acast(binned.traces, exp_title + time_bin ~ cell_id, value.var='zscored_smooth_deconv_trace')
+behav.traces = get.behav.traces(binned.traces)
+```
+
+```{r}
+mobility.bouts = get.mobility.bouts(behav.traces, timebin.dur.msec=timebin.dur.msec,
+                                    mobility.expr=is_running)
+reward.arriving.bouts = mobility.bouts[rew_at_end>0,]
+
+immobility.bouts = get.mobility.bouts(behav.traces, timebin.dur.msec=timebin.dur.msec,
+                                      mobility.expr=!is_running)
+```
+
+Population activity
+```{r}
+pop.traces = binned.traces[, .(pop.events=sum(nevents, na.rm=TRUE) / .N, 
+                               nactive=sum(nevents, na.rm=TRUE),
+                               trace.mean=mean(smoothed_deconv_trace, na.rm=TRUE)),
+                           by=c('exp_title', 'trial_id', 'trial', 
+                                'timestamp', 'time_bin', 'x', 'y', 
+                                'arrivedAtReward', 'velocity', 'atReward', 'atReward0', 'atReward1', 
+                                'is_headdip', 'is_running')] 
+pop.traces
+```
+
+Draw population activity
+```{r}
+source('place_field_utils.R')
+all.locations.df = map_dfr(rootdirs, read_locations)
+rewards.df =  all.locations.df %>%
+  filter(!is_test) %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
+
+pop.traces$trial = as.factor(pop.traces$trial)
+ggplot(pop.traces) +
+  geom_path(aes(x=x, y=100-y, group=trial), size=0.5) +
+  geom_rewards(rewards.df, binned.traces$animal[1], binned.traces$date[1], nbins = 100, 
+               rew.colours = list(current_rew='black')) +
+  theme_void()
+```
+# Activity vs running velocity
+
+Calculate total pop activity
+```{r}
+total.deconv.activity = rowSums(deconv_trace.matrix) / nrow(deconv_trace.matrix)
+behav.traces$total_activity = total.deconv.activity
+behav.traces = behav.traces %>%
+  dplyr::mutate(velocity = ifelse(velocity > 100, 100, velocity))
+behav.traces = as.data.table(behav.traces)
+
+wide.behav.traces = behav.traces %>%
+  pivot_longer(c(x, y, is_headdip, is_running, velocity,  
+                 atReward0, atReward1, 
+                 dist_reward0, dist_reward1, moved_distance, total_activity),
+               names_to='metric', values_to='value')
+```
+
+Activity raster, cells sorted using t-sne on correlation matix
+```{r}
+selected.trial = 1 # G-BR
+#selected.trial = 3 # N-BR
+
+g.behav = wide.behav.traces %>%
+  filter(trial==selected.trial) %>%
+  #filter(metric %in% c('velocity', 'total_activity', 'is_running')) %>% 
+  filter(metric == 'total_activity') %>%
+  ggplot(aes(x=trial_time_bin * (timebin.dur.msec / 1000), y=value)) +
+  geom_line() +
+  facet_grid(metric ~ ., scales='free_y') +
+  xlab('Time (s)')
+```
+
+Sort cells by the time of max trace value
+```{r}
+trial.traces = binned.traces[trial == selected.trial,]
+beforetest.traces = binned.traces[exp_title == 'beforetest',]
+
+rew.aligned.traces = binned.traces[exp_title=='trial' & trial == selected.trial, 
+                                   center.timestamps.around.events(.SD, 
+                                                                   #reward.arriving.bouts[trial == selected.trial], 
+                                                                   mobility.bouts[trial == selected.trial],
+                                                                   exp_title[1],
+                                                                   padding.after.event=5000/timebin.dur.msec), 
+                                   by=.(exp_title, trial_id, cell_id)][aligned_event_id >= 0,]
+cell.order.df = order.cells.by.max.val(rew.aligned.traces[timestamp_from_start >= 0 & timestamp_from_end <= 5000],
+                                       active.val.threshold=0.5)
+```
+
+```{r}
+plotted.trials = c(selected.trial)
+plot.binned.traces = binned.traces[trial %in% plotted.trials,]
+joined.binned.traces = plot.binned.traces[cell.order.df, on='cell_id']
+
+joined.binned.traces.norm = joined.binned.traces %>%
+  filter(is.active==TRUE) %>%
+  group_by(cell_id) %>%
+  dplyr::mutate(zscored_smooth_deconv_trace.norm = 
+                  (zscored_smooth_deconv_trace - min(zscored_smooth_deconv_trace)) / 
+                  (max(zscored_smooth_deconv_trace) - min(zscored_smooth_deconv_trace)))
+
+g.raster = plot.activity.raster(joined.binned.traces.norm, 
+                                zscored_smooth_deconv_trace,
+                                #zscored_smooth_deconv_trace.norm, 
+                                tile.width=2*timebin.dur.msec/1000) +
+  scale_fill_gradientn(colours = jet.colours(7)) + 
+  geom_vline(data=reward.arriving.bouts[trial %in% plotted.trials],
+             aes(xintercept=timestamp_end/1000),
+             linetype='dashed', color='#333333') +
+  geom_vline(data=reward.arriving.bouts[trial %in% plotted.trials],
+             aes(xintercept=timestamp_start/1000),
+             linetype='dashed', color='#0098ff') +
+  facet_grid(trial ~ .) +
+  theme(legend.position = 'right')
+g.raster + xlim(c(0, 80))
+
+plot_grid(g.raster + xlim(c(0, 80)), 
+          g.behav + xlim(c(0, 80)), 
+          ncol=1, 
+          #rel_heights = c(5, 1.4))
+          rel_heights = c(3,1))
+
+ggsave('~/tmp/cheeseboard/pop_activity/dca1_sequence.pdf', 
+       height=7, width=10, units='cm', device=cairo_pdf, dpi=300)
+
+behav.traces.fragment = behav.traces[trial==selected.trial & is_running]
+behav.traces.fragment$row_id = 1:nrow(behav.traces.fragment)
+ggplot(behav.traces.fragment) +
+  geom_path(aes(x=as.integer(x), y=as.integer(100-y), color=row_id)) +
+  xlim(c(0,100)) +
+  ylim(c(0,100)) +
+  geom_rewards.current(rewards.df, subject = animal_name, day = day, nbins=100, rew.size=4, stroke.size=1) +
+  geom_maze_contour(100) +
+  scale_color_continuous(low='#b8e2ff', high='#222222') +
+  gtheme +
+  theme_void() +
+  labs(color='Time (s)') +
+  theme(legend.position='bottom') 
+ggsave('~/tmp/cheeseboard/pop_activity/dca1_running_path.pdf', 
+       height=6.3, width=5, units='cm', device=cairo_pdf, dpi=300)
+
+```

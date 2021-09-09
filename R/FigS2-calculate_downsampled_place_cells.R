@@ -11,8 +11,6 @@ library(datatrace)
 library(foreach)
 library(doSNOW)
 
-setwd("~/mnt_code/cheeseboard_analysis/R")
-
 # Plotting
 library(ggplot2)
 library(cowplot)
@@ -117,13 +115,10 @@ beforetest.occupancies = list()
 habituation.fields = list()
 habituation.occupancies = list()
 
-#test_caimg_dirs = test_caimg_dirs[19]
 for (caimg_result_dir in test_caimg_dirs) {
   data.traces = read.data.trace(caimg_result_dir)
 
   # Beforetest trace
-  #max_test_trial_dur_msec = 240 * 1000
-  #test.traces = data.traces[exp_title == 'beforetest' & timestamp <= max_test_trial_dur_msec]
   test.traces = data.traces[exp_title == 'beforetest']
   timebinned.test.traces.run = prepare.timebinned.run.traces(test.traces, timebin.dur.msec)
 
@@ -170,7 +165,6 @@ for (caimg_result_dir in test_caimg_dirs) {
                                                      timebinned.test.traces.run$animal[1]),
                                       max.rew.dist.thr = rew.dist.threshold)
     return(left_join(spatial.res$df, fields.df, by=c('cell_id')))
-    #return(spatial.res$df)
   }
 
   habit.trials.si = map_dfr(1:ndownsample_shuffles,
@@ -182,15 +176,6 @@ for (caimg_result_dir in test_caimg_dirs) {
 
   test.trials.si = map_dfr(1:ndownsample_shuffles,
                            ~ sample.spatial.info(shuffle.test.timestamps, binned.test.traces.run, .x))
-  # test.trials.si = calc.spatial.info(binned.test.traces.run,
-  #                                    nshuffles=1000,
-  #                                    timebin.dur.msec=timebin.dur.msec,
-  #                                    trace.var = 'smoothed_deconv_trace',
-  #                                    min.occupancy.sec=min.occupancy.sec,
-  #                                    shuffle.shift.sec=10,
-  #                                    nbins=nbins,
-  #                                    gaussian.var=2)$df
-  #test.trials.si = filter(beforetest.trials.si, animal == animal_name, date == test.traces$date[1])
   test.trials.si$date = char2date(test.traces$date[1])
   test.trials.si$animal = animal_name
   down.test.si = bind_rows(down.test.si, test.trials.si)
@@ -198,5 +183,5 @@ for (caimg_result_dir in test_caimg_dirs) {
 
 #down.habit.si$date.test = char2date(down.habit.si$date.test)
 print("Saving env variables")
-save.image(file="data/2021-08-20-downsampled_smoothed_deconv_bin200msec_nbins20_occupancy1sec_gaussvar2_dist15_shuffle_10s.RData")
+save.image(file="data/downsampled_place_field_stats.RData")
 

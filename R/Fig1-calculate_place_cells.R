@@ -10,8 +10,6 @@ library(tictoc)
 library(pryr) # for memory checks
 library(datatrace)
 
-setwd("~/mnt_code/cheeseboard_analysis/R")
-
 
 summarise = dplyr::summarise
 summarize = dplyr::summarize

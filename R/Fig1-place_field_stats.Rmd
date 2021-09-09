@@ -1,0 +1,532 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(plyr)
+library(dplyr)
+library(permute)
+library(raster)
+library(smoothie)
+library(tidyr)
+library(data.table)
+library(datatrace)
+library(DT)
+
+# Testing
+library(lmerTest)
+library(BayesFactor)
+options(BFprogress = FALSE)
+
+# Plotting
+library(ggplot2)
+library(cowplot)
+library(plotly)
+gtheme = theme_minimal() + theme_cowplot() +
+  theme(text = element_text(size=10), axis.text = element_text(size=8))
+
+summarise = dplyr::summarise
+summarize = dplyr::summarize
+select = dplyr::select
+
+source('distances.R')
+source('fixed_effects.R')
+source('locations.R')
+source('place_field_utils.R')
+source('utils.R')
+source('plotting_params.R')
+```
+
+The code assumes data frames with place fields information are loaded in the environment (created by Fig1-calculate_place_cells.R)
+
+Prepare data frames
+```{r}
+mouse.meta.df = read.mouse.meta(rootdirs)
+trials.meta.df = read.trials.meta(rootdirs)
+
+run.trials.si$date = char2date(run.trials.si$date)
+beforetest.trials.si$date = char2date(beforetest.trials.si$date)
+run.trials.si = run.trials.si %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('date', 'animal'))
+```
+
+
+
+```{r calculate early vs late correlations}
+cell.cor = function(animal_name, day, cell_name) {
+  early.pf = create.partial.df(early.fields, early.occupancies, animal_name, day, cell_name, 'Early')
+  late.pf = create.partial.df(late.fields, late.occupancies, animal_name, day, cell_name, 'Late')
+  if (nrow(late.pf) == 0 || nrow(early.pf) == 0) {
+    return(0)
+  }
+  x = field.cor(early.pf, late.pf, nbins, make.cor.plot=FALSE)
+
+  return(x$cor)
+}
+
+run.trials.si = run.trials.si %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(early.late.cor = cell.cor(animal, format(date), cell_id))
+```
+
+```{r classify place cells}
+mi.thresh = -1.0
+field.size.thresh.50 = 100
+field.size.thresh.25 = 100
+field.peak.thresh = 0
+field.cor.min = 0.0
+
+# Classification of place cells based on day SI
+run.trials.pc = run.trials.si
+
+place.cell.db = run.trials.si %>%
+  dplyr::select(date, day_desc, exp, animal, cell_id, implant, 
+                spatial.information, si.shuffle.mean, 
+                mutual.info, mutual.info.bias,
+                sparsity, field.size.50, field.size.25, 
+                field.max, field.mean, trace.mean,
+                early.late.cor, signif.mi, signif.si) %>%
+  ungroup()
+
+
+pc.test.df = beforetest.trials.si %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('date', 'animal')) %>%
+  dplyr::mutate(beforetest_ordinal=location_set-1) %>%
+  dplyr::select(-location_set)
+
+beforetest.cell.db = pc.test.df %>%
+  dplyr::select(date, day_desc, exp, animal, cell_id, implant, 
+                spatial.information, si.shuffle.mean, mutual.info, mutual.info.bias,
+                sparsity, field.size.50, field.size.25,
+                signif.mi, signif.si)
+```
+
+Percent of place cells out of all cells
+```{r place_cell_summary}
+place.cell.db %>%
+  group_by(implant, animal, exp) %>%
+  dplyr::summarise(si.signif.pct=sum(signif.si)/n() * 100) %>%
+  group_by(implant, exp) %>%
+  dplyr::summarise(mean(si.signif.pct),
+                   sem(si.signif.pct))
+```
+
+
+## Comparison of dCA1 and vCA1 place fields: pct of place cells, field size, early late corr
+```{r}
+compared.pcs.df = place.cell.db %>%
+  filter(exp=='habituation') %>% 
+  mutate(exp_title='habituation') %>%
+  left_join(trials.meta.df) %>%
+  left_join(mouse.meta.df) %>%
+  mutate(aday = paste(animal, format(date), sep='_'),
+         spatial.info.corrected = spatial.information - si.shuffle.mean)
+compared.pcs.df$aday = as.factor(compared.pcs.df$aday) %>% as.integer() %>% as.factor()
+single.day.pcs.df = filter(compared.pcs.df, day_desc=='habituation day#3', signif.si)
+
+plot.pc.stat = function(metric, facet.exp_title=FALSE) {
+  metric = enexpr(metric)
+  xvar = quo(implant)
+  if (facet.exp_title) {
+    xvar = quo(exp_title)
+  }
+  g = single.day.pcs.df %>%
+    ggplot(aes(x=!!xvar, y=!!metric)) +
+    geom_violin(fill=single.colour, color=single.colour)+ 
+    geom_violin(fill='transparent', colour='white', draw_quantiles=0.5, size=0.4) +
+    geom_jitter(shape=16, width=0.4, height=0, size=0.1, alpha=0.15, color='#333333')+
+    gtheme +
+    xlab('') +
+    theme(axis.title.x = element_blank(),
+          legend.position = 'top')
+  if (facet.exp_title) {
+    g = g + facet_grid(. ~ implant)
+  }
+  g
+}
+
+summary.compared.pcs.df = compared.pcs.df %>%
+  group_by(implant, animal, day_desc, exp_title) %>%
+  dplyr::summarise(pc.pct = mean(signif.si) * 100)
+
+g.place.cell.count = summary.compared.pcs.df %>%
+  ggplot(aes(x=implant, y=pc.pct, colour=implant)) +
+  stat_summary(fun.data='mean_cl_boot', geom='crossbar') +
+  geom_jitter(shape=1, width=0.2, height=0, size=0.5) +
+  scale_color_manual(values=main.two.colours) +
+  gtheme +
+  ylab('Place cells (%)') + xlab('') + ylim(c(0,100)) +
+  theme(axis.title.x = element_blank(),
+        legend.position = 'none')
+ 
+plot_grid(
+  g.place.cell.count,
+  plot.pc.stat(field.size.50 / nbins / nbins * 100) +
+    ylab('% of maze'),
+  plot.pc.stat(spatial.information-si.shuffle.mean) + ylab('bits'),
+  plot.pc.stat(early.late.cor) + ylab('correlation'),
+  nrow = 1, rel_widths = c(0.95,1,1,1))
+
+figure.ggsave('Figure_1DEGH.pdf', width=12.5, height=2.9)
+```
+
+
+```{r}
+print('Field size signif larger in vCA1')
+field.size.model = lmerTest::lmer(log(field.size.50 ) ~ implant + (1 | aday), 
+                                  data=single.day.pcs.df, REML=TRUE)
+summary(field.size.model)
+anova(field.size.model, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(field.size.model, 
+                       single.day.pcs.df$animal, 
+                       single.day.pcs.df$implant)
+create.summary(mutate(single.day.pcs.df, field.size=field.size.50/nbins/nbins*100), 
+               field.size, implant)
+
+models = create.bayes.lm.pair(mutate(single.day.pcs.df, val=log(field.size.50)))
+models$full/models$null
+calc.pair.95CI(models$full, function(x) {exp(x) * 100})
+```
+
+```{r}
+print('Percent of place cells not different')
+pc.count.model = lmerTest::lmer(pc.pct ~ implant + (1 | animal), data=summary.compared.pcs.df, REML=TRUE)
+summary(pc.count.model)
+anova(pc.count.model, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(pc.count.model, 
+                       summary.compared.pcs.df$animal, 
+                       summary.compared.pcs.df$implant)
+group_by(summary.compared.pcs.df, implant) %>%
+  dplyr::summarise(mean(pc.pct), sem(pc.pct))
+dplyr::summarise(ungroup(summary.compared.pcs.df), mean(pc.pct), sem(pc.pct))
+
+models = create.bayes.lm.pair(summary.compared.pcs.df,
+                              formula.full = pc.pct ~ 1 + implant + animal,
+                              formula.null = pc.pct ~ 1 + animal,
+                              whichRandom = 'animal')
+models$full/models$null
+calc.pair.95CI(models$full, show.percent.change = FALSE)
+```
+
+```{r}
+print('Spatial information not statistically different')
+spatial.info.model = lmerTest::lmer(log(0.2 + spatial.info.corrected) ~ implant + (1 | aday), 
+                                    data=single.day.pcs.df, REML=TRUE)
+summary(spatial.info.model)
+anova(spatial.info.model, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(spatial.info.model, 
+                       single.day.pcs.df$animal, 
+                       single.day.pcs.df$implant)
+
+models = create.bayes.lm.pair(mutate(single.day.pcs.df, val=log(0.2 + spatial.info.corrected)))
+models$full/models$null
+calc.pair.95CI(models$full, function(x) {(exp(x) - 0.2)})
+create.summary(single.day.pcs.df, spatial.info.corrected, implant)
+
+print('Day-stability not statistically different')
+create.summary(single.day.pcs.df, early.late.cor)
+create.summary(single.day.pcs.df, early.late.cor, implant)
+early.late.cors.model = lmerTest::lmer(early.late.cor ~ implant + (1 | aday), 
+                                       data=subset(single.day.pcs.df, exp_title=='habituation'), 
+                                       REML=TRUE)
+summary(early.late.cors.model)
+anova(early.late.cors.model, refit=FALSE, ddf='Satterthwaite')
+plot.model.diagnostics(early.late.cors.model, 
+                       subset(single.day.pcs.df, !is.na(early.late.cor) & exp_title=='habituation')$animal, 
+                       subset(single.day.pcs.df, !is.na(early.late.cor) & exp_title=='habituation')$implant)
+models = create.bayes.lm.pair(filter(single.day.pcs.df, !is.na(early.late.cor)) %>% mutate(val=early.late.cor))
+models$full/models$null
+calc.pair.95CI(models$full, show.percent.change = FALSE)
+```
+    
+
+# Pct of place cells within goal
+Load reward locations
+```{r}
+all.locations.df = map_dfr(rootdirs, read_locations)
+rewards.df =  all.locations.df %>%
+  filter(!is_test) %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(trials.meta.df, by=c('date', 'animal', 'location_set'))
+
+locations.df = rewards.df %>%
+  dplyr::select(date, animal, location_set) %>%
+  dplyr::distinct()
+
+locations.df = data.table(locations.df)
+setkey(locations.df, date, animal)
+
+test.rewards.df = all.locations.df %>%
+  filter(is_test) %>%
+  left_join(mouse.meta.df, by='animal') %>%
+  left_join(dplyr::select(trials.meta.df, -location_set), by=c('date', 'animal'))
+```
+
+
+# Place cells at previous reward location
+```{r}
+prev.locations.df = all.locations.df %>%
+  filter(!is_test) %>%
+  add_prev_locations(prev.loc.set.diff=1) %>%
+  add_prev_locations(prev.loc.set.diff=2) %>%
+  add_prev_locations(prev.loc.set.diff=3) %>%
+  filter()
+```
+
+```{r}
+fst.moved.location.df = all.locations.df %>%
+  filter(!is_test) %>%
+  add_prev_locations(prev.loc.set.diff=1) %>%
+  filter(!current_loc, prev_loc_set==1) %>%
+  ungroup() %>%
+  dplyr::select(-date) %>%
+  dplyr::distinct()
+```
+
+
+For each place field calculate the count of its peaks, and how many of them are in the reward zone or previous reward zone
+```{r warning=FALSE}
+trial.days.df = trials.meta.df %>%
+  dplyr::select(date, animal, exp) %>%
+  filter(animal != 'missing') %>%
+  dplyr::distinct()
+
+create.peaks.df.at.locs = function(fields, locs.df, trial.days, max.rew.dist.thr=goal.cell.max.dist, cell.db=place.cell.db) {
+  res = map2_dfr(trial.days$date,
+                 trial.days$animal,
+                 ~ {
+                    .x = format(.x)
+                    .y = as.character(.y)
+                     if ((.y %in% names(fields)) & (.x %in% names(fields[[.y]]))) {
+                       calc.field.peaks.info(.x, .y, 
+                                             fields[[.y]][[.x]], 
+                                             rew.df=filter.rews.df(locs.df, .x, .y),
+                                             max.rew.dist.thr)
+                     } else {
+                       warning('Not found animal=', .y, ' on day=', .x)
+                       return(data.frame())
+                     }
+                   })
+  res$date = char2date(res$date)
+  res %>%
+    left_join(trials.meta.df, by=c('animal', 'date')) %>%
+    left_join(cell.db, by=c('animal', 'date', 'cell_id', 'day_desc', 'exp'))
+}
+
+trial.peaks.at.rew = create.peaks.df.at.locs(run.fields, prev.locations.df, trial.days.df)
+trial.peaks.at.fst.moved = create.peaks.df.at.locs(run.fields, fst.moved.location.df, trial.days.df)
+trial.peaks.at.current.rew = create.peaks.df.at.locs(run.fields, prev.locations.df[current_loc==TRUE,], trial.days.df)
+
+beforetest.peaks.at.rew = create.peaks.df.at.locs(beforetest.fields, prev.locations.df, trial.days.df, 
+                                                  cell.db=beforetest.cell.db)
+beforetest.peaks.fst.moved = create.peaks.df.at.locs(beforetest.fields, fst.moved.location.df, trial.days.df,
+                                                     cell.db=beforetest.cell.db)
+beforetest.rewards.df$current_loc = FALSE
+beforetest.peaks.at.current.rew = create.peaks.df.at.locs(beforetest.fields, beforetest.rewards.df, trial.days.df,
+                                                          cell.db=beforetest.cell.db)
+
+habituation.peaks.at.fst.moved = filter(trial.peaks.at.fst.moved, exp=='habituation')
+```
+
+Peaks in place fields from habituation with regards to first reward locations
+```{r warning=FALSE}
+habittest.daypair = filter(trials.meta.df, exp == 'habituation') %>%
+  left_join(dplyr::select(beforetest.rewards.df, date, animal, location_set), 
+            by=c('animal'), suffix=c('.habitday', '.testday'))
+habit.fields.at.test.rews = map_dfr(1:nrow(habittest.daypair), ~ {
+  animal_name = as.character(habittest.daypair$animal[.x])
+  activity_date = as.Date(habittest.daypair$date.habitday[.x])
+  test_date = as.Date(habittest.daypair$date.testday[.x])
+  rew.df = beforetest.rewards.df[animal==animal_name & date == test_date,]
+  calc.field.peaks.info(activity_date,
+                        animal_name,
+                        run.fields[[animal_name]][[format(activity_date)]], 
+                        rew.df=rew.df,
+                        max.rew.dist.thr=goal.cell.max.dist) %>%
+    dplyr::mutate(date.active = activity_date,
+                  day_desc.active = habittest.daypair$day_desc[.x],
+                  date.reward = test_date)
+})
+habit.fields.at.test.rews = habit.fields.at.test.rews %>%
+  dplyr::select(-date) %>%
+  left_join(trials.meta.df, by=c('animal'='animal', 'date.reward'='date'), suffix=c('', '.reward')) %>%
+  dplyr::select(-day_ordinal, -exp, -location_set, -current.rew.peaks.count) %>%
+  dplyr::rename(day_desc.reward = day_desc) %>%
+  left_join(place.cell.db, by=c('animal'='animal', 'date.active'='date', 'cell_id'='cell_id', 'day_desc.active'='day_desc'))
+```
+
+## Summary on multiple fields per cell
+
+Fields per cell in dca1 and vCA1
+```{r}
+npeaks.summary = bind_rows(
+    filter(trial.peaks.at.fst.moved, exp == 'habituation'),
+    beforetest.peaks.fst.moved) %>% 
+  filter(signif.si, npeaks > 0) %>%
+  #filter(day_desc == 'habituation day#3') %>% 
+  group_by(implant, exp, animal, day_desc) %>%
+  dplyr::summarise(create.hist.tibble(npeaks, hist.breaks=seq(0.5,6,1)), ncells=n()) %>%
+  filter(ncells >= 5) # Only include samples with >= 5 cells
+
+# Fraction of multifields
+npeaks.summary %>%
+  ungroup() %>%
+  filter(mid == 1) %>%
+  group_by(implant) %>%
+  dplyr::summarise(mean.multi = mean(100-pct.count), sem.multi = sem(100-pct.count))
+
+plotted.npeaks.summary = npeaks.summary %>%
+  group_by(implant, exp, mid) %>%
+  dplyr::summarise(pct.mean = mean(pct.count), pct.sem = sem(pct.count)) 
+
+plotted.npeaks.summary %>% 
+  filter(exp=='habituation') %>%
+  ggplot(aes(x=mid, color=implant)) +
+  geom_errorbar(aes(ymin=pct.mean - pct.sem, ymax=pct.mean + pct.sem), width=0.3) +
+  geom_step(aes(x=mid-0.5, y=pct.mean)) +
+  scale_color_manual(values=main.two.colours) +
+  xlab('# fields') + ylab('Place cells (%)') +
+  xlim(c(0.5,4.5)) + 
+  gtheme +
+  labs(color='')
+
+figure.ggsave('Figure_1G.pdf', width=6.1, height=3.6)
+```
+
+```{r}
+npeaks.habituation = filter(trial.peaks.at.fst.moved, exp == 'habituation') %>%
+  filter(signif.si, npeaks>0) %>%
+  group_by(implant, exp, animal, day_desc) %>%
+  dplyr::summarise(mean.peaks = mean(npeaks))
+
+npeaks.habituation %>%
+  create.summary(mean.peaks, implant)
+
+lmer.test.print(npeaks.habituation, 
+                var = mean.peaks,
+                fixed.effects = implant,
+                randef.str = '(1 | animal)',
+                diagnostics.groupvar = implant)
+models = create.bayes.lm.pair(npeaks.habituation,
+                              formula.full = mean.peaks ~ 1 + implant + animal,
+                              formula.null = mean.peaks ~ 1 + animal,
+                              whichRandom = 'animal')
+models$full / models$null
+calc.pair.95CI(models$full)
+```
+
+
+# Distribution of ditances to the rewards
+```{r}
+compared.habit.fields.at.test.rews = habit.fields.at.test.rews %>%
+  filter(signif.si, exp == 'habituation', day_desc.active == 'habituation day#3') %>%
+  dplyr::select(-ends_with('.active')) %>%
+  dplyr::rename(date=date.reward,
+                day_desc=day_desc.reward)
+
+plot.densities = function(df, xvar.expr, fill.var, ..., include.means=FALSE) {
+  xvar.expr = enexpr(xvar.expr)
+  fill.var = enquo(fill.var)
+  group.vars = c(fill.var, enquos(...))
+  
+  df = unite(df, 'groups.concat', map_chr(group.vars, as_label), remove = FALSE) 
+  xvar.mean.summary = group_by(df, implant, groups.concat, !!!group.vars) %>%
+    dplyr::summarise(xvar.mean=mean(!!xvar.expr, na.rm=TRUE),
+                     .groups='drop')
+  
+  g = df %>%
+    ggplot(aes(x=!!xvar.expr, group=groups.concat)) +
+    geom_density(aes(fill=!!fill.var), alpha=0.3, adjust=1, color='#333333') +
+    scale_fill_manual(values=c('#999999', '#0098ff')) +
+    scale_color_manual(values=c('#999999', '#0098ff')) +
+    gtheme +
+    ylab('Density')
+  if (include.means) {
+    g = g +
+      geom_vline(data=xvar.mean.summary,
+                 mapping=aes(xintercept=xvar.mean, color=!!fill.var),
+                 linetype='longdash')
+  }
+  g
+}
+
+bind_rows(
+  mutate(compared.habit.fields.at.test.rews, group.name='1_habituation'),
+  filter(beforetest.peaks.at.current.rew, signif.si) %>% mutate(group.name='2_test')
+) %>%
+  plot.densities(min.rew.dist * perc2dist, group.name) +
+  geom_vline(xintercept = goal.cell.max.dist, linetype='dotted') +
+  xlim(c(0,100)) +
+  facet_grid(. ~ implant) +
+  coord_flip() +
+  xlab('Distance (cm)')
+figure.ggsave('Figure_2FH_Left.pdf', height=6, width=8)
+```
+
+
+## Multifield distance to the closest reward
+```{r}
+habit.summary.fields.pct.df = summarize.rew.pc.pct(
+  filter(compared.habit.fields.at.test.rews),
+  dist.var=min.rew.dist, 
+  dist.threshold=goal.cell.max.dist) %>% dplyr::ungroup()
+
+beforetest.summary.fields.pct.df = summarize.rew.pc.pct(
+  filter(beforetest.peaks.at.current.rew, signif.si),
+  dist.var=min.rew.dist, 
+  dist.threshold=goal.cell.max.dist)
+
+merged.summary.df = bind_rows(
+  habit.summary.fields.pct.df %>% mutate(exp='habituation'),
+  beforetest.summary.fields.pct.df %>% mutate(exp='test')) %>%
+  mutate(animal_beforetest_day = paste(animal, day_desc, sep='_'))
+  #filter(animal_beforetest_day %in% kept.testtrials$animal_beforetest_day)
+merged.summary.df$exp = as.factor(merged.summary.df$exp)
+merged.summary.df$aday = as.factor(merged.summary.df$animal_beforetest_day) %>% as.integer %>% as.factor
+
+dca1.rew.pc.pct = subset(merged.summary.df, implant == 'dCA1')
+vca1.rew.pc.pct = subset(merged.summary.df, implant == 'vCA1')
+
+print('Fraction of dCA1 place cells at reward increased')
+fem.model = lmerTest::lmer(pct.reward ~ exp*implant + (1 + exp + day_desc | animal), 
+                           data=merged.summary.df, REML = TRUE)
+plot.model.diagnostics(fem.model, merged.summary.df$implant, merged.summary.df$exp)
+anova(fem.model, refit=FALSE, ddf='Satterthwaite')
+pairwise.post.hoc(fem.model, factor.interaction=c('exp:implant'))
+create.summary(merged.summary.df, pct.reward, implant, exp)
+
+models = create.bayes.lm.pair(dca1.rew.pc.pct,
+                     formula.full = pct.reward ~ 1 + exp + aday + animal,
+                     formula.null = pct.reward ~ 1 + aday + animal,
+                     whichRandom = c('aday', 'animal'))
+models$full / models$null
+calc.pair.95CI(models$full, pair.vars = c('exp-habituation', 'exp-test'))
+
+models = create.bayes.lm.pair(vca1.rew.pc.pct,
+                     formula.full = pct.reward ~ 1 + exp + aday + animal,
+                     formula.null = pct.reward ~ 1 + aday + animal,
+                     whichRandom = c('aday', 'animal'))
+models$full / models$null
+calc.pair.95CI(models$full, pair.vars = c('exp-habituation', 'exp-test'))
+
+merged.summary.df %>%
+  ggplot(aes(x=exp, y=pct.reward, group=animal_beforetest_day)) +
+  #geom_point(aes(color=animal)) +
+  geom_line(size=0.25) +
+  facet_grid(. ~ implant, scales = 'free') +
+  xlab('') +
+  gtheme +
+  ylab('Place cells at reward (%)') +
+  ggtitle('Fraction of place cells at reward increased at test trial')
+
+
+figure.ggsave('Figure_2FH_Right.pdf', height=6, width=5)
+```
+```{r}
+print("Saving processed place field stats")
+save.image(file="data/place_field_stats.RData")
+```
+
