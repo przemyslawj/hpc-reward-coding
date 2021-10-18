@@ -42,11 +42,11 @@ day_desc_name = 'learning3 day#2'
 animal_name = 'K-BR' # vCA1 example
 #animal_name='F-BL' # vCA1 example
 
-get.rew.aligned.traces = function(animal_name, day_desc_name, min.bout.dur=3000) {
+get.rew.aligned.traces = function(animal_name, day_desc_name, 
+                                  min.bout.dur=3000, timebin.dur.msec=200) {
 
   day = filter(trials.meta.df, animal == animal_name, day_desc == day_desc_name) %>% pull(date)
   caimg_result_dir = find.caimg.dir(caimg_result_dirs, animal_name, day)
-  timebin.dur.msec = 200
   binned.traces = prepare.binned.traces(caimg_result_dir, timebin.dur.msec=timebin.dur.msec)
   behav.traces = get.behav.traces(binned.traces)
   mobility.bouts = get.mobility.bouts(behav.traces, timebin.dur.msec=timebin.dur.msec,
@@ -100,7 +100,7 @@ rew.aligned.traces %>%
   scale_color_manual(values=c('#0098ffff', 'white')) +
   scale_y_reverse()
 
-figures.ggsave('Fig4D-approach-traces-example.pdf',
+figure.ggsave('Fig4D-approach-traces-example.pdf',
                width=9.5, height=3.4)
 ```
 
@@ -179,17 +179,192 @@ all.rew.aligned.traces.comparison = all.rew.aligned.traces[
   !is.na(timestamp_from_end_bin) & !is.na(is.rew.cell) & !is.na(date)]
 ```
 
+Calculate how many times a cell active
+TODO: Choose a day
+```{r}
+cell.active.thr = 0.5
 
-Difference between reward and other cells
+fraction.approaches.cell.active = 
+  all.rew.aligned.traces[, timestamp_from_end_bin := ceiling(timestamp_from_end / timebin.width)][
+                         timestamp_from_end_bin %in% c(-4, 0),
+                         .(binned.activity = mean(zscored_smooth_deconv_trace)),day
+                         by=.(implant, exp_title, trial_id, cell_id, animal, date, trial, aligned_event_id, rew_at_end, timestamp_from_end_bin)][
+                         ,
+                       .(fraction.active = mean(binned.activity >= cell.active.thr),
+                         napproaches = .N),
+                       by=.(implant, exp_title, cell_id, animal, date, rew_at_end, timestamp_from_end_bin)]
+```
+
+
+```{r}
+calc.ecdfs.summary = function(line_ids, fraction.active, group_name) {
+  group.ecdfs = map(unique(line_ids), 
+                    ~ { e = ecdf(fraction.active[which(line_ids == .x)])
+                        list(e =e,
+                             group = group_name,
+                             knots.list = knots(e))
+                        })
+  #group.knots = map(seq_along(group.ecdfs), ~ knots(group.ecdfs[[.x]]$e)) %>% unlist
+  # Add fixed knots for zero approaches and frequent approaches
+  #group.knots = c(0.1, 0.5, group.knots) %>% sort %>% unique 
+  group.knots = c(0.1, 0.5, seq(0, 1.0, 0.05)) %>% sort %>% unique
+  group.ecdfs.summary.df = map_df(group.knots, function(knot) {
+    vals = map_dbl(seq_along(group.ecdfs), ~ group.ecdfs[[.x]]$e(knot))
+    list(knot=knot,
+         group=group_name,
+         mean.val=mean(vals),
+         lower.val=quantile(vals, 0.05)[[1]],
+         higher.val=quantile(vals, 0.95)[[1]])
+  })
+  bind_rows(group.ecdfs.summary.df,
+            data.frame(knot=c(-0.01,1.01),
+                       group=group_name,
+                       mean.val=c(0,1),
+                       lower.val=c(0,1),
+                       higher.val=c(0,1)))
+}
+
+# ecdf.df = fraction.approaches.cell.active %>% 
+#   left_join(trials.meta.df) %>%
+#   left_join(place.cell.db) %>%
+#   #filter(rew_at_end == 1) %>%
+#   #filter(day_desc == 'learning1 day#5') %>%
+#   #filter(day_desc == 'learning2 day#2') %>%
+#   mutate(line_id=paste(implant, animal, day_desc, is.pc, rew_at_end)) %>% 
+#   group_by(implant, animal, day_desc, is.pc, rew_at_end, line_id) %>%
+#   dplyr::summarise(calc.ecdfs.summary(line_id, fraction.active, line_id[1]))
+
+
+pooled.ecdf.df = fraction.approaches.cell.active %>% 
+  left_join(trials.meta.df) %>%
+  left_join(place.cell.db) %>%
+  #filter(rew_at_end == 1) %>%
+  #filter(day_desc == 'learning1 day#5') %>%
+  #filter(day_desc == 'learning2 day#2') %>%
+  mutate(line_id=paste(implant, animal, is.pc)) %>% 
+  group_by(implant, animal, is.pc, line_id) %>%
+  dplyr::summarise(calc.ecdfs.summary(line_id, fraction.active, line_id[1]))
+
+pooled.ecdf.df.mean = pooled.ecdf.df %>%
+  group_by(knot, implant, is.pc) %>%
+  dplyr::summarise(val.mean = mean(mean.val), 
+                   sem.val = sem(mean.val),
+                   .groups='drop') %>%
+  dplyr::rename(mean.val=val.mean)
+
+print('Fraction of cells frequently active at reward')
+pooled.ecdf.df.mean %>% filter(knot == 0.5) %>% dplyr::mutate(1-mean.val)
+
+print('Fraction of cells not active at reward')
+pooled.ecdf.df.mean %>% filter(knot == 0.1) 
+
+
+pooled.ecdf.df %>%
+  ggplot(aes(x=knot, y=mean.val, color=is.pc)) +
+  geom_step(aes(group=line_id), alpha=0.5, size=0.4) +
+  geom_step(data = pooled.ecdf.df.mean,
+            alpha=0.8, size=0.8) +
+  facet_grid(implant ~ .) +
+  xlab('Approaches when cell active') +
+  ylab('Cells CDF') +
+  scale_color_manual(values=rev(side.two.coulours)) +
+  scale_x_continuous(labels = scales::percent, breaks=c(0,0.5,1)) +
+  scale_y_continuous(breaks=c(0,0.5,1)) +
+  gtheme +
+  theme(legend.position='none')
+figure.ggsave('FigS3D-cdf-approaches-active.pdf',
+              width=4.3,
+              height=5.4)
+
+
+# ecdf.df %>%
+#   ggplot(aes(x=knot, y=mean.val, group=line_id)) +
+#   geom_step(aes(color=is.pc)) +
+#   facet_grid(implant ~ is.pc) +
+#   xlab('Approaches when cell active') +
+#   ylab('Cells CDF') +
+#   scale_color_manual(values=rev(side.two.coulours)) +
+#   scale_x_continuous(labels = scales::percent) +
+#   gtheme
+
+
+# ecdf.df %>%
+#   ggplot(aes(x=fraction.active, group=line_id, color=is.pc)) +
+#   stat_ecdf(geom='step') +
+#   facet_grid(implant ~ is.pc) +
+#   xlab('Approaches when cell active') +
+#   ylab('Cells CDF') +
+#   scale_color_manual(values=rev(side.two.coulours)) +
+#   scale_x_continuous(labels = scales::percent) +
+#   gtheme
+```
+
+
 ```{r}
 # average over cells in the trial
 trial.rew.traces = all.rew.aligned.traces[,
                    .(mean.trace=mean(zscored_smooth_deconv_trace),
+                     velocity=smooth_velocity[1],
                      #mean.trace=mean(log(0.1 + smoothed_deconv_trace)),
                      n=.N), 
                    by=.(implant, animal, date, trial_id, trial, is.rew.cell, timestamp_from_end)] 
 data.table::setorder(trial.rew.traces, implant, animal, date, trial_id, trial, timestamp_from_end, is.rew.cell)
+```
 
+
+Change in velocity vs the activity of reward active cells
+```{r}
+# trial.rew.cells.traces = trial.rew.traces %>%
+#   filter(is.rew.cell) %>%
+#   filter(velocity < 50) %>%
+#   arrange(implant, trial_id, animal, date, trial, timestamp_from_end) %>%
+#   group_by(implant, trial_id, animal, date, trial) %>%
+#   dplyr::mutate(acceleration = calc.acceleration(velocity, timebin.dur.msec)) %>%
+#   ungroup()
+# 
+# rew.cells.traces.cor.line = trial.rew.cells.traces %>% 
+#   filter(!is.na(mean.trace), !is.na(acceleration)) %>%
+#   filter(timestamp_from_end <= 0, timestamp_from_end >= -5000) %>%
+#   # group_by(implant, animal, date, trial_id) %>%
+#   # dplyr::mutate(nvals = sum(!is.na(mean.trace))) %>%
+#   # dplyr::ungroup() %>%
+#   # dplyr::filter(nvals > 10) %>%
+#   # dplyr::arrange(implant, animal, date, trial_id, timestamp_from_end) %>%
+#   # dplyr::group_by(implant, animal, date, trial_id) %>%
+#   #dplyr::summarise(cross.corr.vals.line(mean.trace, acceleration))
+#   group_by(implant, animal, timestamp_from_end) %>%
+#   dplyr::summarise(trace.mean=mean(mean.trace),
+#                    velocity.mean=mean(velocity, na.rm=TRUE),
+#                    acceleration.mean=mean(acceleration, na.rm=TRUE),
+#                    .groups='drop') %>%
+#   arrange(implant, animal, timestamp_from_end) %>%
+#   group_by(implant, animal) %>%
+#   dplyr::summarise(cross.corr.vals.line(trace.mean, acceleration.mean))
+# 
+# rew.cells.traces.cor.mean.line = rew.cells.traces.cor.line %>%
+#   group_by(implant, lag.ms) %>%
+#   dplyr::summarise(acf.mean=mean(acf), .groups='drop')
+# 
+# rew.cells.traces.cor.line %>%
+#   mutate(animal_line=paste(implant, animal)) %>%
+#   ggplot(aes(x=-lag.ms/1000, y=acf)) +
+#   geom_line(aes(group=animal_line), color='#777777', size=0.2) +
+#   geom_line(data=rew.cells.traces.cor.mean.line,
+#            mapping=aes(y=acf.mean),
+#            color='#333333', size=0.8) +
+#   geom_vline(xintercept = 0, linetype='dashed', color='#333333') +
+#   geom_hline(yintercept = 0, linetype='dashed', color='#333333') +
+#   scale_x_continuous(breaks=seq(-0.4,0.4,0.4)) +
+#   scale_y_continuous(breaks=seq(-1.0, 1.0, 0.5), limits=c(-0.8,0.8)) +
+#   facet_grid(. ~ implant) +
+#   xlab('Acceleration lag (s)') + ylab('Cross-correlation') +
+#   gtheme
+# figure.ggsave('FigureS4-deceleration-cor.pdf', width=5.0, height=3.6)
+```
+
+
+Difference between reward and other cells
+```{r}
 rew.traces.norm = trial.rew.traces %>%
   filter(!is.na(is.rew.cell)) %>%
   #filter(n >= 3) %>%
@@ -218,6 +393,46 @@ rew.traces.norm %>%
   gtheme
 
 figure.ggsave('Fig4E-approach_traces.pdf', width=6.0, height=3.9)
+
+# Per animal
+rew.traces.norm %>%
+  #filter(implant=='vCA1') %>%
+  dplyr::group_by(animal) %>%
+  dplyr::mutate(ordinal = dplyr::cur_group_id()) %>%
+  dplyr::group_by(implant, animal, ordinal, timestamp_from_end) %>%
+  dplyr::summarise(mean.trace=mean(trace.diff, na.rm=TRUE), 
+                   sem.trace=sem(trace.diff)) %>%
+  #dplyr::mutate(ordinal = as.numeric(animal)) %>%
+  ggplot(aes(x=timestamp_from_end/1000, y=ordinal, fill=mean.trace)) +
+  #geom_ribbon(aes(ymin=mean.trace-sem.trace, 
+  #                ymax=mean.trace+sem.trace),
+  #                fill='#888888', alpha=0.2) +
+  geom_tile(width=0.2) +
+  xlab('Time (s)') +
+  ylab('Approach') +
+  scale_x_continuous(limits=c(-5, 5), breaks=seq(-4,4,2)) +
+  facet_wrap(implant ~ ., scales = 'free_y') +
+  gtheme +
+  scale_fill_gradientn(colours = jet.colours(7)) 
+
+figure.ggsave('FigureS4E-reward-diff.pdf', width=8, height=5)
+#plotly::ggplotly()
+
+rew.traces.norm %>%
+  left_join(trials.meta.df) %>%
+  ggplot() +
+  geom_tile(aes(x=timestamp_from_end/1000, 
+                y=as.integer(day_desc), 
+                fill=trace.diff),
+            width=0.2) +
+  xlab('Time (s)') +
+  ylab('Approach') +
+  scale_x_continuous(limits=c(-5, 5), breaks=seq(-4,4,2)) +
+  facet_wrap(implant ~ animal, scales = 'free_y') +
+  gtheme +
+  #theme(legend.position = 'none') +
+  scale_fill_gradientn(colours = jet.colours(7)) + 
+  scale_y_reverse()
 ```
 
 ```{r}

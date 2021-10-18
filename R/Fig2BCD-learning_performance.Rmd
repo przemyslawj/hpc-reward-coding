@@ -42,8 +42,7 @@ cheeseboard.len.cm = 120
 
 
 ```{r}
-df = dplyr::mutate(df, total_trial_n = 8*(learning_day1 - 1) + trial_n) %>%
-    filter(!animal %in% c('A-BL', 'C-1R', 'L-TL', 'P-BR'))  # Animals not included
+df = dplyr::mutate(df, total_trial_n = 8*(learning_day1 - 1) + trial_n)
 
 notest.df = filter(df, exp_title == 'trial')
 d = notest.df 
@@ -174,16 +173,24 @@ test.trial.df.joined$location_set = as.factor(test.trial.df.joined$location_set)
 ```
 
 ```{r}
+animal.test.trial.df.joined = test.trial.df.joined %>%
+  group_by(implant, animal, type) %>%
+  dplyr::summarise(norm_crossings.mean = mean(norm_crossings, na.rm=TRUE),
+                   n=n())
+
 test.trial.df.joined %>%
   mutate(animal_day_desc = paste(animal, day_desc, sep='_')) %>%
   ggplot(aes(x=type, y=norm_crossings, group=animal_day_desc)) +
-  geom_line(size=0.25, color='#333333') +
+  geom_line(size=0.25, color='#888888') +
+  geom_line(data=animal.test.trial.df.joined, 
+            mapping=aes(y=norm_crossings.mean, group=animal),
+            size=0.5, color='#333333') +  
   facet_grid(. ~ implant) +
   ylab('Crossings per m') +
   gtheme
 
 figure.ggsave('Figure_2D-learning_performance.pdf',
-       width=4.6, height=3.9)
+       width=4.6, height=3.5)
 ```
 Statistical tests
 ```{r}

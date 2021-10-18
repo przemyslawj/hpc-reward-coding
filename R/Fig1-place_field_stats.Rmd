@@ -512,10 +512,17 @@ models = create.bayes.lm.pair(vca1.rew.pc.pct,
 models$full / models$null
 calc.pair.95CI(models$full, pair.vars = c('exp-habituation', 'exp-test'))
 
+animal.merged.summary.df = merged.summary.df %>%
+  group_by(implant, animal, exp) %>%
+  dplyr::summarise(pct.reward.mean = mean(pct.reward),
+                   n=n())
+
 merged.summary.df %>%
   ggplot(aes(x=exp, y=pct.reward, group=animal_beforetest_day)) +
-  #geom_point(aes(color=animal)) +
-  geom_line(size=0.25) +
+  geom_line(size=0.25, color='#888888') +
+  geom_line(data=animal.merged.summary.df, 
+            mapping=aes(y=pct.reward.mean, group=animal),
+            size=0.5, color='#333333') +
   facet_grid(. ~ implant, scales = 'free') +
   xlab('') +
   gtheme +
@@ -523,7 +530,7 @@ merged.summary.df %>%
   ggtitle('Fraction of place cells at reward increased at test trial')
 
 
-figure.ggsave('Figure_2FH_Right.pdf', height=6, width=5)
+figure.ggsave('Figure_2H.pdf', height=5, width=4.9)
 ```
 ```{r}
 print("Saving processed place field stats")

@@ -386,18 +386,45 @@ dist2current.rew.df %>%
   dplyr::summarise(persistent_field=1-mean(remapped),
                    sum(min.rew.dist <= goal.cell.max.dist),
                    ncells=n())
+# 
+# dist2current.rew.df %>%
+#   group_by(implant, group) %>%
+#   ggplot() +
+#   geom_density(aes(x=min.rew.dist * perc2dist, group=group, color=group)) +
+#   facet_wrap(. ~ implant) +
+#   scale_color_manual(values=c(side.two.coulours[1], '#999999')) +
+#   xlab('Distance to reward (cm)') + 
+#   ylab('Cell density') + 
+#   labs(linetype='', title='Field distance to reward after translocation') +
+#   xlim(c(0,100))+
+#   gtheme
 
 dist2current.rew.df %>%
   group_by(implant, group) %>%
-  ggplot() +
-  geom_density(aes(x=min.rew.dist * perc2dist, group=group, color=group)) +
-  facet_wrap(. ~ implant) +
+  ggplot(aes(x=min.rew.dist * perc2dist, group=group, color=group)) +
+  stat_ecdf(geom='step') +
+  facet_grid(implant ~ .) +
   scale_color_manual(values=c(side.two.coulours[1], '#999999')) +
   xlab('Distance to reward (cm)') + 
-  ylab('Cell density') + 
-  labs(linetype='', title='Field distance to reward after translocation') +
-  xlim(c(0,100))+
-  gtheme
-
+  ylab('Cell CDF') + 
+  xlim(c(0,100)) +
+  scale_y_continuous(breaks=c(0, 0.5, 1.0)) + 
+  gtheme + theme(legend.position = 'none')
 figure.ggsave('Figs4B-reward_active_dist_to_current_reward.pdf', 
-       height=4.57, width=8.3)
+              height=5.4, width=4.1)
+
+dist2current.rew.df %>%
+  group_by(implant, group, animal) %>%
+  mutate(line_id=paste(group,animal)) %>%
+  ggplot(aes(x=min.rew.dist * perc2dist, group=line_id, color=group)) +
+  stat_ecdf(geom='step') +
+  facet_wrap(implant ~ animal) +
+  scale_color_manual(values=c(side.two.coulours[1], '#999999')) +
+  xlab('Distance to reward (cm)') + 
+  ylab('Cell CDF') + 
+  scale_y_continuous(breaks=c(0, 0.5, 1.0)) + 
+  scale_x_continuous(breaks=c(0, 50, 100), limits = c(0,100)) + 
+  gtheme + theme(legend.position = 'none')
+
+figure.ggsave('Figs4B-reward_active_dist_to_current_reward-per-animal.pdf', 
+       height=9.8, width=7.2)

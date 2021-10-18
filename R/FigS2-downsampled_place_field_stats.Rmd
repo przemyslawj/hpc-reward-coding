@@ -73,11 +73,23 @@ down.peaks.dist %>%
   xlab('Distance (cm)') + ylab('Density') +
   ggtitle('Field distance from reward in downsampled data')
 
-figure.ggsave('FigS2A-downsampled_reward_dist.pdf',
-       height=6, width=8, units='cm', device=cairo_pdf, dpi=300)
+figure.ggsave('FigS2A-downsampled_reward_dist.pdf', height=6, width=8)
 ```
 
 ```{r}
+summarize.downrew.pc.pct = function(df, dist.var=min.rew.dist, dist.threshold) {
+  dist.var = enquo(dist.var)
+  df %>%
+    group_by(date, day_desc, animal, implant, exp_title) %>%
+    dplyr::summarise(at.reward=sum((!!dist.var <= dist.threshold) & signif.si),
+                     mean.cells = n() / max(shuffle_i),
+                     npcs = sum(signif.si),
+                     pct.pcs = npcs / n() * 100,
+                     mean.pcs = npcs / max(shuffle_i),
+                     pct.reward=at.reward / npcs * 100) %>%
+    dplyr::select(-npcs, -at.reward)
+}
+
 peaks.summary.df = summarize.downrew.pc.pct(down.peaks.dist, dist.threshold=goal.cell.max.dist) %>%
   dplyr::mutate(animal_beforetest_day = paste(animal, day_desc, sep='_')) %>%
   filter(pct.pcs > 0) %>% 
@@ -116,9 +128,16 @@ models = create.bayes.lm.pair(vca1.rew.pc.pct,
 models$full / models$null
 calc.pair.95CI(models$full, pair.vars = c('exp_title-1_habituation', 'exp_title-2_test'))
 
+animal.peaks.summary.df = peaks.summary.df %>%
+  group_by(implant, animal, exp_title) %>%
+  dplyr::summarise(pct.reward.mean = mean(pct.reward),
+                   n=n())
 peaks.summary.df %>%
   ggplot(aes(x=exp_title, y=pct.reward, group=animal_beforetest_day)) +
-  geom_line(size=0.25) +
+  geom_line(size=0.25, color='#888888') +
+  geom_line(data=animal.peaks.summary.df, 
+          mapping=aes(y=pct.reward.mean, group=animal),
+          size=0.5, color='#333333') +
   facet_grid(. ~ implant, scales = 'free') +
   xlab('') +
   gtheme +
@@ -126,7 +145,7 @@ peaks.summary.df %>%
   ggtitle('Fraction of fields at reward increased at test trial')
 
 figure.ggsave('FigS2B-downsampled_reward_dist_stat.pdf',
-       height=6, width=6)
+       height=5.3, width=6)
 ```
 
 Change in the field size
