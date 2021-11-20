@@ -557,7 +557,7 @@ reward.aligned.pop.traces.earlylate.binned.per.day$bout =
 reward.aligned.pop.traces.earlylate.binned.per.day$proximal.timestamp =
   as.factor(reward.aligned.pop.traces.earlylate.binned.per.day$proximal.timestamp)
 
-printf('N approaches = ')
+print('N approaches = ')
 reward.aligned.pop.traces.earlylate.binned %>%
   ungroup() %>%
   dplyr::select(implant, bout, trial_id, aligned_event_id) %>%
@@ -565,7 +565,7 @@ reward.aligned.pop.traces.earlylate.binned %>%
   dplyr::count(implant, bout)
 
 
-implant.loc = 'vCA1'
+implant.loc = 'dCA1'
 reward.aligned.pop.traces.earlylate.binned %>%
   filter(implant == implant.loc) %>%
   ggplot(aes(x=proximal.timestamp, y=zscored_deconv_trace.mean)) +
@@ -1036,7 +1036,7 @@ reward.proximity.diff.by.pc.binned.per.day = reward.aligned.pop.traces.by.pc %>%
   dplyr::summarise(across(.fns = mean), .groups='drop')
 
 # Learning performance data
-df = read.csv(file.path('/mnt/DATA/Prez/cheeseboard', 'trial_stats.csv'))
+df = read.csv(file.path(base_dir, 'trial_stats.csv'))
 df$date = as.Date(df$date)
 
 d = filter(df, exp_title == 'trial')

@@ -197,9 +197,8 @@ beforetest.onedayout.reward.summary %>%
   group_by(implant) %>%
   dplyr::summarise(mean(mean.error), sem(mean.error), 
                    mean(mean.rand.diff), sem(mean.rand.diff),
-                   mean(mean.rand.error), sem(mean.rand.error))
-
-
+                   mean(mean.rand.error), sem(mean.rand.error),
+                   ntrials=n())
 ```
 
 ```{r}

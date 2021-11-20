@@ -377,8 +377,38 @@ eval.val.current.rew = function(dist2current.rew.df,
 eval.val.current.rew(dist2current.rew.df, 'dCA1')
 eval.val.current.rew(dist2current.rew.df, 'vCA1')
 
+animal.summary.dist2current.rew.df = dist2current.rew.df %>%
+  group_by(implant, animal, group) %>%
+  dplyr::summarise(min.rew.dist.mean = mean(min.rew.dist),
+                   ncells=n())
+
+dist2current.rew.df %>%
+  ggplot(aes(x=group, 
+             color=group)) +
+  geom_jitter(aes(y=min.rew.dist * perc2dist),
+              shape=1, height=0.0, width=0.3, size=0.4) +
+  geom_line(data=animal.summary.dist2current.rew.df,
+            mapping=aes(group=animal, y=min.rew.dist.mean * perc2dist),
+            color='#555555') +
+  scale_color_manual(values=c(side.two.coulours[1], '#999999')) +
+  facet_grid(. ~ implant) +
+  ylim(c(0,80)) +
+  xlab('Distance to reward (cm)') + ylab('') +
+  gtheme
+figure.ggsave('FigS4B-reward-dist-datapoints.pdf', width=6.2, height=4.2)
+
 # Field size not different in vCA1 between active and not-active group
 eval.val.current.rew(dist2current.rew.df, 'vCA1', field.size.50 / nbins / nbins * 100, identity)
+filter(dist2current.rew.df, implant=='vCA1') %>%
+  ggplot(aes(x=group, 
+             y=field.size.50 / nbins / nbins * 100, 
+             color=group)) +
+  geom_jitter(shape=1, height=0, width=0.2, size=0.6) +
+  stat_summary(fun.data='mean_cl_boot', geom='crossbar') +
+  scale_color_manual(values=c(side.two.coulours[1], '#999999')) +
+  ylab('Field size (% of maze)') + xlab('') +
+  gtheme
+figure.ggsave('FigS4B-vca1-field-sizes.pdf', width=5.4, height=3.9)
 
 # How many cells remapped in each group
 dist2current.rew.df %>%
@@ -403,15 +433,15 @@ dist2current.rew.df %>%
   group_by(implant, group) %>%
   ggplot(aes(x=min.rew.dist * perc2dist, group=group, color=group)) +
   stat_ecdf(geom='step') +
-  facet_grid(implant ~ .) +
+  facet_grid(. ~ implant) +
   scale_color_manual(values=c(side.two.coulours[1], '#999999')) +
   xlab('Distance to reward (cm)') + 
   ylab('Cell CDF') + 
   xlim(c(0,100)) +
   scale_y_continuous(breaks=c(0, 0.5, 1.0)) + 
   gtheme + theme(legend.position = 'none')
-figure.ggsave('Figs4B-reward_active_dist_to_current_reward.pdf', 
-              height=5.4, width=4.1)
+figure.ggsave('Figs4B-reward_active_dist_to_current_reward.pdf', height=3.4, width=5.9)
+
 
 dist2current.rew.df %>%
   group_by(implant, group, animal) %>%
@@ -428,3 +458,69 @@ dist2current.rew.df %>%
 
 figure.ggsave('Figs4B-reward_active_dist_to_current_reward-per-animal.pdf', 
        height=9.8, width=7.2)
+
+# Plot place field COMs in pseudo-random locations that maintain the distance from reward
+source('place_field_utils.R')
+dist.shift = 10
+radius = 50 + dist.shift
+# Preserves distance to reward
+add.schema.coordinate = function(rew.x, rew.y, dist) {
+  # Random polar coordinates
+  point.x = radius * 10
+  point.y = radius * 10
+  # Make sure the distance is within the maze given the reward position
+  max.dist = radius + sqrt(rew.x^2 + rew.y^2) - 3
+  # Shift distances for presentation
+  dist = min(dist + dist.shift, max.dist)
+  # checks if the point is inside the maze, fails on the first iteration
+  while (point.x^2 + point.y^2 > radius^2) {
+    polar.angle = runif(1) * 2 * pi
+    point.x = rew.x + dist * cos(polar.angle)
+    point.y = rew.y + dist * sin(polar.angle)
+  }
+  return(dplyr::tibble(point.x=point.x,
+                       point.y=point.y))
+}
+
+selected.cells.dist.plot = dist2current.rew.df %>%
+  # Sample equal number of cells per implant and group
+  group_by(implant, group) %>%
+  dplyr::sample_n(15) %>%
+  ungroup()
+
+prev.selected.cells.dist.plot = selected.cells.dist.plot %>%
+  mutate(prev_loc_set_ordinal = loc_set_ordinal - 1) %>%
+  dplyr::select(animal, cell_id, prev_loc_set_ordinal) %>%
+  left_join(beforetest.field.dist2current.rew, 
+            by=c('animal'='animal',
+                 'cell_id'='cell_id',
+                 'prev_loc_set_ordinal'='loc_set_ordinal')) %>%
+  mutate(group = ifelse(min.rew.dist <= goal.cell.max.dist, 'active', 'inactive'))
+
+rew.point = c(x=-26, y=26)
+bind_rows(
+  selected.cells.dist.plot %>% mutate(test_n='2_current'),
+  prev.selected.cells.dist.plot %>% mutate(test_n = '1_previous')) %>%
+  # grouping to do the function call rowwise
+  dplyr::group_by(implant, animal, date, cell_id, group, test_n) %>%
+  dplyr::summarise(add.schema.coordinate(rew.point['x'], rew.point['y'], min.rew.dist)) %>%
+  ggplot() +
+  geom_maze_contour(diameter = 2*radius) + 
+  geom_circle(c(rew.point['x'] + radius, rew.point['y'] + radius), 
+              goal.cell.max.dist + dist.shift) +
+  geom_point(data=data.frame(x=rew.point['x'] + radius,
+                             y=rew.point['y'] + radius),
+             mapping=aes(x=x, y=y),
+             shape=2,
+             size=2,
+             stroke=2,
+             color='#666666') +
+  geom_point(aes(x=point.x + radius, 
+                 y=point.y + radius,
+                 color=group),
+             size=1,
+             shape=1) +
+  facet_grid(implant ~ test_n) +
+  scale_color_manual(values=c('#8856a7', '#999999')) +
+  theme_void()
+figure.ggsave('4B-circular-jitter.pdf', width=7.0, height=4.5)

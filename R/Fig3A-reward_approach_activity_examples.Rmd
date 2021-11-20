@@ -31,12 +31,12 @@ trials.meta.df = read.trials.meta(rootdirs)
 
 
 ```{r}
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
+root_dir = root_dir01
 animal_name = 'G-BR'
 exp_title='learning'
 day = '2020-02-10' # learning 3 day2
 
-# root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
+# root_dir = root_dir10
 # animal_name = 'N-BR'
 # exp_title='learning'
 # day = '2020_10_23'

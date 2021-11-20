@@ -24,7 +24,7 @@ nbins = 20
 timebin.dur.msec = 200
 min.occupancy.sec = 1.0
 trace.var = 'smoothed_deconv_trace'
-gen_imgs_dir = '/mnt/DATA/Prez/pf_stability/'
+gen_imgs_dir = file.path(base_dir, .., 'pf_stability')
 
 #all.trials.si = data.frame()
 run.trials.si = data.frame()
@@ -69,7 +69,7 @@ for (caimg_result_dir in caimg_result_dirs) {
   binned.traces.run = prepare.run.dirtraces(data.traces, nbins)
   toc()
 
-  plot.dir.prefix = paste(gen_imgs_dir, animal, format(date), sep='/')
+  plot.dir.prefix = file.path(gen_imgs_dir, animal, format(date))
 
   # tic("spatial info on all trials")
   # all.spatial = calc.spatial.info(binned.traces[exp_title == 'trial'],

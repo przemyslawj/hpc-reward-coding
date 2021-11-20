@@ -1,14 +1,15 @@
+source('traces_input.R')
 source('plotting_params.R')
 
 library(dplyr)
 library(datatrace)
 library(R.matlab)
 library(imager)
-ca_img_result_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/habituation/2020_10_08/caiman/M-BR/'
-#ca_img_result_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/habituation/2019-07-18/caiman/D-BR/'
-#ca_img_result_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/habituation/2020-01-28/caiman/G-BR/'
+ca_img_result_dir = file.path(base_dir, '2020-10', 'habituation', '2020_10_08', 'caiman', 'M-BR')
+#ca_img_result_dir = file.path(base_dir, '2019-07'. 'habituation', '2019-07-18', 'caiman', 'D-BR')
+#ca_img_result_dir = file.path(base_dir, '2020-01', 'habituation', '2020-01-28', 'caiman', 'G-BR')
 
-mat_file = paste0(ca_img_result_dir, 'ms.mat')
+mat_file = file.path(ca_img_result_dir, 'ms.mat')
 ca.mat = readMat(mat_file)
 meanFrame = matrix(ca.mat$ms[,,1]$meanFrame, 
                    nrow = ca.mat$ms[,,1]$height, ncol=ca.mat$ms[,,1]$width) 

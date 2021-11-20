@@ -1,13 +1,14 @@
 library(purrr)
 library(stringr)
 
+source('traces_input.R')
 source('plotting_params.R')
 
 v4.px2um = 4.31/2
 v3.px2um = 2.84/2
 v4.animals = c('M-BL', 'N-BL', 'N-BR')
 
-reg_stat_files_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/registration_stats'
+reg_stat_files_dir = file.path(base_dir, 'registration_stats')
 reg_stat_files = list.files(reg_stat_files_dir, pattern='*.csv')
 reg_stat_df = map_dfr(reg_stat_files, ~ {
   df = read.csv(file.path(reg_stat_files_dir, .x))

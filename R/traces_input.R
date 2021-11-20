@@ -5,14 +5,13 @@ library(stringr)
 source('locations.R')
 source('utils.R')
 
-root_dir07 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-07/'
-root_dir08 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2019-08/'
-root_dir01 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
-root_dir10 = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-10/'
+base_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/'
+root_dir07 = file.path(base_dir, '2019-07')
+root_dir08 = file.path(base_dir, '2019-08')
+root_dir01 = file.path(base_dir, '2020-01')
+root_dir10 = file.path(base_dir, '2020-10')
 rootdirs = c(root_dir07, root_dir08, root_dir01, root_dir10)
-#rootdirs = c(root_dir10)
-tracking_rootdirs = stringr::str_replace(rootdirs, '-down/down_2', '')
-#tracking_rootdirs = rootdirs
+tracking_rootdirs = stringr::str_replace(rootdirs, file.path('-down', 'down_2'), '')
 
 animal_names = c('O-TR', 'R-TR', 'M-BR', 'N-BR', 'N-BL',
                  'E-BL', 'E-TR', 'F-BL', 'F-TL',
@@ -30,9 +29,7 @@ caimg_result_dirs = c(
   get.subject.result.dirs(root_dir08, 'F-TL'),
   get.subject.result.dirs(root_dir01, 'G-BR'),
   get.subject.result.dirs(root_dir01, 'K-BR'),
-  #get.subject.result.dirs(root_dir01, 'L-TL'), # misplaced lens - targeting ca3
   get.subject.result.dirs(root_dir07, 'B-BL'),
-  #get.subject.result.dirs(root_dir07, 'C-1R'),
   get.subject.result.dirs(root_dir07, 'D-BR')
 )
 
@@ -43,7 +40,7 @@ caimg_result_dirs = Filter(
 locations.df = map_dfr(rootdirs, read_locations) 
 test.days.df = locations.df %>%
   filter(exp_title == 'beforetest') %>%
-  filter(!animal %in% c('A-BL', 'C-1R', 'L-TL', 'P-BR')) %>%
+  filter(animal %in% animal_names) %>%
   dplyr::select(animal, date) %>%
   dplyr::distinct()
 

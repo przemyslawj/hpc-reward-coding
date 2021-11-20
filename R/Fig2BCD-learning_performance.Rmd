@@ -27,11 +27,10 @@ source('plotting_params.R')
 ```
 
 ```{r}
-dir = '/mnt/DATA/Prez/cheeseboard'
-hab_dirs = map_chr(tracking_rootdirs, ~ paste(.x, 'habituation', sep='/'))
-gen_imgs_dir = '~/tmp/cheeseboard/learning/'
+hab_dirs = map_chr(base_dir, ~ file.sep(.x, 'habituation'))
+gen_imgs_dir = file.path('tmp', 'cheeseboard', 'learning')
 
-df = read_csv(paste0(dir, '/trial_stats.csv'))
+df = read_csv(file.path(base_dir, 'trial_stats.csv'))
 locations.df = map_dfr(rootdirs, read_locations)
 trials.meta.df = read.trials.meta(rootdirs)
 mouse.meta.df = read.mouse.meta(rootdirs)

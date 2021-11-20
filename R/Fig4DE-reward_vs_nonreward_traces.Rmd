@@ -36,7 +36,7 @@ last.learning.days = c('learning1 day#5', 'learning2 day#2', 'learning3 day#2', 
 
 
 ```{r}
-root_dir = '/mnt/DATA/Prez/cheeseboard-down/down_2/2020-01/'
+root_dir = root_dir01
 exp_title='learning'
 day_desc_name = 'learning3 day#2'
 animal_name = 'K-BR' # vCA1 example
@@ -187,7 +187,7 @@ cell.active.thr = 0.5
 fraction.approaches.cell.active = 
   all.rew.aligned.traces[, timestamp_from_end_bin := ceiling(timestamp_from_end / timebin.width)][
                          timestamp_from_end_bin %in% c(-4, 0),
-                         .(binned.activity = mean(zscored_smooth_deconv_trace)),day
+                         .(binned.activity = mean(zscored_smooth_deconv_trace)),
                          by=.(implant, exp_title, trial_id, cell_id, animal, date, trial, aligned_event_id, rew_at_end, timestamp_from_end_bin)][
                          ,
                        .(fraction.active = mean(binned.activity >= cell.active.thr),
@@ -458,10 +458,17 @@ bin.trial.rew.traces.wide = pivot_wider(
   names_prefix='is_proximal_') %>%
   mutate(trace.change=is_proximal_TRUE - is_proximal_FALSE)
 
-  
+compared.bin.trial.rew.traces = filter(bin.trial.rew.traces) %>% 
+    mutate(val=log(2.0 + bin.activity)) %>% filter(!is.na(val), val < Inf)
+printf('N approaches = ')
+compared.bin.trial.rew.traces %>%
+  ungroup() %>%
+  dplyr::select(implant, animal, trial_id) %>%
+  dplyr::distinct() %>%
+  dplyr::count(implant)  
+
 m.rew.activ.diff = lmer.test.print(
-  filter(bin.trial.rew.traces) %>% 
-    mutate(val=log(2.0 + bin.activity)) %>% filter(!is.na(val), val < Inf),
+  bin.trial.rew.traces,
   val,
   diagnostics.groupvar = animal,
   fixed.effects = implant * is_proximal,
@@ -469,9 +476,7 @@ m.rew.activ.diff = lmer.test.print(
 pairwise.post.hoc(m.rew.activ.diff, factor.interaction = 'implant:is_proximal')
 
 models = create.bayes.lm.pair(
-  filter(bin.trial.rew.traces, implant=='vCA1') %>%
-    mutate(val=log(2.0+bin.activity)) %>%
-    filter(!is.na(val), val < Inf),
+  filter(bin.trial.rew.traces, implant=='vCA1'),
   formula.full = val ~ 1 + is_proximal + aday,
   formula.null = val ~ 1 + aday,
   whichRandom = c('aday'),

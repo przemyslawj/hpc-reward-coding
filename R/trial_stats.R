@@ -13,7 +13,7 @@ source('tracking_info.R')
 source('traces_input.R')
 
 behav_cam_frame_rate = 24
-root_dat_dir = '/mnt/DATA/Prez/cheeseboard/'
+root_dat_dir = base_dir
 
 get_time_arrived = function(at.reward.vec, timestamps) {
   indecies = which(at.reward.vec == 1)
